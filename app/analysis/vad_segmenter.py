@@ -85,7 +85,7 @@ def _speech_segments(
     frames = audio[: frame_count * frame_length].reshape(frame_count, frame_length)
     frame_rms = np.sqrt(np.mean(frames**2, axis=1))
     threshold = (
-        _adaptive_threshold(frame_rms) if rms_threshold is None else rms_threshold
+        adaptive_threshold(frame_rms) if rms_threshold is None else rms_threshold
     )
     is_speech = frame_rms >= threshold
 
@@ -117,11 +117,14 @@ def _segment(start_frame: int, end_frame: int, frame_ms: int) -> VadSegment:
     return VadSegment(start_ms=start_frame * frame_ms, end_ms=end_frame * frame_ms)
 
 
-def _adaptive_threshold(frame_rms: np.ndarray) -> float:
+def adaptive_threshold(frame_rms: np.ndarray) -> float:
     """잡음 바닥을 추정해 임계값을 정한다.
 
     하위 백분위를 잡음으로 보되, 통화 전체가 발화인 경우 잡음 추정이
     발화 수준까지 올라가 스스로를 지우므로 피크 대비 상한을 씌운다.
+
+    배치(segment_audio)와 스트리밍(StreamingVad)이 이 함수를 공유한다.
+    공식이 두 벌로 갈라지면 같은 오디오에 다른 판정이 나온다.
     """
     if frame_rms.size == 0:
         return DEFAULT_NOISE_FLOOR
