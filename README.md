@@ -64,8 +64,8 @@ def test_score_is_identical_across_repeated_runs():
 .
 ├─ app/
 │  ├─ analysis/         VAD 분절 · 결정론적 위험도 계산 (순수 함수)
-│  └─ media/            통화 중 오디오 처리 (구현 중)
-├─ tests/               34개 통과
+│  └─ media/            통화 중 오디오 처리 (스트리밍 VAD · 세션 · WebSocket)
+├─ tests/               61개 통과
 ├─ db/                  schema.sql (7개 테이블, 컨테이너 검증) · erd.md
 ├─ client/              Flutter 앱 늘봄 — 어르신용 / 보호자용
 ├─ docs/
@@ -91,8 +91,11 @@ def test_score_is_identical_across_repeated_runs():
 ## 실행
 
 ```bash
-# 백엔드 분석 코어
+# 백엔드 (분석 코어 + 통화 처리)
 python -m pytest
+
+# 앱 채널 통화 서버
+uvicorn app.media.ws_server:app --port 8000
 
 # 앱 (fixture 모드가 기본 — 서버 없이 화면 개발 가능)
 cd client && flutter run
@@ -121,7 +124,7 @@ docker exec pg psql -U postgres -v ON_ERROR_STOP=1 -f /schema.sql
 | `VadSegmenter` | 완료 — 8kHz 전화 음질에서 결함 발견·수정 |
 | `MetricsCalculator` | 완료 — 재현성 테스트 통과 |
 | 앱 프론트 (늘봄) | 완료 — 역할 분기, fixture 모드 |
-| **앱 채널 통화** | **구현 중** |
+| **앱 채널 통화 골격** | **완료** — StreamingVad · CallSession · WebSocket, 테스트 27개 |
 | `Transcriber` · `ReportWriter` · `AlertDispatcher` | 예정 |
 | 인프라 프로비저닝 | 예정 |
 
