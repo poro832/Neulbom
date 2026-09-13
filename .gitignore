@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Flutter / Dart
+client/build/
+client/.dart_tool/
+client/.flutter-plugins
+client/.flutter-plugins-dependencies
+client/android/.gradle/
+client/android/local.properties
+client/ios/Pods/
+client/ios/Flutter/ephemeral/
+client/macos/Flutter/ephemeral/
+
+# 비밀
+client/android/app/google-services.json
+client/ios/Runner/GoogleService-Info.plist
+.env
+
+# OS
+.DS_Store
+Thumbs.db

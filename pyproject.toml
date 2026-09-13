@@ -1,0 +1,14 @@
+[project]
+name = "ansimcare"
+version = "0.1.0"
+description = "독거노인 AI 친구 전화 (안심케어) — 팀 공명"
+requires-python = ">=3.11"
+# VadSegmenter가 numpy를 쓰는데 선언이 빠져 있었다. 새로 받은 사람은 실행이 안 된다.
+dependencies = ["numpy>=2.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
