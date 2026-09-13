@@ -7,6 +7,7 @@
 """
 
 import numpy as np
+import pytest
 
 from app.media.streaming_vad import SpeechEnded, StreamingVad
 
@@ -120,6 +121,20 @@ def test_click_shorter_than_min_speech_is_discarded():
     audio = build_audio(("silence", 200), ("speech", 60), ("silence", 1000))
 
     assert feed(vad, audio) == []
+
+
+def test_push_rejects_a_wrong_sized_frame():
+    """짧은 프레임을 받아주면 RMS는 일부만 반영되는데 frame_index는 그대로
+
+    한 틱 전진해, 이후 모든 SpeechEnded 시각이 조용히 밀린다. 통화망
+    채널(Asterisk AudioSocket)이 두 번째 호출자로 붙으면 슬라이싱을
+    믿을 수 없으므로 여기서 막아야 한다.
+    """
+    vad = StreamingVad(SAMPLE_RATE)
+    short_frame = np.zeros(vad.frame_length - 1, dtype=np.float32)
+
+    with pytest.raises(ValueError):
+        vad.push(short_frame)
 
 
 def test_two_turns_are_reported_separately():

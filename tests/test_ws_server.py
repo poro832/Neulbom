@@ -77,3 +77,37 @@ def test_wrong_sample_rate_is_rejected(client):
         with client.websocket_connect("/v1/app-call") as ws:
             ws.send_json({"type": "start", "sample_rate": 8000})
             ws.receive_bytes()
+
+
+def test_malformed_first_frame_is_rejected_not_crashed(client):
+    """첫 텍스트 프레임이 JSON이 아니어도(예: "ping") 죽지 않고 거부한다.
+
+    인증 없이 도달하는 프레임이라 json.loads를 무방비로 걸면 서비스
+    거부로 이어진다. _is_end와 같은 1003으로 정리되는지 확인한다.
+    """
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/v1/app-call") as ws:
+            ws.send_text("ping")
+            ws.receive_bytes()
+
+
+def test_json_scalar_first_frame_is_rejected_not_crashed(client):
+    """JSON이지만 dict가 아니면(스칼라) .get()에서 AttributeError가 난다."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/v1/app-call") as ws:
+            ws.send_text("42")
+            ws.receive_bytes()
+
+
+def test_start_with_wrong_type_is_rejected(client):
+    """sample_rate만 맞으면 type을 안 봐도 통과하던 구멍을 막는다."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/v1/app-call") as ws:
+            ws.send_json({"type": "note", "sample_rate": SAMPLE_RATE})
+            ws.receive_bytes()

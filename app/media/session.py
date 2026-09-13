@@ -93,8 +93,13 @@ class CallSession:
     def _on_speech_end(self, start_ms: int, end_ms: int) -> list[Outgoing]:
         outgoing: list[Outgoing] = [TextMessage({"type": "speech_end"})]
 
-        start = int(start_ms * self._sample_rate / 1000) * _BYTES_PER_SAMPLE
-        end = int(end_ms * self._sample_rate / 1000) * _BYTES_PER_SAMPLE
+        # start_ms/end_ms는 StreamingVad가 frame_ms의 배수로만 내놓으므로,
+        # sample_rate로 다시 환산하지 않고 frame_length(= vad가 실제로 자른
+        # 프레임의 샘플 수)로 프레임 인덱스를 바이트로 되돌린다. 그래야
+        # sample_rate * frame_ms / 1000이 정수가 아닌 레이트(예: 11025Hz)에서도
+        # push_audio가 실제로 슬라이스한 바이트와 어긋나지 않는다.
+        start = (start_ms // self._vad.frame_ms) * self._frame_bytes
+        end = (end_ms // self._vad.frame_ms) * self._frame_bytes
         turn = _to_float32(bytes(self._recorded[start:end]))
 
         try:

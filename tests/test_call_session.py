@@ -82,6 +82,9 @@ def test_result_is_same_when_bytes_arrive_split_oddly():
     aligned = drain(CallSession("c1", SAMPLE_RATE, FakeResponder()), audio)
     ragged = drain(CallSession("c2", SAMPLE_RATE, FakeResponder()), audio, 137)
 
+    # push_audio가 몽땅 버려도 aligned == ragged([] == [])는 통과해버리므로,
+    # 실제로 메시지가 나왔는지부터 확인해야 이 비교가 의미를 가진다.
+    assert len(aligned) == 2
     assert aligned == ragged
 
 

@@ -63,7 +63,17 @@ class StreamingVad:
     def frame_length(self) -> int:
         return self._frame_length
 
+    @property
+    def frame_ms(self) -> int:
+        return self._frame_ms
+
     def push(self, frame: np.ndarray) -> SpeechEnded | None:
+        # 길이가 어긋나면 RMS는 일부만 반영되는데 _frame_index는 그대로
+        # 한 틱 전진해, 이후 모든 SpeechEnded 시각이 조용히 밀린다.
+        if len(frame) != self._frame_length:
+            raise ValueError(
+                f"frame 길이가 {self._frame_length}이어야 하는데 {len(frame)}다"
+            )
         rms = float(np.sqrt(np.mean(np.asarray(frame, dtype=np.float32) ** 2)))
         self._rms_window.append(rms)
         threshold = adaptive_threshold(

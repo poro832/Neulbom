@@ -29,6 +29,20 @@ EXPECTED_SAMPLE_RATE = 16000
 _UNSUPPORTED_DATA = 1003
 
 
+def _parse_control(text: str) -> dict | None:
+    """제어 프레임을 dict로 파싱한다. 아니면(깨진 JSON, 스칼라, 리스트) None.
+
+    start 핸드셰이크와 _is_end가 같은 위험(JSON이 아닌 첫 텍스트 프레임,
+    또는 dict가 아닌 JSON 스칼라/리스트)에 노출돼 있으므로 파싱 경로를
+    하나로 합쳐 둘 다 방어한다.
+    """
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _is_end(text: str) -> bool:
     """type 필드가 "end"인지 제대로 파싱해서 본다.
 
@@ -37,11 +51,8 @@ def _is_end(text: str) -> bool:
     프레임이 깨져 있어도(JSON이 아니거나 dict가 아니어도) 소켓을 죽이지 않고
     그냥 "end 아님"으로 넘긴다.
     """
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return False
-    return isinstance(payload, dict) and payload.get("type") == "end"
+    payload = _parse_control(text)
+    return payload is not None and payload.get("type") == "end"
 
 
 def _build_responder() -> CannedResponder:
@@ -67,7 +78,15 @@ async def app_call(websocket: WebSocket) -> None:
         if (text := first.get("text")) is not None:
             break
 
-    if json.loads(text).get("sample_rate") != EXPECTED_SAMPLE_RATE:
+    # 인증 없이 도달하는 첫 프레임이다. "ping" 같은 비-JSON 텍스트나 JSON
+    # 스칼라/리스트가 와도 죽지 않고 그냥 거부해야 한다. type도 "start"인지
+    # 봐야, sample_rate만 맞는 아무 JSON 객체가 통과하는 일이 없다.
+    payload = _parse_control(text)
+    if (
+        payload is None
+        or payload.get("type") != "start"
+        or payload.get("sample_rate") != EXPECTED_SAMPLE_RATE
+    ):
         # 조용히 틀린 결과를 내느니 거부한다.
         await websocket.close(code=_UNSUPPORTED_DATA)
         return
