@@ -29,6 +29,21 @@ EXPECTED_SAMPLE_RATE = 16000
 _UNSUPPORTED_DATA = 1003
 
 
+def _is_end(text: str) -> bool:
+    """type 필드가 "end"인지 제대로 파싱해서 본다.
+
+    stop_playback처럼 신호 어휘가 계속 늘어날 예정이라, 부분 문자열 검사는
+    {"reason": "end"} 같은 무관한 필드에도 오탐해 통화를 끊어버릴 수 있다.
+    프레임이 깨져 있어도(JSON이 아니거나 dict가 아니어도) 소켓을 죽이지 않고
+    그냥 "end 아님"으로 넘긴다.
+    """
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and payload.get("type") == "end"
+
+
 def _build_responder() -> CannedResponder:
     """골격의 고정 응답. CLOVA가 붙으면 이 함수만 바뀐다."""
     return CannedResponder(
@@ -69,7 +84,7 @@ async def app_call(websocket: WebSocket) -> None:
                         await websocket.send_json(outgoing.payload)
                     elif isinstance(outgoing, AudioMessage):
                         await websocket.send_bytes(outgoing.pcm)
-            elif (text := message.get("text")) is not None and '"end"' in text:
+            elif (text := message.get("text")) is not None and _is_end(text):
                 break
     except WebSocketDisconnect:
         # 앱이 갑자기 끊겼다. 아래 finally에서 녹음을 남긴다.

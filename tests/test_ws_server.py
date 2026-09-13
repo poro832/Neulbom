@@ -51,6 +51,24 @@ def test_call_is_saved_as_wav(client, tmp_path):
     assert list(tmp_path.glob("*.wav"))
 
 
+def test_unrelated_end_substring_does_not_hang_up(client):
+    """제어 어휘가 늘어날 때를 대비한 테스트.
+
+    "type"이 아닌 다른 필드에 "end"라는 값이 들어 있어도 부분 문자열만
+    보고 통화를 끊으면 안 된다. 실제 발화를 보내 speech_end가 정상적으로
+    돌아오는지로 연결이 살아있음을 확인한다.
+    """
+    with client.websocket_connect("/v1/app-call") as ws:
+        ws.send_json({"type": "start", "sample_rate": SAMPLE_RATE})
+        ws.send_json({"type": "note", "reason": "end"})
+        ws.send_bytes(pcm16(("speech", 500), ("silence", 1000)))
+
+        assert ws.receive_json() == {"type": "speech_end"}
+        assert len(ws.receive_bytes()) > 0
+
+        ws.send_json({"type": "end"})
+
+
 def test_wrong_sample_rate_is_rejected(client):
     """조용히 틀린 결과를 내느니 연결을 거부한다."""
     from starlette.websockets import WebSocketDisconnect
