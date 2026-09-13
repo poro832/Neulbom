@@ -31,6 +31,7 @@
 | `app/media/session.py` | 한 통화의 상태 — 바이트 버퍼링, VAD 구동, 응답 요청, 원본 누적, wav 저장 |
 | `app/media/ws_server.py` | FastAPI WebSocket 엔드포인트. 세션에 바이트만 옮김 |
 | `tests/test_streaming_vad.py` | 합성 오디오로 VAD 검증 |
+| `tests/test_responder.py` | Responder 규약과 고정 응답 검증 |
 | `tests/test_call_session.py` | 가짜 Responder로 세션 검증 |
 | `tests/test_ws_server.py` | TestClient 통합 |
 

@@ -16,7 +16,8 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+# 백엔드(pyproject.toml)와 같은 버전을 쓴다. 아직 출시본이 아니라 0.x다.
+version: 0.1.0+1
 
 environment:
   sdk: ^3.10.0

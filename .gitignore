@@ -21,6 +21,9 @@ client/android/app/google-services.json
 client/ios/Runner/GoogleService-Info.plist
 .env
 
+# 통화 원본(어르신 육성)은 30일 삭제 정책이 걸린 개인정보라 저장소에 들어가면 안 된다
+recordings/
+
 # OS
 .DS_Store
 Thumbs.db
