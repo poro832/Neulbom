@@ -56,16 +56,16 @@ CREATE TABLE calls (
     elder_id          BIGINT NOT NULL REFERENCES elders(elder_id) ON DELETE CASCADE,
     call_type         TEXT NOT NULL DEFAULT 'outbound'
                       CHECK (call_type IN ('outbound', 'inbound')),
-    -- 어르신에게 닿는 두 가지 길. 정기 안부 전화는 전화망(pstn)으로 걸고,
-    -- 어르신이 앱에서 "AI 친구" 버튼을 누르면 app 채널로 들어온다.
-    -- 지표 해석이 달라지므로(전화망 8kHz vs 앱 16kHz+) 반드시 구분해 둔다.
-    channel           TEXT NOT NULL DEFAULT 'pstn'
-                      CHECK (channel IN ('pstn', 'app')),
+    -- 채널은 전화망 하나뿐이다. 이제 구분해야 하는 것은 "누가 시작했나"다.
+    -- 요청 통화의 미응답은 "버튼을 누르고 전화기를 못 찾았다"일 뿐이라
+    -- 위험 신호로 세면 활발한 어르신이 오히려 감점된다(설계 6장).
+    trigger_type      TEXT NOT NULL DEFAULT 'scheduled'
+                      CHECK (trigger_type IN ('scheduled', 'requested')),
     -- 원 스키마는 미응답·발신실패를 표현할 수 없었다(ended_at NULL로만 추정).
     status            TEXT NOT NULL DEFAULT 'scheduled'
                       CHECK (status IN ('scheduled', 'ringing', 'answered',
                                         'completed', 'no_answer', 'failed')),
-    provider_call_sid TEXT UNIQUE,          -- 전화망 통화의 사업자 측 식별자. 앱 통화는 NULL
+    provider_call_sid TEXT UNIQUE,          -- 전화망 사업자 측 식별자. 발신 전에는 NULL
     audio_key         TEXT,                 -- S3. 30일 뒤 삭제(설계 3.6)
     started_at        TIMESTAMPTZ,
     ended_at          TIMESTAMPTZ,
@@ -79,14 +79,7 @@ CREATE TABLE calls (
         CHECK (error_code IS NULL OR status IN ('failed', 'no_answer')),
     -- 통화가 끝났다면 분석할 오디오가 있어야 한다. 없으면 파이프라인이 조용히 멈춘다.
     CONSTRAINT calls_completed_requires_audio
-        CHECK (status <> 'completed' OR audio_key IS NOT NULL),
-    -- 앱 통화에는 전화 사업자가 개입하지 않는다. SID가 붙어 있으면 채널을 잘못 적은 것이다.
-    CONSTRAINT calls_app_has_no_provider_sid
-        CHECK (channel <> 'app' OR provider_call_sid IS NULL),
-    -- 앱 통화는 어르신이 직접 눌러서 시작한다. "안 받았다"가 성립하지 않는다.
-    -- 미응답 지표(설계 3.2)는 전화망 통화만 세야 하므로 여기서 오염을 막는다.
-    CONSTRAINT calls_app_cannot_be_no_answer
-        CHECK (channel <> 'app' OR status <> 'no_answer')
+        CHECK (status <> 'completed' OR audio_key IS NOT NULL)
 );
 
 CREATE INDEX calls_elder_idx ON calls (elder_id, started_at DESC);
