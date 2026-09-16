@@ -230,3 +230,24 @@ def test_speech_after_a_gap_keeps_its_absolute_position(tmp_path):
     at_600ms = samples[GAP_SAMPLE_RATE * 600 // 1000 : GAP_SAMPLE_RATE * 640 // 1000]
     assert np.all(at_200ms == 0)
     assert np.any(at_600ms != 0)
+
+
+def test_tiny_out_of_order_chunks_do_not_freeze_the_clock(tmp_path):
+    """duration_ms가 0으로 내림되는 작은 조각이 역순으로 여러 번 와도
+    시계가 recorded 버퍼와 어긋나면 안 된다.
+
+    8kHz에서 16바이트(1ms) 미만인 조각은 길이를 ms로 환산하면 0으로
+    내려앉는다. 시계를 그 값만큼 누적으로만 더해 나가면, 역순으로 온
+    조각(gap_ms < 0)이 버퍼에는 계속 쌓이는데 시계는 한 걸음도 못 뗀다 —
+    그러면 다음에 온 정상 프레임이 있지도 않은 갭으로 오판된다. 하드코딩한
+    숫자가 아니라 실제로 저장된 wav 길이와 맞대어 검증한다.
+    """
+    session = CallSession("c4", GAP_SAMPLE_RATE, _SilentResponder())
+    session.push_audio(silence_frame(), timestamp_ms=0)  # 0~20ms 정상
+
+    tiny = b"\x00" * 8  # 8000Hz에서 8바이트 = 0.5ms, duration_ms가 0으로 내림된다
+    for _ in range(20):
+        session.push_audio(tiny, timestamp_ms=0)  # 항상 과거 시각 — gap_ms < 0
+
+    path = session.finish(tmp_path)
+    assert session.stream_duration_ms == wav_duration_ms(path)

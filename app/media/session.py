@@ -91,14 +91,17 @@ class CallSession:
         self._recorded.extend(pcm)
         self._pending += pcm
 
-        duration_ms = len(pcm) * 1000 // (self._sample_rate * _BYTES_PER_SAMPLE)
-        if gap_ms < 0:
-            # 중복/역순이어도 pcm은 방금 그대로 덧붙였다 — 되감지 않고 이어붙였을
-            # 뿐이므로, 시계는 (틀렸을 수 있는) timestamp_ms가 아니라 실제로
-            # 늘어난 바이트만큼만 앞으로 간다.
-            self._next_timestamp_ms += duration_ms
-        else:
-            self._next_timestamp_ms = timestamp_ms + duration_ms
+        # 시계는 recorded 버퍼 길이에서 매번 새로 구한다 — 누적으로 더하면
+        # 조각이 작아 duration_ms가 0으로 내림되는 경우(8kHz에서 16바이트,
+        # 즉 1ms 미만 조각) 버퍼는 계속 자라는데 시계만 멈춰서, 다음
+        # 프레임에서 있지도 않은 갭이 생겼다고 오판하게 된다. 버퍼는 갭까지
+        # 이미 침묵으로 채운 실제 오디오이므로 그 길이 자체가 흐른 시간의
+        # 진실이고, 매번 거기서 다시 계산하면 어긋날 수가 없다.
+        self._next_timestamp_ms = len(self._recorded) * 1000 // (
+            self._sample_rate * _BYTES_PER_SAMPLE
+        )
+        # next_timestamp_ms와 항상 같은 값이지만, 다음 태스크가 재생 마크를
+        # 찍는 시각으로 이 이름을 따로 참조하므로 남겨둔다.
         self._last_timestamp_ms = self._next_timestamp_ms
 
         outgoing: list[Outgoing] = []
@@ -116,12 +119,23 @@ class CallSession:
 
         ClawOps의 통화 길이와 다르다 — 어르신이 받고 나서 Connect가 붙기까지
         틈이 있다. 지표에는 이쪽을 쓴다(설계 3.2).
+
+        recorded 버퍼 길이에서 직접 구한다. 갭은 이미 침묵으로 채워 그
+        버퍼에 들어 있으므로 버퍼 길이 자체가 흐른 시간의 진실이다 — 별도로
+        누적한 값이면 반올림이 쌓여 버퍼와 어긋날 수 있지만, 이건 매번 같은
+        버퍼에서 다시 재는 것이라 어긋날 수가 없다.
         """
-        return self._last_timestamp_ms
+        return len(self._recorded) * 1000 // (self._sample_rate * _BYTES_PER_SAMPLE)
 
     def _bytes_for(self, duration_ms: int) -> int:
-        """프레임 경계에 맞춰 바이트 수를 낸다."""
-        samples = int(self._sample_rate * duration_ms / 1000)
+        """프레임 경계에 맞춰 바이트 수를 낸다.
+
+        sample_rate가 1000의 배수(8000/16000)면 이 나눗셈이 정확히 떨어진다.
+        11025Hz처럼 그렇지 않은 레이트에서는 내림 때문에 gap_ms만큼을 정확히
+        채우지 못할 수 있다 — 지금은 지원 레이트가 8000/16000뿐이라 해당
+        없지만, 다른 레이트를 추가할 때는 이 지점부터 다시 봐야 한다.
+        """
+        samples = self._sample_rate * duration_ms // 1000
         return samples * _BYTES_PER_SAMPLE
 
     def finish(self, directory: Path) -> Path:
