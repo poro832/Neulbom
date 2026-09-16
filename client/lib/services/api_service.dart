@@ -15,6 +15,18 @@ import '../models/call_summary.dart';
 ///
 ///   flutter run --dart-define=USE_FIXTURES=false \
 ///               --dart-define=API_BASE_URL=https://api.example.com
+
+/// 전화 요청 결과. 409는 오류가 아니라 "이미 그 통화가 진행 중"이다.
+class CallRequestResult {
+  final int callId;
+  final bool alreadyInProgress;
+
+  const CallRequestResult({
+    required this.callId,
+    required this.alreadyInProgress,
+  });
+}
+
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
@@ -86,6 +98,36 @@ class ApiService {
     final json =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     return json['reply'] as String;
+  }
+
+  /// AI에게 전화를 걸어 달라고 요청한다.
+  ///
+  /// 앱은 통화를 하지 않는다. 마이크도 소켓도 쓰지 않는다 — 버튼은 신호일 뿐이고
+  /// 대화는 어르신의 전화기로 걸려 오는 진짜 전화에서 일어난다.
+  static Future<CallRequestResult> requestCall({int elderId = 1}) async {
+    if (useFixtures) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      return const CallRequestResult(callId: 1042, alreadyInProgress: false);
+    }
+
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/v1/calls/request'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'elder_id': elderId}),
+        )
+        .timeout(_timeout);
+
+    if (response.statusCode == 202 || response.statusCode == 409) {
+      final json =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      return CallRequestResult(
+        callId: json['call_id'] as int,
+        // 두 번 누른 것은 오류가 아니다. 그 통화의 대기 화면으로 보낸다.
+        alreadyInProgress: response.statusCode == 409,
+      );
+    }
+    throw Exception('전화 요청 실패 (${response.statusCode})');
   }
 
   // ------------------------------------------------------------ 공통

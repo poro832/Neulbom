@@ -1,37 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 
-
+/// "곧 전화가 갑니다" 대기 화면 (전화망 설계 5장).
+///
+/// 이 화면은 통화를 하지 않는다. 서버에 전화를 걸어 달라고 요청하고,
+/// 어르신 전화기가 울리기를 기다릴 뿐이다. 종료 버튼을 두지 않는 이유는
+/// 앱이 전화망 통화를 끊을 수 없기 때문이다 — 눌렀는데 안 끊기면
+/// 가장 나쁜 종류의 혼란이 된다.
 class CallingScreen extends StatefulWidget {
   final String callerName;
+  final int elderId;
 
   const CallingScreen({
     super.key,
     required this.callerName,
+    this.elderId = 1,
   });
 
   @override
   State<CallingScreen> createState() => _CallingScreenState();
 }
 
+enum _Phase { requesting, waiting, failed }
+
 class _CallingScreenState extends State<CallingScreen>
     with SingleTickerProviderStateMixin {
-  late Duration _callDuration;
-  late DateTime _callStartTime;
   late AnimationController _pulseController;
+  _Phase _phase = _Phase.requesting;
 
   @override
   void initState() {
     super.initState();
-    _callStartTime = DateTime.now();
-    _callDuration = Duration.zero;
-    _startTimer();
-
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 2400),
       vsync: this,
     )..repeat();
+    _request();
   }
 
   @override
@@ -40,22 +47,15 @@ class _CallingScreenState extends State<CallingScreen>
     super.dispose();
   }
 
-  void _startTimer() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _callDuration = DateTime.now().difference(_callStartTime);
-        });
-        _startTimer();
-      }
-    });
-  }
-
-  String _formatDuration(Duration duration) {
-    String twoDigits(int n) => n.toString().padLeft(2, '0');
-    String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
-    String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
-    return "${twoDigits(duration.inHours)}:$twoDigitMinutes:$twoDigitSeconds";
+  Future<void> _request() async {
+    try {
+      await ApiService.requestCall(elderId: widget.elderId);
+      // 409(이미 진행 중)도 성공으로 다룬다. 어르신 입장에서는
+      // "전화가 오고 있다"로 똑같다.
+      if (mounted) setState(() => _phase = _Phase.waiting);
+    } catch (_) {
+      if (mounted) setState(() => _phase = _Phase.failed);
+    }
   }
 
   @override
@@ -74,163 +74,130 @@ class _CallingScreenState extends State<CallingScreen>
           ),
         ),
         child: SafeArea(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // 상단 여백
-              const SizedBox(height: 50),
-
-              // 중앙: 아바타 + 이름 + 타이머
-              Column(
-                children: [
-                  // 아바타 (맥박 애니메이션)
-                  SizedBox(
-                    width: 160,
-                    height: 160,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // 펄스 링 1
-                        ScaleTransition(
-                          scale: Tween<double>(begin: 0.75, end: 1.15).animate(
-                            CurvedAnimation(
-                              parent: _pulseController,
-                              curve: const Interval(0, 1, curve: Curves.easeOut),
-                            ),
-                          ),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.4),
-                                width: 1.5,
-                                strokeAlign: BorderSide.strokeAlignOutside,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // 펄스 링 2 (딜레이)
-                        ScaleTransition(
-                          scale: Tween<double>(begin: 0.75, end: 1.15).animate(
-                            CurvedAnimation(
-                              parent: _pulseController,
-                              curve: const Interval(0.33, 1, curve: Curves.easeOut),
-                            ),
-                          ),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.4),
-                                width: 1.5,
-                                strokeAlign: BorderSide.strokeAlignOutside,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // 아바타
-                        Container(
-                          width: 130,
-                          height: 130,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withOpacity(0.25),
-                          ),
-                          child: const Icon(
-                            Icons.person,
-                            size: 60,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _avatar(),
+                const SizedBox(height: 32),
+                Text(
+                  _headline,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSerifKr(
+                    fontSize: 30,
+                    height: 1.4,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
                   ),
-                  const SizedBox(height: 20),
-
-                  // 이름
-                  Text(
-                    _callDurationFormattedName,
-                    style: GoogleFonts.notoSerifKr(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-
-                  // 타이머
-                  Text(
-                    _formatDuration(_callDuration),
-                    style: TextStyle(
-                      fontSize: 17,
-                      color: Colors.white.withOpacity(0.85),
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-
-              // 하단: 통화 종료 버튼
-              Padding(
-                padding: const EdgeInsets.only(bottom: 40),
-                child: Column(
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.pop(context);
-                      },
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.25),
-                              blurRadius: 24,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.call_end,
-                          color: Color(0xFFC0553F),
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      '종료',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      '대화 내용이 자동으로 녹음되며\n분석 결과는 보호자에게 전송됩니다',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withOpacity(0.8),
-                        height: 1.6,
-                      ),
-                    ),
-                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Text(
+                  _detail,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 19,
+                    height: 1.6,
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                _action(),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  String get _callDurationFormattedName {
-    return widget.callerName;
+  String get _headline {
+    switch (_phase) {
+      case _Phase.requesting:
+        return '전화를 거는 중이에요';
+      case _Phase.waiting:
+        return '곧 전화가\n갑니다';
+      case _Phase.failed:
+        return '전화를 걸지\n못했어요';
+    }
+  }
+
+  String get _detail {
+    switch (_phase) {
+      case _Phase.requesting:
+        return '잠시만 기다려 주세요';
+      case _Phase.waiting:
+        return '전화기가 울리면 받아 주세요.\n대화 내용은 보호자에게 전해집니다.';
+      case _Phase.failed:
+        return '잠시 후 다시 시도해 주세요';
+    }
+  }
+
+  Widget _action() {
+    if (_phase == _Phase.failed) {
+      return _button('다시 시도', () {
+        setState(() => _phase = _Phase.requesting);
+        _request();
+      });
+    }
+    return _button('닫기', () => Navigator.pop(context));
+  }
+
+  Widget _button(String label, VoidCallback onTap) {
+    return SizedBox(
+      width: double.infinity,
+      height: 64,
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFFC0553F),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        child: Text(label, style: const TextStyle(fontSize: 21)),
+      ),
+    );
+  }
+
+  Widget _avatar() {
+    return SizedBox(
+      width: 160,
+      height: 160,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          for (final start in const [0.0, 0.33])
+            ScaleTransition(
+              scale: Tween<double>(begin: 0.75, end: 1.15).animate(
+                CurvedAnimation(
+                  parent: _pulseController,
+                  curve: Interval(start, 1, curve: Curves.easeOut),
+                ),
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.4),
+                    width: 1.5,
+                    strokeAlign: BorderSide.strokeAlignOutside,
+                  ),
+                ),
+              ),
+            ),
+          Container(
+            width: 130,
+            height: 130,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withOpacity(0.25),
+            ),
+            child: const Icon(Icons.phone_in_talk, size: 60, color: Colors.white),
+          ),
+        ],
+      ),
+    );
   }
 }
