@@ -82,6 +82,10 @@ class CallSession:
         # 지어 begin/end를 짝짓고, 짝이 안 맞으면 지어내지 않고 세기만 한다.
         self._turn_index = 0
         self._mark_times: dict[str, int] = {}
+        # 결론이 난 mark 이름들 — 성공적으로 짝지어졌거나(둘 다) 끝내 짝을
+        # 찾지 못해 unmatched로 센 쪽(end만). 통신망은 mark를 다시 보낼 수
+        # 있으므로, 이미 처리한 이름이 또 오면 새 정보로 취급하지 않는다.
+        self._resolved_marks: set[str] = set()
         self._ai_turns: list[VadSegment] = []
         self._unmatched_marks = 0
 
@@ -96,17 +100,25 @@ class CallSession:
         지연이 섞여 들어가 같은 통화를 다시 분석해도 다른 값이 나온다.
         """
         gap_ms = timestamp_ms - self._next_timestamp_ms
+        if gap_ms < 0:
+            # 중복이거나 순서가 뒤집혔다 — 이 바이트가 가리키는 시간대는 이미
+            # 버퍼에 있다. 그런데도 붙이면 녹음이 통화보다 길어져 그 뒤 모든
+            # 위치가 밀린다('샘플 위치 = 통화 내 시각'이 이 프로젝트의 전제).
+            # 게다가 시계를 버퍼 길이에서 매번 다시 구하는 구조라, 붙이는
+            # 순간 시계가 실제보다 앞서가 버려 바로 뒤에 오는 진짜 갭을
+            # 실제보다 작게 계산해 덜 채우게 된다(R10 번복 — 조용히 붙이지
+            # 않고 통째로 버린다).
+            logger.warning(
+                "타임스탬프가 뒤로 갔다 — 버린다 call_id=%s gap=%dms",
+                self._call_id,
+                gap_ms,
+            )
+            return []
+
         if gap_ms > 0:
             filler = b"\x00" * self._bytes_for(gap_ms)
             self._recorded.extend(filler)
             self._pending += filler
-        elif gap_ms < 0:
-            # 중복이거나 순서가 뒤집혔다. 되감으면 이미 쓴 오디오를 덮어쓴다.
-            logger.warning(
-                "타임스탬프가 뒤로 갔다 — 무시한다 call_id=%s gap=%dms",
-                self._call_id,
-                gap_ms,
-            )
 
         self._recorded.extend(pcm)
         self._pending += pcm
@@ -180,9 +192,9 @@ class CallSession:
         # 프레임의 샘플 수)로 프레임 인덱스를 바이트로 되돌린다. 그래야
         # sample_rate * frame_ms / 1000이 정수가 아닌 레이트(예: 11025Hz)에서도
         # push_audio가 실제로 슬라이스한 바이트와 어긋나지 않는다.
-        start = (start_ms // self._vad.frame_ms) * self._frame_bytes
-        end = (end_ms // self._vad.frame_ms) * self._frame_bytes
-        turn = _to_float32(bytes(self._recorded[start:end]))
+        start_offset = (start_ms // self._vad.frame_ms) * self._frame_bytes
+        end_offset = (end_ms // self._vad.frame_ms) * self._frame_bytes
+        turn = _to_float32(bytes(self._recorded[start_offset:end_offset]))
 
         try:
             reply = self._responder.respond(turn, self._sample_rate)
@@ -193,13 +205,13 @@ class CallSession:
 
         if reply:
             self._turn_index += 1
-            begin = f"turn{self._turn_index}-begin"
-            end = f"turn{self._turn_index}-end"
+            begin_mark = f"turn{self._turn_index}-begin"
+            end_mark = f"turn{self._turn_index}-end"
             # 오디오 앞뒤로 표식을 건다. 플랫폼이 순서대로 재생하므로
             # begin이 돌아온 시점이 재생 시작, end가 돌아온 시점이 종료다.
-            outgoing.append(MarkMessage(begin))
+            outgoing.append(MarkMessage(begin_mark))
             outgoing.append(AudioMessage(reply))
-            outgoing.append(MarkMessage(end))
+            outgoing.append(MarkMessage(end_mark))
         return outgoing
 
     def on_mark(self, name: str) -> None:
@@ -207,17 +219,39 @@ class CallSession:
 
         mark 이벤트에는 타임스탬프가 없고, 벽시계를 쓰면 재현성이 깨진다.
         """
+        if name in self._resolved_marks:
+            # 이미 결론이 난 mark(짝이 맞아 구간으로 확정됐거나, 끝내 짝을
+            # 못 찾아 unmatched로 이미 센 것)가 다시 왔다. 통신망 재전송은
+            # 새로운 사실이 아니므로 여기서 또 세면 멀쩡히 잡힌 턴이 조용히
+            # '열화'로 잘못 표시된다 — 그래서 조용히 버린다.
+            return
+
+        if name in self._mark_times:
+            # 짝(-end)이 오기 전에 같은 mark가 또 왔다. 나중 시각으로
+            # 덮어쓰면 시작/종료 시각이 조용히 틀려도 아무 신호가 없다 —
+            # 이 프로젝트가 절대 하지 않기로 한, 모르는 값을 지어내는 것과
+            # 같다. 그래서 먼저 온 시각을 지키고, 대신 이상 신호는
+            # unmatched_marks로 드러낸다.
+            self._unmatched_marks += 1
+            return
+
         self._mark_times[name] = self._last_timestamp_ms
         if not name.endswith("-end"):
             return
 
         begin = name[: -len("-end")] + "-begin"
+        self._resolved_marks.add(name)
         start_ms = self._mark_times.pop(begin, None)
         end_ms = self._mark_times.pop(name)
         if start_ms is None:
             # begin이 유실됐다. 구간을 지어내면 응답 지연이 조용히 틀린다.
             self._unmatched_marks += 1
             return
+        self._resolved_marks.add(begin)
+        # end_ms가 start_ms보다 앞설 수 없다: 시계는 recorded 버퍼 길이에서만
+        # 구해지고 그 버퍼는 절대 줄지 않으므로, begin을 찍은 뒤에 늘어난
+        # 시계로만 end를 찍을 수 있다. VadSegment 자체는 이를 강제하지
+        # 않으므로 그 근거를 여기 남긴다.
         self._ai_turns.append(VadSegment(start_ms=start_ms, end_ms=end_ms))
 
     @property

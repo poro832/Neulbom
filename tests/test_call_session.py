@@ -214,14 +214,39 @@ def test_lost_frames_are_filled_with_silence(tmp_path):
 
 
 def test_duplicate_or_out_of_order_timestamp_does_not_rewind(tmp_path):
-    """같은 타임스탬프가 두 번 와도 오디오를 되감지 않는다."""
+    """같은 타임스탬프가 두 번 와도 오디오를 되감지 않는다.
+
+    중복 프레임은 버퍼에 붙이지 않고 통째로 버린다(설계 결정 번복 — 이미
+    지나간 시간대의 오디오를 또 붙이면 녹음이 통화보다 길어져 그 뒤 모든
+    위치가 밀린다). 그래서 기대 길이는 프레임 세 개분(60ms)이 아니라
+    실제로 새로 들어온 정상 프레임 두 개(0~20ms, 20~40ms)만큼인 40ms다.
+    """
     session = CallSession("c2", GAP_SAMPLE_RATE, _SilentResponder())
     session.push_audio(silence_frame(), timestamp_ms=0)
     session.push_audio(silence_frame(), timestamp_ms=20)
-    session.push_audio(silence_frame(), timestamp_ms=20)   # 중복
+    session.push_audio(silence_frame(), timestamp_ms=20)   # 중복 — 버려진다
 
-    assert session.stream_duration_ms == 60
-    assert wav_duration_ms(session.finish(tmp_path)) == 60
+    assert session.stream_duration_ms == 40
+    assert wav_duration_ms(session.finish(tmp_path)) == 40
+
+
+def test_backwards_frames_do_not_shrink_a_genuine_gap_that_follows(tmp_path):
+    """역행 프레임 뒤에 오는 진짜 갭이 실제보다 작게 계산되면 안 된다.
+
+    이전 구현은 gap_ms<0인 프레임도 버퍼에 붙였다. 시계는 버퍼 길이에서
+    다시 구하므로, 그 순간 시계가 실제 시간보다 앞서가 버려 바로 뒤에 오는
+    진짜 갭이 실제보다 작게 계산되어 덜 채워졌다. 지금은 역행 프레임을
+    통째로 버리므로 시계가 실제 시간과 어긋나지 않는다 — 하드코딩한
+    숫자가 아니라 저장된 wav 길이와 맞대어 검증한다.
+    """
+    session = CallSession("c10", GAP_SAMPLE_RATE, _SilentResponder())
+    session.push_audio(silence_frame(), timestamp_ms=0)        # 0~20ms 정상
+    for _ in range(5):
+        session.push_audio(silence_frame(), timestamp_ms=0)    # 역행 — 전부 버려진다
+    session.push_audio(silence_frame(), timestamp_ms=100)      # 20ms 뒤 진짜 갭
+
+    path = session.finish(tmp_path)
+    assert session.stream_duration_ms == wav_duration_ms(path)
 
 
 def test_speech_after_a_gap_keeps_its_absolute_position(tmp_path):
@@ -340,3 +365,49 @@ def test_a_turn_with_only_one_mark_is_not_counted():
 
     assert session.ai_turns == []
     assert session.unmatched_marks == 1
+
+
+def test_duplicate_begin_mark_does_not_corrupt_the_start_time():
+    """짝(-end)이 오기 전에 begin이 두 번 오면 나중 시각으로 덮으면 안 된다.
+
+    덮어쓰면 시작 시각이 조용히 틀려도 아무 신호가 없다 — 재현 분석을
+    다시 돌려도 똑같이 틀린 값이 나오므로 재현성 테스트조차 이걸 정상으로
+    본다. 먼저 온 시각(1320ms)이 지켜지는지, 그리고 이상 신호가
+    unmatched_marks에 남는지를 함께 확인한다.
+    """
+    session = CallSession("c8", GAP_SAMPLE_RATE, _OneBeepResponder())
+    outgoing = _drive_one_turn(session)
+    marks = [m.name for m in outgoing if isinstance(m, MarkMessage)]
+
+    session.push_audio(silence_frame(), timestamp_ms=1300)
+    session.on_mark(marks[0])                              # 최초 begin → 1320ms
+    for i in range(66, 70):
+        session.push_audio(silence_frame(), timestamp_ms=i * GAP_FRAME_MS)
+    session.on_mark(marks[0])                              # 같은 begin 재전송 → 1400ms로 덮이면 안 된다
+    for i in range(70, 80):
+        session.push_audio(silence_frame(), timestamp_ms=i * GAP_FRAME_MS)
+    session.on_mark(marks[1])                              # end → 1600ms
+
+    assert session.ai_turns == [VadSegment(start_ms=1320, end_ms=1600)]
+    assert session.unmatched_marks == 1
+
+
+def test_duplicate_end_mark_after_a_match_is_a_no_op():
+    """이미 짝지어진 턴의 end가 재전송으로 또 오면 unmatched_marks가 늘면 안 된다.
+
+    두 mark가 이미 pop된 뒤 같은 end가 다시 들어오면 begin을 못 찾았다고
+    오판해, 제대로 잡힌 턴을 '열화'로 잘못 표시하는 것이 옛 버그였다.
+    """
+    session = CallSession("c9", GAP_SAMPLE_RATE, _OneBeepResponder())
+    outgoing = _drive_one_turn(session)
+    marks = [m.name for m in outgoing if isinstance(m, MarkMessage)]
+
+    session.push_audio(silence_frame(), timestamp_ms=1300)
+    session.on_mark(marks[0])
+    for i in range(66, 80):
+        session.push_audio(silence_frame(), timestamp_ms=i * GAP_FRAME_MS)
+    session.on_mark(marks[1])
+    session.on_mark(marks[1])          # end 재전송
+
+    assert session.ai_turns == [VadSegment(start_ms=1320, end_ms=1600)]
+    assert session.unmatched_marks == 0
