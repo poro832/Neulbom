@@ -80,12 +80,32 @@ def build_app(
                 raw = await websocket.receive_text()
                 message = _parse(raw)
                 if message is None:
-                    # 깨진 프레임 하나로 통화를 끊지 않는다(설계 8장).
+                    # 최상위가 JSON도 dict도 아닌 프레임 하나로 통화를
+                    # 끊지 않는다(설계 8장). 중첩 필드가 null인 경우는
+                    # 아래 각 분기에서 따로 막는다 — 여기서는 못 잡는다.
                     continue
 
                 event = message.get("event")
                 if event == "start":
-                    session = _open(message, registry, responder_factory)
+                    if session is not None:
+                        # 소켓 하나는 통화 하나다. 두 번째 start를 받아들여
+                        # session을 덮어쓰면 첫 세션은 finish()가 다시는
+                        # 불리지 않아 녹음이 통째로 사라진다 — 반면 여기서
+                        # 소켓을 닫으면 멀쩡히 진행 중이던 첫 통화까지
+                        # 끊어버리므로, 침묵 손실보다 더 나쁘다. 그래서
+                        # 무시하고 첫 세션을 계속 쓴다.
+                        logger.warning(
+                            "이미 세션이 열린 소켓에 start가 다시 왔다 — 무시한다 call_id=%s",
+                            session.call_id,
+                        )
+                        continue
+                    start = message.get("start")
+                    if not isinstance(start, dict):
+                        # start가 null이면 토큰도 없어 세션을 열 수 없다.
+                        # 다음에 오는 진짜 start를 기다린다.
+                        logger.warning("start 필드가 비어 있다(null) — 버린다")
+                        continue
+                    session = _open(start, registry, responder_factory)
                     if session is None:
                         await websocket.close(code=_POLICY_VIOLATION)
                         return
@@ -93,10 +113,26 @@ def build_app(
                     # start 전에 온 것은 시각도 세션도 없이 해석할 수 없다.
                     continue
                 elif event == "media":
-                    for outgoing in _push(session, message):
+                    media = message.get("media")
+                    if not isinstance(media, dict):
+                        # null이면 payload도 timestamp도 없다 — 이 프레임만
+                        # 버리고 통화는 계속한다.
+                        logger.warning(
+                            "media 필드가 비어 있다(null) — 버린다 call_id=%s",
+                            session.call_id,
+                        )
+                        continue
+                    for outgoing in _push(session, media):
                         await _send(websocket, outgoing)
                 elif event == "mark":
-                    session.on_mark(message.get("mark", {}).get("name", ""))
+                    mark = message.get("mark")
+                    if not isinstance(mark, dict):
+                        logger.warning(
+                            "mark 필드가 비어 있다(null) — 버린다 call_id=%s",
+                            session.call_id,
+                        )
+                        continue
+                    session.on_mark(mark.get("name", ""))
                 elif event == "stop":
                     break
         except WebSocketDisconnect:
@@ -118,17 +154,17 @@ def _parse(raw: str) -> dict | None:
 
 
 def _open(
-    message: dict,
+    start: dict,
     registry: CallRegistry,
     responder_factory: Callable[[], Responder],
 ) -> CallSession | None:
-    """토큰을 확인하고 세션을 연다.
+    """토큰을 확인하고 세션을 연다. 호출부가 start가 dict임을 이미 보장한다.
 
     이 소켓에는 ClawOps 서명이 없다. <Parameter>로 심어 둔 1회용 토큰이
     유일한 문이다(설계 7장).
     """
-    start = message.get("start", {})
-    token = start.get("customParameters", {}).get("token", "")
+    custom_params = start.get("customParameters") or {}
+    token = custom_params.get("token", "")
     call_id = registry.claim(token) if token else None
     if call_id is None:
         logger.warning("알 수 없는 토큰으로 스트림 접속 — 거부한다")
@@ -136,8 +172,8 @@ def _open(
     return CallSession(call_id, ulaw.SAMPLE_RATE, responder_factory())
 
 
-def _push(session: CallSession, message: dict) -> list:
-    media = message.get("media", {})
+def _push(session: CallSession, media: dict) -> list:
+    """media 프레임을 세션에 밀어 넣는다. 호출부가 media가 dict임을 이미 보장한다."""
     try:
         payload = base64.b64decode(media.get("payload", ""), validate=True)
         timestamp_ms = int(media.get("timestamp", "0"))

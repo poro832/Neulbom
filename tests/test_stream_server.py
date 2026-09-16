@@ -7,6 +7,7 @@ CallSession에 있으므로 이 계층은 배관만 한다 — 그래서 이벤�
 
 import base64
 import json
+import wave
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -167,6 +168,93 @@ def test_garbage_frame_does_not_kill_the_call(tmp_path):
         socket.send_text(json.dumps({"event": "stop"}))
 
     assert (tmp_path / "call-1.wav").exists()
+
+
+def test_null_media_field_does_not_kill_the_call(tmp_path):
+    """media 필드 자체가 null이어도(JSON은 유효하다) 통화가 죽으면 안 된다.
+
+    message.get("media", {})는 키가 "없을" 때만 기본값을 준다 — 키가 있고
+    값이 null이면 그대로 None을 돌려줘 다음 .get() 호출에서 터진다. 그
+    프레임만 버리고 이어지는 정상 프레임은 실제로 처리돼야 한다.
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps({"event": "media", "media": None}))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES
+
+
+def test_null_mark_field_does_not_kill_the_call(tmp_path):
+    """mark 필드가 null이어도 같은 방식으로 죽는다 — 같은 구멍이다."""
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps({"event": "mark", "mark": None}))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES
+
+
+def test_null_start_field_does_not_kill_the_call(tmp_path):
+    """start 필드가 null인 start 이벤트도 세션 없이 안전하게 버려져야 하고,
+    소켓은 살아남아 뒤이은 진짜 start를 받아들여야 한다.
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps({"event": "start", "start": None}))
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES
+
+
+def test_second_start_with_different_valid_token_is_ignored(tmp_path):
+    """소켓 하나는 통화 하나다. 두 번째 start가 다른 유효한 토큰을 들고
+    와도 받아들이면 첫 세션이 finish() 한 번 못 받고 사라진다 — 그 세션의
+    녹음 전체가 조용히 없어지는 것이다. 두 번째 start는 무시해야 하고,
+    그 뒤에 오는 media도 계속 첫 세션(call-1)에 쌓여야 한다.
+    """
+    client, registry = make_client(tmp_path)
+    registry.issue("tok-good-2", "call-2")
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps(start_event("tok-good-2")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 20)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    assert (tmp_path / "call-1.wav").exists()
+    assert not (tmp_path / "call-2.wav").exists()
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES * 2
+    # 무시됐을 뿐 소모되지는 않았다 — 다음 통화에 이 토큰을 다시 쓸 수 있다.
+    assert registry.claim("tok-good-2") == "call-2"
+
+
+def test_second_start_with_bad_token_is_ignored(tmp_path):
+    """두 번째 start가 이번엔 나쁜 토큰이다. 예전 코드는 이 경우 _open이
+    None을 돌려줘 세션 변수를 덮어쓰고 소켓까지 닫아, 멀쩡한 첫 통화를
+    두 번 죽였다(세션도 잃고 소켓도 잃고). 무시하면 첫 통화는 그대로
+    이어져야 한다.
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps(start_event("tok-bad")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 20)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES * 2
 
 
 def _expect_disconnect():
