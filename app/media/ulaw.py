@@ -38,7 +38,10 @@ def _build_decode_table() -> np.ndarray:
 _DECODE = _build_decode_table()
 
 # 인코드용. 표를 값 순으로 세워 두고 이웃 사이의 중점을 경계로 쓴다.
-_ORDER = np.argsort(_DECODE, kind="stable").astype(np.uint8)
+# G.711은 0(영점)이 두 가지다: 0x7F(음의 영점)와 0xFF(양의 영점).
+# lexsort로 같은 값끼리는 바이트 인덱스 내림차순 정렬하면 0xFF가 이긴다.
+# encode(0.0)이 표준 G.711 침묵 마크인 0xFF를 만들어야 한다.
+_ORDER = np.lexsort((-np.arange(256), _DECODE)).astype(np.uint8)
 _SORTED = _DECODE[_ORDER].astype(np.float32)
 _BOUNDARIES = (_SORTED[:-1] + _SORTED[1:]) / 2.0
 

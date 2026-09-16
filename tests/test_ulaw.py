@@ -24,6 +24,13 @@ def test_0xff_is_silence():
     assert np.all(decoded == 0.0)
 
 
+def test_encode_silence_produces_0xff():
+    # 침묵(0.0)을 인코드하면 표준 G.711 침묵 마크 0xFF가 나와야 한다.
+    # 통신사로 보낼 프레임이 표준 바이트를 쓰도록 한다.
+    encoded = ulaw.encode(np.array([0.0], dtype=np.float32))
+    assert encoded[0] == 0xFF
+
+
 def test_decode_reaches_full_scale():
     # 0x00은 μ-law 최소값(-32124), 0x80은 최대값(+32124)이다.
     assert ulaw.decode(bytes([0x00]))[0] == pytest.approx(-32124 / 32768, abs=1e-6)
