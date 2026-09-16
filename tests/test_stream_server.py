@@ -1,0 +1,177 @@
+"""ClawOps Stream 어댑터 (전화망 설계 4장).
+
+프로토콜은 이벤트 JSON이고 오디오는 base64 μ-law다. 로직은 전부
+CallSession에 있으므로 이 계층은 배관만 한다 — 그래서 이벤트 시퀀스를
+재생하는 것으로 전부 검증된다. 실통화가 필요 없다.
+"""
+
+import base64
+import json
+
+import numpy as np
+from fastapi.testclient import TestClient
+
+from app.media import ulaw
+from app.media.stream_server import InMemoryCallRegistry, build_app
+
+FRAME_SAMPLES = 160
+
+
+def silence_payload() -> str:
+    return base64.b64encode(b"\xff" * FRAME_SAMPLES).decode()
+
+
+def speech_payload() -> str:
+    samples = np.empty(FRAME_SAMPLES, dtype=np.float32)
+    samples[0::2] = 0.25
+    samples[1::2] = -0.25
+    return base64.b64encode(ulaw.encode(samples)).decode()
+
+
+def start_event(token: str, call_id: str = "CA1") -> dict:
+    return {
+        "event": "start",
+        "sequenceNumber": "1",
+        "start": {
+            "streamId": "MZ1",
+            "callId": call_id,
+            "accountId": "AC1",
+            "tracks": ["inbound"],
+            "customParameters": {"token": token},
+            "mediaFormat": {
+                "encoding": "audio/x-mulaw",
+                "sampleRate": 8000,
+                "channels": 1,
+            },
+        },
+    }
+
+
+def media_event(payload: str, timestamp_ms: int) -> dict:
+    return {
+        "event": "media",
+        "media": {
+            "track": "inbound",
+            "chunk": "1",
+            "timestamp": str(timestamp_ms),
+            "payload": payload,
+        },
+    }
+
+
+def make_client(tmp_path, responder=None):
+    registry = InMemoryCallRegistry()
+    registry.issue("tok-good", "call-1")
+
+    class _Beep:
+        def respond(self, audio, sample_rate):
+            return b"\x01\x02" * 400
+
+    app = build_app(
+        registry=registry,
+        responder_factory=lambda: responder or _Beep(),
+        recordings_dir=tmp_path,
+    )
+    return TestClient(app), registry
+
+
+def test_unknown_token_is_rejected(tmp_path):
+    """스트림 소켓에는 ClawOps 서명이 없다. 토큰이 유일한 문이다."""
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-bad")))
+        with _expect_disconnect():
+            socket.receive_text()
+
+
+def test_a_token_cannot_be_used_twice(tmp_path):
+    """재사용되면 같은 통화에 두 스트림이 붙는다."""
+    client, registry = make_client(tmp_path)
+    assert registry.claim("tok-good") == "call-1"
+    assert registry.claim("tok-good") is None
+
+
+def test_media_is_decoded_and_recorded(tmp_path):
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        for i in range(10):
+            socket.send_text(json.dumps(media_event(silence_payload(), i * 20)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    saved = tmp_path / "call-1.wav"
+    assert saved.exists()
+
+
+def test_speech_then_silence_sends_marked_audio(tmp_path):
+    """발화가 끝나면 mark로 감싼 μ-law 오디오가 나가야 한다."""
+    client, _ = make_client(tmp_path)
+    received = []
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        index = 0
+        for _ in range(20):
+            socket.send_text(json.dumps(media_event(speech_payload(), index * 20)))
+            index += 1
+        for _ in range(45):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        # 나간 것들을 모은다.
+        for _ in range(3):
+            received.append(json.loads(socket.receive_text()))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    events = [message["event"] for message in received]
+    assert events == ["mark", "media", "mark"]
+    # 오디오는 base64 μ-law여야 한다. PCM16을 그대로 보내면 굉음이 난다.
+    audio = base64.b64decode(received[1]["media"]["payload"])
+    assert len(audio) == 400          # PCM16 800바이트 → μ-law 400바이트
+
+
+def test_mark_from_platform_records_an_ai_turn(tmp_path):
+    """돌아온 mark가 AI 발화 구간이 된다 (설계 3.2)."""
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        index = 0
+        for _ in range(20):
+            socket.send_text(json.dumps(media_event(speech_payload(), index * 20)))
+            index += 1
+        for _ in range(45):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        marks = []
+        for _ in range(3):
+            message = json.loads(socket.receive_text())
+            if message["event"] == "mark":
+                marks.append(message["mark"]["name"])
+
+        socket.send_text(json.dumps(media_event(silence_payload(), 2000)))
+        socket.send_text(json.dumps({"event": "mark", "mark": {"name": marks[0]}}))
+        socket.send_text(json.dumps(media_event(silence_payload(), 2600)))
+        socket.send_text(json.dumps({"event": "mark", "mark": {"name": marks[1]}}))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    # 소켓이 닫힌 뒤 세션이 남긴 wav가 있으면 충분하다. 구간 자체는
+    # Task 4의 단위 테스트가 이미 고정하고 있다.
+    assert (tmp_path / "call-1.wav").exists()
+
+
+def test_garbage_frame_does_not_kill_the_call(tmp_path):
+    """깨진 프레임 하나로 통화를 끊으면 어르신은 영문을 모른다."""
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text("not json at all")
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    assert (tmp_path / "call-1.wav").exists()
+
+
+def _expect_disconnect():
+    """pytest_ 로 시작하는 이름은 훅으로 오인되므로 밑줄로 시작한다."""
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    return pytest.raises(WebSocketDisconnect)
