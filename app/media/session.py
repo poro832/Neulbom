@@ -59,13 +59,47 @@ class CallSession:
         self._pending = b""
         self._recorded = bytearray()
 
+        # 다음 프레임이 시작해야 할 시각. 실제 타임스탬프가 이보다 뒤면
+        # 그 사이가 유실이다. 바이트 수로 세면 유실만큼 오디오가 짧아져
+        # 뒤의 모든 발화 구간이 앞으로 당겨진다.
+        self._next_timestamp_ms = 0
+        self._last_timestamp_ms = 0
+
     @property
     def call_id(self) -> str:
         return self._call_id
 
-    def push_audio(self, data: bytes) -> list[Outgoing]:
-        self._recorded.extend(data)
-        self._pending += data
+    def push_audio(self, pcm: bytes, timestamp_ms: int) -> list[Outgoing]:
+        """PCM16 LE 한 덩이를 그 시작 시각과 함께 밀어 넣는다.
+
+        시각은 전송 계층이 준 것을 그대로 쓴다. 벽시계를 쓰면 네트워크
+        지연이 섞여 들어가 같은 통화를 다시 분석해도 다른 값이 나온다.
+        """
+        gap_ms = timestamp_ms - self._next_timestamp_ms
+        if gap_ms > 0:
+            filler = b"\x00" * self._bytes_for(gap_ms)
+            self._recorded.extend(filler)
+            self._pending += filler
+        elif gap_ms < 0:
+            # 중복이거나 순서가 뒤집혔다. 되감으면 이미 쓴 오디오를 덮어쓴다.
+            logger.warning(
+                "타임스탬프가 뒤로 갔다 — 무시한다 call_id=%s gap=%dms",
+                self._call_id,
+                gap_ms,
+            )
+
+        self._recorded.extend(pcm)
+        self._pending += pcm
+
+        duration_ms = len(pcm) * 1000 // (self._sample_rate * _BYTES_PER_SAMPLE)
+        if gap_ms < 0:
+            # 중복/역순이어도 pcm은 방금 그대로 덧붙였다 — 되감지 않고 이어붙였을
+            # 뿐이므로, 시계는 (틀렸을 수 있는) timestamp_ms가 아니라 실제로
+            # 늘어난 바이트만큼만 앞으로 간다.
+            self._next_timestamp_ms += duration_ms
+        else:
+            self._next_timestamp_ms = timestamp_ms + duration_ms
+        self._last_timestamp_ms = self._next_timestamp_ms
 
         outgoing: list[Outgoing] = []
         while len(self._pending) >= self._frame_bytes:
@@ -75,6 +109,20 @@ class CallSession:
             if ended is not None:
                 outgoing.extend(self._on_speech_end(ended.start_ms, ended.end_ms))
         return outgoing
+
+    @property
+    def stream_duration_ms(self) -> int:
+        """스트림이 흐른 시간. 지표의 분모다.
+
+        ClawOps의 통화 길이와 다르다 — 어르신이 받고 나서 Connect가 붙기까지
+        틈이 있다. 지표에는 이쪽을 쓴다(설계 3.2).
+        """
+        return self._last_timestamp_ms
+
+    def _bytes_for(self, duration_ms: int) -> int:
+        """프레임 경계에 맞춰 바이트 수를 낸다."""
+        samples = int(self._sample_rate * duration_ms / 1000)
+        return samples * _BYTES_PER_SAMPLE
 
     def finish(self, directory: Path) -> Path:
         """누적한 원본을 wav로 남긴다.
