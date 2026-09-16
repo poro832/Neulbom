@@ -64,4 +64,27 @@ class ClawOpsTelephony:
             timeout=self._timeout,
         )
         response.raise_for_status()
-        return response.json()["call_id"]
+
+        # 엔드포인트 경로·인증 헤더·응답 필드명(call_id) 셋 다 계정 없이 작성한
+        # 추측이다. 실제 API와 어긋나면 바로 여기서 처음 드러난다 — 그 순간
+        # 팀원이 가진 단서는 이 예외 메시지뿐이므로 상태 코드와 본문을 남긴다.
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                "ClawOps 응답이 JSON이 아니다: "
+                f"status={response.status_code} body={_truncate(response.text)}"
+            ) from exc
+
+        try:
+            return payload["call_id"]
+        except KeyError as exc:
+            raise RuntimeError(
+                "ClawOps 응답에 call_id 필드가 없다: "
+                f"status={response.status_code} body={_truncate(response.text)}"
+            ) from exc
+
+
+def _truncate(body: str, limit: int = 300) -> str:
+    """거대한 HTML 에러 페이지가 로그를 뒤덮지 않도록 자른다."""
+    return body if len(body) <= limit else body[:limit] + "…"
