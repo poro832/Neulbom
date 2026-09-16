@@ -15,8 +15,8 @@ from app.media.stream_server import InMemoryCallRegistry
 from app.telephony.client import FakeTelephony
 
 
-def make_client(telephony=None):
-    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+def make_client(telephony=None, store=None):
+    store = store or InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = telephony or FakeTelephony()
     registry = InMemoryCallRegistry()
     app = build_app(
@@ -189,3 +189,64 @@ def test_concurrent_double_press_places_only_one_call():
     statuses = sorted(r.status_code for r in responses)
     assert statuses == [202] + [409] * (threads_count - 1)
     assert len(telephony.placed) == 1
+
+
+# ------------------------------------------------------- 통화의 끝
+
+
+def test_a_finished_call_stops_blocking_the_next_request():
+    """끝난 통화가 '진행 중'으로 남으면 그 어르신은 영원히 잠긴다.
+
+    이건 조용한 고장이다: 서버는 409를 주고 앱은 409를 성공으로 보여 준다.
+    어르신 화면에는 "곧 전화가 갑니다"가 뜨는데 전화기는 다시는 울리지
+    않는다. 사업자 웹훅이 통화의 끝을 알려 왔으면 기록도 끝나야 한다.
+    """
+    client, store, telephony, _ = make_client()
+    call_id = client.post("/v1/calls/request", json={"elder_id": 12}).json()["call_id"]
+    sid = store.get(call_id).provider_call_sid
+
+    client.post("/v1/stream-ended", data={"CallId": sid, "StreamEvent": "stop"})
+
+    assert store.get(call_id).status == "no_answer"
+    assert store.find_active(12) is None
+    assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202
+    assert len(telephony.placed) == 2
+
+
+def test_a_finished_calls_token_is_no_longer_handed_out():
+    """끝난 통화의 스트림 토큰이 남아 있으면 안 된다.
+
+    /v1/voiceml에는 인증이 없다. CallId만 알면 누구나 부를 수 있고, 토큰이
+    남아 있는 한 그 토큰으로 스트림 소켓에 붙을 수 있다 — 소켓의 유일한
+    문이 그 토큰이기 때문이다(설계 7장).
+    """
+    client, store, _, _ = make_client()
+    call_id = client.post("/v1/calls/request", json={"elder_id": 12}).json()["call_id"]
+    sid = store.get(call_id).provider_call_sid
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 200
+
+    client.post("/v1/stream-ended", data={"CallId": sid, "StreamEvent": "stop"})
+
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 404
+
+
+def test_a_lost_webhook_does_not_lock_the_elder_forever():
+    """끝을 알리는 신호가 하나도 오지 않을 수도 있다.
+
+    웹훅은 유실되고 스트림은 시작도 못 한 채 죽을 수 있다. 그때 기록이
+    영원히 활성으로 남으면 복구할 방법이 없다 — 시간 자체를 바닥으로 둔다.
+    """
+    now = [1000.0]
+    store = InMemoryCallStore(
+        phones={12: "070-1111-2222"}, clock=lambda: now[0], max_active_seconds=600
+    )
+    client, _, telephony, _ = make_client(store=store)
+
+    client.post("/v1/calls/request", json={"elder_id": 12})
+    # 아직 통화 중일 수 있는 시각이다 — 여기서 열어 주면 전화가 두 번 걸린다.
+    now[0] += 599
+    assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 409
+
+    now[0] += 2
+    assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202
+    assert len(telephony.placed) == 2

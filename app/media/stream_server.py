@@ -3,7 +3,9 @@
 프로토콜은 이벤트 JSON이고 오디오는 base64 μ-law다. 로직은 전부
 CallSession에 있으므로 이 파일은 배관만 한다.
 
-실행: uvicorn app.media.stream_server:app --host 0.0.0.0 --port 8000
+이 모듈만으로는 서버가 되지 않는다 — 토큰을 발급하는 트리거 API와 같은
+레지스트리를 써야 스트림이 통과한다. 조립은 app/main.py가 한다.
+실행: uvicorn app.main:app --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
@@ -29,7 +31,6 @@ RECORDINGS_DIR = Path("recordings")
 # 정책 위반이 아니라 인증 실패이므로 1008(Policy Violation).
 _POLICY_VIOLATION = 1008
 
-
 class CallRegistry(Protocol):
     def issue(self, token: str, call_id: str) -> None:
         """이 통화에 쓸 1회용 토큰을 등록한다. 트리거 API가 부른다."""
@@ -37,6 +38,10 @@ class CallRegistry(Protocol):
 
     def claim(self, token: str) -> str | None:
         """토큰을 소모하고 call_id를 돌려준다. 모르거나 이미 쓴 토큰이면 None."""
+        ...
+
+    def revoke(self, token: str) -> None:
+        """통화가 끝났다. 쓰이지 않은 토큰도 더는 유효하지 않다."""
         ...
 
 
@@ -53,8 +58,13 @@ class InMemoryCallRegistry:
         # 1회용이다. 재사용되면 같은 통화에 두 스트림이 붙는다.
         return self._tokens.pop(token, None)
 
+    def revoke(self, token: str) -> None:
+        # 통화가 끝났는데 토큰이 남아 있으면, 그 토큰을 쥔 누구든 나중에
+        # 스트림을 열 수 있다. 끝난 통화의 문은 닫아 둔다.
+        self._tokens.pop(token, None)
 
-def _default_responder() -> Responder:
+
+def default_responder() -> Responder:
     """골격의 고정 응답. CLOVA가 붙으면 이 함수만 바뀐다."""
     return CannedResponder(
         [
@@ -64,12 +74,24 @@ def _default_responder() -> Responder:
     )
 
 
-def build_app(
+# 통화가 끝났을 때 불린다. wav 경로는 저장에 실패했으면 None이지만 그래도
+# 불린다 — 녹음을 못 남긴 것과 통화가 안 끝난 것은 다른 일이다.
+CallEndHook = Callable[[CallSession, "Path | None"], None]
+
+
+def add_stream_route(
+    app: FastAPI,
     registry: CallRegistry,
-    responder_factory: Callable[[], Responder] = _default_responder,
+    responder_factory: Callable[[], Responder] = default_responder,
     recordings_dir: Path = RECORDINGS_DIR,
-) -> FastAPI:
-    app = FastAPI(title="늘봄 전화망 스트림")
+    on_call_end: CallEndHook | None = None,
+) -> None:
+    """스트림 소켓을 이미 있는 앱에 붙인다.
+
+    앱 생성과 분리한 이유는 트리거 API와 같은 FastAPI 앱에 얹기 위해서다.
+    각자 앱을 만들면 레지스트리도 각자가 되어, 토큰을 발급한 쪽과 검사하는
+    쪽이 달라진다 — 그러면 모든 스트림이 거부된다.
+    """
 
     @app.websocket("/v1/stream")
     async def stream(websocket: WebSocket) -> None:
@@ -139,9 +161,42 @@ def build_app(
             logger.info("스트림이 끊겼다 call_id=%s", session.call_id if session else "-")
         finally:
             if session is not None:
-                session.finish(recordings_dir)
+                _end_call(session, recordings_dir, on_call_end)
 
+
+def build_app(
+    registry: CallRegistry,
+    responder_factory: Callable[[], Responder] = default_responder,
+    recordings_dir: Path = RECORDINGS_DIR,
+    on_call_end: CallEndHook | None = None,
+) -> FastAPI:
+    """스트림만 있는 앱. 어댑터 단위 테스트가 쓴다 — 실행용이 아니다."""
+    app = FastAPI(title="늘봄 전화망 스트림")
+    add_stream_route(app, registry, responder_factory, recordings_dir, on_call_end)
     return app
+
+
+def _end_call(
+    session: CallSession, recordings_dir: Path, on_call_end: CallEndHook | None
+) -> None:
+    """통화를 마무리한다. 한 단계가 실패해도 다음 단계는 실행된다.
+
+    둘은 독립적이다 — 녹음 저장이 실패해도 통화가 끝난 사실은 그대로이고,
+    그 사실을 기록하지 못하면 어르신은 '통화 중'으로 영원히 잠긴다. 한쪽이
+    다른 쪽을 삼키지 않도록 따로 감싼다.
+    """
+    wav_path: Path | None = None
+    try:
+        wav_path = session.finish(recordings_dir)
+    except Exception:
+        logger.exception("녹음 저장 실패 call_id=%s", session.call_id)
+
+    if on_call_end is None:
+        return
+    try:
+        on_call_end(session, wav_path)
+    except Exception:
+        logger.exception("통화 종료 처리 실패 call_id=%s", session.call_id)
 
 
 def _parse(raw: str) -> dict | None:
@@ -160,7 +215,7 @@ def _open(
 ) -> CallSession | None:
     """토큰을 확인하고 세션을 연다. 호출부가 start가 dict임을 이미 보장한다.
 
-    이 소켓에는 ClawOps 서명이 없다. <Parameter>로 심어 둔 1회용 토큰이
+    이 소켓에는 ClawOps 서명이 없다. Parameter로 심어 둔 1회용 토큰이
     유일한 문이다(설계 7장).
     """
     custom_params = start.get("customParameters") or {}
@@ -180,6 +235,7 @@ def _push(session: CallSession, media: dict) -> list:
     except (binascii.Error, ValueError):
         logger.warning("media 프레임이 깨졌다 — 버린다 call_id=%s", session.call_id)
         return []
+
     return session.push_audio(ulaw.decode_to_pcm16(payload), timestamp_ms=timestamp_ms)
 
 
@@ -192,6 +248,3 @@ async def _send(websocket: WebSocket, outgoing) -> None:
     elif isinstance(outgoing, TextMessage):
         # speech_end는 앱 화면용 신호였다. 전화망에는 보낼 곳이 없다.
         pass
-
-
-app = build_app(registry=InMemoryCallRegistry())

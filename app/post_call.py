@@ -1,0 +1,54 @@
+"""통화가 끝난 직후 한 번 도는 후처리 (전화망 설계 2장 ⑦).
+
+CallSession(매체)과 analyze_call(분석)은 서로를 모른다 — 그래야 분석이
+소켓 없이 재현된다. 둘을 잇는 배선만 여기에 둔다.
+
+transcript는 빈 문자열이다. STT가 아직 없어서 통화 중 발화를 글로 만드는
+곳이 이 프로젝트에 존재하지 않는다. 지어낸 문장을 넣으면 negative_word_count가
+거짓이 되고, 그 숫자는 위험 점수에 20점으로 들어간다 — 측정하지 않은 것은
+0으로 둔다(없는 것과 세지 않은 것은 다르지만, 여기서는 둘 다 "부정어를
+발견하지 못했다"이고 점수를 올리지 않는 쪽이라 안전하다).
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import replace
+from pathlib import Path
+
+from app.analysis.call_analysis import CallAnalysis, analyze_call
+from app.media.session import CallSession
+
+logger = logging.getLogger(__name__)
+
+
+def analyze_session(
+    session: CallSession, wav_path: Path, transcript: str = ""
+) -> CallAnalysis:
+    """끝난 세션의 녹음을 분석한다.
+
+    스트리밍 중 나온 VAD 판정은 쓰지 않는다. 프레임 도착 타이밍에 따라
+    달라지기 때문이다 — wav 전체에 배치 VAD를 다시 돌린다(설계 3.2).
+    세션에서 가져오는 것은 타이밍에 좌우되지 않는 두 가지뿐이다: mark
+    왕복으로 확정된 AI 발화 구간과, 녹음 길이에서 구한 스트림 시간.
+    """
+    analysis = analyze_call(
+        wav_path=wav_path,
+        ai_turns=session.ai_turns,
+        stream_duration_ms=session.stream_duration_ms,
+        transcript=transcript,
+    )
+
+    if session.unmatched_marks:
+        # 짝이 안 맞은 표식은 AI 발화 구간 하나를 통째로 잃었다는 뜻이다.
+        # 그 구간은 에코 제거에서도 빠지고(어르신 발화가 부풀려진다) 응답
+        # 지연 계산에서도 빠진다. 숫자는 나오지만 근거가 줄었으므로 실패가
+        # 아니라 '정확도 낮음'으로 표시한다(설계 8장).
+        logger.warning(
+            "짝이 안 맞은 표식이 있다 — degraded로 표시한다 call_id=%s count=%d",
+            session.call_id,
+            session.unmatched_marks,
+        )
+        analysis = replace(analysis, degraded=True)
+
+    return analysis

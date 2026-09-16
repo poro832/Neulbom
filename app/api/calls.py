@@ -7,12 +7,12 @@
 from __future__ import annotations
 
 import logging
-import secrets
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from app.api.lifecycle import CallLifecycle
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
 from app.telephony.client import Telephony
@@ -31,14 +31,15 @@ def build_app(
     registry: CallRegistry,
     public_base_url: str,
     stream_base_url: str,
+    lifecycle: CallLifecycle | None = None,
 ) -> FastAPI:
+    # 조립 지점(app/main.py)은 스트림 소켓과 같은 lifecycle을 넘긴다. 통화의
+    # 끝을 양쪽이 각자 처리하면 한쪽만 일어난다(lifecycle 모듈 설명 참고).
+    lifecycle = lifecycle or CallLifecycle(store, registry)
     app = FastAPI(title="늘봄 통화 트리거")
     answer_url = f"{public_base_url.rstrip('/')}/v1/voiceml"
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
     stream_url = f"{stream_base_url.rstrip('/')}/v1/stream"
-
-    # CallId → 그 통화의 1회용 토큰. VoiceML을 만들 때 심는다.
-    pending_tokens: dict[str, str] = {}
 
     @app.post("/v1/calls/request")
     def request_call(body: CallRequest) -> JSONResponse:
@@ -72,8 +73,7 @@ def build_app(
 
         try:
             store.attach_sid(call.call_id, sid)
-            pending_tokens[sid] = secrets.token_urlsafe(24)
-            registry.issue(pending_tokens[sid], str(call.call_id))
+            lifecycle.issue_token(call.call_id, sid)
         except Exception:
             # 여기서부터는 전화가 이미 걸렸다 — Telephony에는 취소/끊기
             # 수단이 없으므로 그 통화를 멈출 수 없다. 하지만 토큰이 없으면
@@ -82,7 +82,7 @@ def build_app(
             # 요청할 수 없게 되는데, 이는 절대 복구가 안 된다. 반면 실패로
             # 돌려 재시도를 열어주면 최악의 경우 전화가 중복으로 한 번 더
             # 울리는 정도다 — 복구 가능한 쪽을 택한다.
-            pending_tokens.pop(sid, None)
+            lifecycle.discard_token(sid)
             store.mark_failed(call.call_id)
             logger.exception(
                 "발신 후 처리 실패 call_id=%s sid=%s — 통화가 걸렸어도 연결되지 않는다",
@@ -104,7 +104,7 @@ def build_app(
         한다. 정상 동작이므로 같은 CallId의 재전송에는 같은 VoiceML을
         돌려줘야 한다. 모르는 CallId만 여전히 404다.
         """
-        token = pending_tokens.get(CallId)
+        token = lifecycle.token_for(CallId)
         if token is None:
             # 우리가 만들지 않은 통화다. 토큰을 내주면 안 된다.
             logger.warning("모르는 CallId로 VoiceML 요청 CallId=%s", CallId)
@@ -118,8 +118,16 @@ def build_app(
 
     @app.post("/v1/stream-ended")
     def stream_ended(CallId: str = Form(...), StreamEvent: str = Form("")) -> Response:
-        """스트림이 끝났다. 마무리 인사를 하고 끊는다."""
+        """스트림이 끝났다. 마무리 인사를 하고 끊는다.
+
+        통화 상태를 여기서도 옮긴다. 우리 스트림이 한 번도 붙지 않은 통화
+        (어르신이 받지 않았거나 VoiceML이 404로 끝난 경우)는 이 웹훅이
+        끝을 알리는 유일한 신호이기 때문이다 — 스트림 쪽 종료 처리만 두면
+        그런 통화는 영원히 '진행 중'으로 남아 그 어르신을 잠근다.
+        스트림이 이미 끝내 놓은 통화라면 store가 멱등하게 무시한다.
+        """
         logger.info("스트림 종료 CallId=%s event=%s", CallId, StreamEvent)
+        lifecycle.carrier_finished(CallId)
         return Response(
             content=say_and_hangup("오늘도 좋은 하루 보내세요. 안녕히 계세요."),
             media_type="application/xml",
