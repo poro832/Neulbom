@@ -70,14 +70,35 @@ def _average_response_delay(
 ) -> int | None:
     """AI 발화 종료 → 어르신 발화 시작까지의 평균.
 
-    AI 발화 뒤에 어르신 응답이 없으면(작별 인사 등) 그 턴은 세지 않는다.
-    응답이 하나도 없으면 0이 아니라 None이다 — 측정 불가와 즉답을
-    같은 값으로 두면 평균이 왜곡된다.
+    AI 발화 뒤에 어르신 응답이 없으면(작별 인사 등, 또는 그냥 못 들은
+    질문) 그 턴은 세지 않는다. 응답이 하나도 없으면 0이 아니라 None이다 —
+    측정 불가와 즉답을 같은 값으로 두면 평균이 왜곡된다.
+
+    "그 턴의 응답"은 다음 AI 발화가 시작되기 전에 시작한 발화만이다.
+    그 경계가 없으면, 대답 없이 지나간 턴이 한참 뒤 다른 질문에 대한
+    대답을 자기 것으로 끌어다 쓴다 — 중간의 AI 발화와 침묵을 전부 건너뛴
+    시간이 그 턴의 '응답 지연'이 되는 것이다. 응답 없는 질문 하나가
+    7.5초짜리 지연을 만들어 내고, 그 값은 지연 벌점 25점을 만점으로
+    올린다. 멀쩡한 어르신에게 붙는, 지어낸 벌점이다.
     """
+    # 시각 순서를 가정하지 않는다. VAD는 순서대로 내놓지만, 여기서 그
+    # 가정이 깨지면 엉뚱한 발화가 응답으로 잡혀도 아무 신호가 없다.
+    turns = sorted(ai_turns, key=lambda t: t.start_ms)
+    replies = sorted(elder_speech, key=lambda s: s.start_ms)
+
     delays = []
-    for turn in ai_turns:
+    for index, turn in enumerate(turns):
+        # 다음 AI 발화가 시작되면 이 턴의 응답 기회는 끝난 것이다.
+        next_turn_start = (
+            turns[index + 1].start_ms if index + 1 < len(turns) else None
+        )
         reply = next(
-            (s for s in elder_speech if s.start_ms >= turn.end_ms),
+            (
+                s
+                for s in replies
+                if s.start_ms >= turn.end_ms
+                and (next_turn_start is None or s.start_ms < next_turn_start)
+            ),
             None,
         )
         if reply is not None:

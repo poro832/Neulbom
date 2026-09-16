@@ -245,3 +245,54 @@ def test_score_is_identical_across_repeated_runs():
     }
 
     assert len(scores) == 1
+
+
+def test_an_unanswered_turn_does_not_borrow_a_later_reply():
+    """대답 없이 지나간 턴이 뒤 질문의 대답을 자기 것으로 끌어다 쓰면 안 된다.
+
+    AI가 두 번 말했고 어르신은 두 번째에만 답했다. 첫 턴의 '응답 지연'을
+    두 번째 대답으로 재면 중간의 AI 발화와 침묵까지 전부 지연으로 세어져
+    3000ms가 나온다. 실제로 잰 것은 두 번째 턴의 1000ms 하나뿐이다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(8_000, 9_000)],
+        ai_turns=[seg(1_000, 3_000), seg(5_000, 7_000)],
+        transcript="",
+    )
+
+    assert metrics.avg_response_delay_ms == 1_000
+
+
+def test_unanswered_turns_do_not_manufacture_a_maximum_penalty():
+    """이 버그의 실제 피해는 점수다.
+
+    짧은 질문 셋 중 마지막에만 답한 통화에서 평균 지연이 7500ms로 나왔다.
+    지연 벌점은 6000ms에서 이미 만점(25점)이라, 미응답 두 번이 멀쩡한
+    어르신에게 만점짜리 벌점을 만들어 준다. 진짜 값은 6500ms이고, 그건
+    첫 두 턴을 세지 않고 마지막 턴 하나만 잰 결과다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=12_000,
+        elder_speech=[seg(9_000, 9_500)],
+        ai_turns=[seg(0, 500), seg(1_000, 1_500), seg(2_000, 2_500)],
+        transcript="",
+    )
+
+    assert metrics.avg_response_delay_ms == 6_500
+
+
+def test_a_reply_before_the_next_turn_still_counts():
+    """경계를 넣었다고 정상적인 대답까지 버리면 안 된다.
+
+    두 턴 모두 그 턴과 다음 턴 사이에 대답이 있다. 둘 다 세어야 한다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=20_000,
+        elder_speech=[seg(3_500, 4_000), seg(9_000, 9_500)],
+        ai_turns=[seg(1_000, 3_000), seg(7_000, 8_000)],
+        transcript="",
+    )
+
+    # 500ms, 1000ms → 평균 750ms
+    assert metrics.avg_response_delay_ms == 750
