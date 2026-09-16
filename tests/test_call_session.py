@@ -10,7 +10,8 @@ import wave
 
 import numpy as np
 
-from app.media.session import AudioMessage, CallSession, TextMessage
+from app.analysis.segments import VadSegment
+from app.media.session import AudioMessage, CallSession, MarkMessage, TextMessage
 
 SAMPLE_RATE = 16000
 FRAME_BYTES = 640  # 20ms × 16000Hz × 2bytes
@@ -63,6 +64,11 @@ def drain(session, data, chunk_bytes=FRAME_BYTES):
 
 
 def test_speech_end_produces_signal_then_audio():
+    """감지된 발화 종료는 제어 신호를 먼저, 그다음 응답 오디오를 낸다.
+
+    응답 오디오는 mark로 앞뒤가 감싸인다(turn1-begin/turn1-end) — 순서 자체가
+    이 테스트가 못 박는 것이므로 mark의 위치도 그대로 고정한다.
+    """
     responder = FakeResponder()
     session = CallSession("c1", SAMPLE_RATE, responder)
 
@@ -70,7 +76,9 @@ def test_speech_end_produces_signal_then_audio():
 
     assert messages == [
         TextMessage({"type": "speech_end"}),
+        MarkMessage("turn1-begin"),
         AudioMessage(responder.reply),
+        MarkMessage("turn1-end"),
     ]
     assert len(responder.calls) == 1
 
@@ -93,7 +101,11 @@ def test_result_is_same_when_bytes_arrive_split_oddly():
 
     # push_audio가 몽땅 버려도 aligned == ragged([] == [])는 통과해버리므로,
     # 실제로 메시지가 나왔는지부터 확인해야 이 비교가 의미를 가진다.
-    assert len(aligned) == 2
+    # (signal, mark-begin, audio, mark-end) — mark가 추가되며 2에서 4로 늘었다.
+    assert len(aligned) == 4
+    # mark 이름은 세션마다 turn_index=0부터 다시 세므로("turn1-begin"...), 갓 만든
+    # 두 세션이 도착 단위만 다르면 이름까지 완전히 같은 메시지를 내야 한다.
+    # 이 비교가 곧 그것의 증거다 — 이름이 도착 청크에 좌우됐다면 여기서 어긋난다.
     assert aligned == ragged
 
 
@@ -251,3 +263,80 @@ def test_tiny_out_of_order_chunks_do_not_freeze_the_clock(tmp_path):
 
     path = session.finish(tmp_path)
     assert session.stream_duration_ms == wav_duration_ms(path)
+
+
+class _OneBeepResponder:
+    """한 번만 응답하고 그 뒤로는 침묵. AI 턴이 몇 개인지 세기 쉽다."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def respond(self, audio: np.ndarray, sample_rate: int) -> bytes:
+        self.calls += 1
+        return b"\x01\x02" * 400 if self.calls == 1 else b""
+
+
+def _drive_one_turn(session: CallSession) -> list:
+    """발화 400ms → 침묵 900ms. StreamingVad의 end_of_turn(800ms)을 넘긴다.
+
+    8kHz 채널용 speech_frame/silence_frame(GAP_FRAME_MS=20ms)을 쓴다 —
+    이 세션들도 GAP_SAMPLE_RATE로 만들어야 프레임 길이가 맞는다.
+    """
+    outgoing = []
+    index = 0
+    for _ in range(20):
+        outgoing += session.push_audio(speech_frame(), timestamp_ms=index * GAP_FRAME_MS)
+        index += 1
+    for _ in range(45):
+        outgoing += session.push_audio(silence_frame(), timestamp_ms=index * GAP_FRAME_MS)
+        index += 1
+    return outgoing
+
+
+def test_ai_audio_is_bracketed_by_marks():
+    """오디오만 보내면 언제 재생됐는지 알 수 없다. 앞뒤로 mark가 붙어야 한다."""
+    session = CallSession("c4", GAP_SAMPLE_RATE, _OneBeepResponder())
+    outgoing = _drive_one_turn(session)
+
+    kinds = [type(message).__name__ for message in outgoing]
+    assert kinds.count("AudioMessage") == 1
+    audio_at = kinds.index("AudioMessage")
+    assert kinds[audio_at - 1] == "MarkMessage"
+    assert kinds[audio_at + 1] == "MarkMessage"
+
+
+def test_ai_turn_takes_its_time_from_the_media_clock():
+    """mark에는 타임스탬프가 없다. 직전 inbound media의 시각을 쓴다.
+
+    _drive_one_turn은 프레임 0~64를 소비해 시계를 1300ms에 남긴다. 그 뒤로는
+    앞으로만 흐르는 타임스탬프를 밀어 넣는다 — 시계를 되감는 입력은 설계상
+    무시되므로(gap_ms < 0), 여기서 뒤로 가는 타임스탬프를 주면 mark는 항상
+    1300ms로 찍혀 버려 begin과 end를 구별할 수 없다.
+    """
+    session = CallSession("c5", GAP_SAMPLE_RATE, _OneBeepResponder())
+    outgoing = _drive_one_turn(session)
+    marks = [m.name for m in outgoing if isinstance(m, MarkMessage)]
+
+    # 재생 시작 확인: 시계를 한 프레임(20ms) 전진시킨 뒤 온 mark → 1320ms.
+    session.push_audio(silence_frame(), timestamp_ms=1300)
+    session.on_mark(marks[0])
+    # 재생 종료 확인: 그 뒤로 14프레임(1320~1580ms)을 더 흘려보낸 뒤 mark → 1600ms.
+    for i in range(66, 80):
+        session.push_audio(silence_frame(), timestamp_ms=i * GAP_FRAME_MS)
+    session.on_mark(marks[1])
+
+    assert session.ai_turns == [VadSegment(start_ms=1320, end_ms=1600)]
+    assert session.unmatched_marks == 0
+
+
+def test_a_turn_with_only_one_mark_is_not_counted():
+    """한쪽 mark가 유실되면 구간을 모른다. 지어내지 않고 빼고 표시한다."""
+    session = CallSession("c6", GAP_SAMPLE_RATE, _OneBeepResponder())
+    outgoing = _drive_one_turn(session)
+    marks = [m.name for m in outgoing if isinstance(m, MarkMessage)]
+
+    session.push_audio(silence_frame(), timestamp_ms=1300)
+    session.on_mark(marks[0])      # begin만 오고 end는 안 온다
+
+    assert session.ai_turns == []
+    assert session.unmatched_marks == 1

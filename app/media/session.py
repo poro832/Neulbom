@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from app.analysis.segments import VadSegment
 from app.analysis.vad_segmenter import DEFAULT_FRAME_MS
 from app.media.responder import Responder
 from app.media.streaming_vad import StreamingVad
@@ -38,7 +39,19 @@ class AudioMessage:
     pcm: bytes
 
 
-Outgoing = TextMessage | AudioMessage
+@dataclass(frozen=True)
+class MarkMessage:
+    """재생 완료를 확인받기 위한 표식.
+
+    우리는 응답 오디오를 한 번에 밀어 넣지만 플랫폼은 20ms씩 재생한다.
+    보낸 시각으로 응답 지연을 재면 늘 짧게 나오므로, 앞뒤로 표식을 걸고
+    되돌아오는 시점을 AI 발화 구간으로 삼는다(설계 3.2).
+    """
+
+    name: str
+
+
+Outgoing = TextMessage | AudioMessage | MarkMessage
 
 
 class CallSession:
@@ -64,6 +77,13 @@ class CallSession:
         # 뒤의 모든 발화 구간이 앞으로 당겨진다.
         self._next_timestamp_ms = 0
         self._last_timestamp_ms = 0
+
+        # AI 발화 구간을 mark 왕복으로 잡는다(설계 3.2). turn_index로 이름을
+        # 지어 begin/end를 짝짓고, 짝이 안 맞으면 지어내지 않고 세기만 한다.
+        self._turn_index = 0
+        self._mark_times: dict[str, int] = {}
+        self._ai_turns: list[VadSegment] = []
+        self._unmatched_marks = 0
 
     @property
     def call_id(self) -> str:
@@ -172,8 +192,43 @@ class CallSession:
             return outgoing
 
         if reply:
+            self._turn_index += 1
+            begin = f"turn{self._turn_index}-begin"
+            end = f"turn{self._turn_index}-end"
+            # 오디오 앞뒤로 표식을 건다. 플랫폼이 순서대로 재생하므로
+            # begin이 돌아온 시점이 재생 시작, end가 돌아온 시점이 종료다.
+            outgoing.append(MarkMessage(begin))
             outgoing.append(AudioMessage(reply))
+            outgoing.append(MarkMessage(end))
         return outgoing
+
+    def on_mark(self, name: str) -> None:
+        """표식이 돌아왔다. 시각은 직전 inbound media의 것을 쓴다.
+
+        mark 이벤트에는 타임스탬프가 없고, 벽시계를 쓰면 재현성이 깨진다.
+        """
+        self._mark_times[name] = self._last_timestamp_ms
+        if not name.endswith("-end"):
+            return
+
+        begin = name[: -len("-end")] + "-begin"
+        start_ms = self._mark_times.pop(begin, None)
+        end_ms = self._mark_times.pop(name)
+        if start_ms is None:
+            # begin이 유실됐다. 구간을 지어내면 응답 지연이 조용히 틀린다.
+            self._unmatched_marks += 1
+            return
+        self._ai_turns.append(VadSegment(start_ms=start_ms, end_ms=end_ms))
+
+    @property
+    def ai_turns(self) -> list[VadSegment]:
+        """begin/end가 둘 다 돌아온 AI 발화 구간."""
+        return list(self._ai_turns)
+
+    @property
+    def unmatched_marks(self) -> int:
+        """짝이 안 맞은 표식 수. 크면 degraded로 표시한다(설계 8장)."""
+        return self._unmatched_marks + len(self._mark_times)
 
 
 def _to_float32(pcm: bytes) -> np.ndarray:
