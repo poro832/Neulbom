@@ -68,3 +68,24 @@ def test_overlapping_ai_turns_are_not_double_counted():
 def test_no_ai_turns_is_a_pass_through():
     elder = [VadSegment(0, 1000)]
     assert clip_ai_playback(elder, []).segments == elder
+
+
+def test_zero_length_ai_window_is_no_op():
+    """mark 타이밍이 같으면 AI 윈도우가 zero-length가 된다.
+
+    재생 시간이 없으므로 뺄 게 없다. 어르신 구간은 단일이고 변하지 않는다.
+    turn_count를 부풀리는 phantom split이 생기면 안 된다.
+    """
+    elder = [VadSegment(1000, 2000)]
+    result = clip_ai_playback(elder, [VadSegment(1500, 1500)])
+    assert result.segments == [VadSegment(1000, 2000)]
+    assert result.clipped_ms == 0
+
+
+def test_zero_length_elder_segment_is_kept():
+    """어르신 구간이 zero-length면 그대로 유지된다 (split되지 않음)."""
+    result = clip_ai_playback([VadSegment(1000, 1000)], [VadSegment(500, 1500)])
+    # zero-length는 유지되지만, AI 윈도우와 겹치므로 "뺀다".
+    # 다만 뺄 게 없으므로 segments는 비어 있고 clipped_ms는 0이다.
+    assert result.segments == []
+    assert result.clipped_ms == 0

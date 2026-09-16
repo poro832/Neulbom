@@ -46,9 +46,15 @@ def clip_ai_playback(
 
 
 def _merge(turns: Sequence[VadSegment]) -> list[VadSegment]:
-    """겹친 구간을 합친다. 안 합치면 겹친 만큼 clipped_ms가 두 번 세어진다."""
+    """겹친 구간을 합친다. 안 합치면 겹친 만큼 clipped_ms가 두 번 세어진다.
+
+    mark 타이밍이 같으면 zero-length 윈도우가 생긴다. 재생 시간이 없으므로 버린다.
+    """
     merged: list[VadSegment] = []
     for turn in sorted(turns, key=lambda t: t.start_ms):
+        # zero-length나 inverted 윈도우는 무시 — 재생 시간이 없다.
+        if turn.start_ms >= turn.end_ms:
+            continue
         if merged and turn.start_ms <= merged[-1].end_ms:
             last = merged[-1]
             merged[-1] = VadSegment(last.start_ms, max(last.end_ms, turn.end_ms))
