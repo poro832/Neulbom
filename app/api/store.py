@@ -7,6 +7,7 @@ DB가 붙기 전까지 메모리 구현을 쓴다. 규약이 같으므로 Postgr
 from __future__ import annotations
 
 import itertools
+import threading
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -28,6 +29,17 @@ class CallStore(Protocol):
     def find_active(self, elder_id: int) -> CallRecord | None: ...
     def get(self, call_id: int) -> CallRecord: ...
     def create(self, elder_id: int, trigger_type: str) -> CallRecord: ...
+    def find_active_or_create(
+        self, elder_id: int, trigger_type: str
+    ) -> tuple[CallRecord, bool]:
+        """활성 통화를 찾거나, 없으면 만든다 — 검사와 생성을 한 덩어리로.
+
+        FastAPI가 sync 라우트를 스레드풀에서 돌리므로, 이 둘을 따로 부르면
+        두 스레드가 모두 find_active를 통과한 뒤에야 create가 불려 전화가
+        두 번 걸릴 수 있다. 두 번째 값은 새로 만들었으면 True다.
+        """
+        ...
+
     def attach_sid(self, call_id: int, sid: str) -> None: ...
     def mark_failed(self, call_id: int) -> None: ...
 
@@ -37,6 +49,8 @@ class InMemoryCallStore:
         self._phones = phones
         self._calls: dict[int, CallRecord] = {}
         self._ids = itertools.count(1)
+        # find_active + create를 한 스레드가 끝낼 때까지 다른 스레드를 세운다.
+        self._lock = threading.Lock()
 
     def find_elder(self, elder_id: int) -> str | None:
         return self._phones.get(elder_id)
@@ -59,6 +73,17 @@ class InMemoryCallStore:
         )
         self._calls[call.call_id] = call
         return call
+
+    def find_active_or_create(
+        self, elder_id: int, trigger_type: str
+    ) -> tuple[CallRecord, bool]:
+        # 락 없이 find_active와 create를 따로 부르면, 두 스레드가 모두
+        # "없다"를 보고 동시에 만들어 실제 전화가 두 번 걸릴 수 있다.
+        with self._lock:
+            active = self.find_active(elder_id)
+            if active is not None:
+                return active, False
+            return self.create(elder_id, trigger_type), True
 
     def attach_sid(self, call_id: int, sid: str) -> None:
         self._calls[call_id] = replace(
