@@ -8,8 +8,11 @@
 - 토큰만 지우고 상태를 두면, 그 어르신은 영원히 409를 받아 다시는 전화를
   요청할 수 없다 — 그런데 앱은 409를 성공으로 보여 준다.
 
-끝을 알리는 신호는 두 개이고 둘 다 유실될 수 있어 순서도 보장되지 않는다.
-그래서 여기의 모든 종료 처리는 멱등이다(실제 전이 판정은 store가 한다).
+끝을 알리는 신호는 세 개다 — 우리 소켓의 종료, 사업자 웹훅, 그리고 둘 다
+유실됐을 때 저장소의 바닥 시간. 셋 다 유실되거나 늦을 수 있고 순서도
+보장되지 않아서, 여기의 모든 종료 처리는 멱등이다(실제 전이 판정은 store가
+한다). 셋 모두 이 파일을 지나야 한다 — 한 경로라도 store를 직접 고치면
+그 통화의 토큰만 살아남는다.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ import logging
 import secrets
 import threading
 
-from app.api.store import CallStore
+from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,9 @@ class CallLifecycle:
         # 사업자 CallId → 그 통화의 1회용 토큰. VoiceML을 만들 때 심는다.
         self._tokens: dict[str, str] = {}
         self._lock = threading.Lock()
+        # 바닥 시간이 통화를 접는 일은 저장소 안에서 혼자 일어난다. 여기서
+        # 손을 들어 두지 않으면 그 통화의 토큰을 폐기할 사람이 없다.
+        self._store.add_expiry_listener(self._expired)
 
     def issue_token(self, call_id: int, sid: str) -> str:
         """이 통화에 쓸 1회용 스트림 토큰을 만들어 레지스트리에 등록한다."""
@@ -80,14 +86,20 @@ class CallLifecycle:
         있어야 한다'를 제약으로 걸어 둔 것과 같은 이유로, 분석할 오디오가
         없는 통화를 정상 종료로 세면 후속 파이프라인이 조용히 멈춘다.
         """
-        if audio_key is None:
-            logger.error(
-                "녹음 없이 스트림이 끝났다 — 실패로 남긴다 call_id=%s", call_id
-            )
-            self._store.mark_failed(call_id)
-        else:
-            self._store.mark_completed(call_id, audio_key)
-        self._revoke_for_call(call_id)
+        try:
+            if audio_key is None:
+                logger.error(
+                    "녹음 없이 스트림이 끝났다 — 실패로 남긴다 call_id=%s", call_id
+                )
+                self._store.mark_failed(call_id)
+            else:
+                self._store.mark_completed(call_id, audio_key)
+        finally:
+            # 상태 전이가 터져도 토큰은 반드시 닫는다. 이 둘 중 하나만
+            # 일어나는 것이 이 모듈이 막으려고 존재하는 바로 그 일이고,
+            # 상태를 못 옮긴 통화의 토큰이 남는 쪽이 더 나쁘다 — 그 토큰은
+            # 인증 없는 /v1/voiceml에서 계속 꺼내진다.
+            self._revoke_for_call(call_id)
 
     def carrier_finished(self, sid: str, event: str = "") -> None:
         """사업자가 스트림 종료를 알려 왔다.
@@ -134,8 +146,24 @@ class CallLifecycle:
         self._store.mark_no_answer(call.call_id)
         self._revoke(sid)
 
+    def _expired(self, call: CallRecord) -> None:
+        """바닥 시간이 통화를 접었다 — 토큰도 같이 접는다.
+
+        이 경로는 끝 신호가 둘 다 유실된 통화다. 다른 폐기 지점이 하나도
+        불리지 않았으므로 여기가 그 토큰의 마지막 기회다.
+        """
+        if call.provider_call_sid is not None:
+            self._revoke(call.provider_call_sid)
+
     def _revoke_for_call(self, call_id: int) -> None:
-        sid = self._store.get(call_id).provider_call_sid
+        try:
+            sid = self._store.get(call_id).provider_call_sid
+        except KeyError:
+            # 모르는 call_id다. 여기서 터지면 호출부의 나머지 마무리까지
+            # 같이 죽는다 — 알 수 없는 것 하나 때문에 아는 일을 못 하게
+            # 두지 않는다.
+            logger.error("모르는 통화의 토큰을 폐기하려 했다 call_id=%s", call_id)
+            return
         if sid is not None:
             self._revoke(sid)
 

@@ -76,6 +76,14 @@ class CallStore(Protocol):
         """우리 스트림이 이 통화에 붙었다 — 어르신이 실제로 받았다는 증거다."""
         ...
 
+    def add_expiry_listener(self, listener: Callable[[CallRecord], None]) -> None:
+        """바닥 시간이 통화를 접을 때 부를 콜백을 건다.
+
+        만료는 저장소 안에서 혼자 일어나므로, 등록해 두지 않으면 그 통화의
+        스트림 토큰을 폐기할 사람이 아무도 없다(lifecycle 모듈 설명 참고).
+        """
+        ...
+
     def mark_failed(self, call_id: int) -> None: ...
     def mark_completed(self, call_id: int, audio_key: str) -> None:
         """통화가 정상적으로 끝났다. 녹음이 있어야 끝난 것이다."""
@@ -98,10 +106,17 @@ class InMemoryCallStore:
         self._ids = itertools.count(1)
         self._clock = clock
         self._max_active_seconds = max_active_seconds
+        # 만료로 통화를 접을 때 알릴 곳들. 리스트인 이유는 한 저장소에 두
+        # lifecycle이 걸리는 조립(테스트가 그렇다)에서 마지막 하나만 남기면
+        # 나머지 쪽 토큰이 조용히 살아남기 때문이다.
+        self._expiry_listeners: list[Callable[[CallRecord], None]] = []
         # find_active + create를 한 스레드가 끝낼 때까지 다른 스레드를 세운다.
         # 상태 전이(mark_*)도 읽고-고쳐-쓰기라 같은 락으로 묶는다. 전이가
         # find_active_or_create 안에서 다시 불릴 수 있어 재진입 가능해야 한다.
         self._lock = threading.RLock()
+
+    def add_expiry_listener(self, listener: Callable[[CallRecord], None]) -> None:
+        self._expiry_listeners.append(listener)
 
     def find_elder(self, elder_id: int) -> str | None:
         return self._phones.get(elder_id)
@@ -157,8 +172,15 @@ class InMemoryCallStore:
         상태를 실제로 옮기는 이유는, 'ringing'으로 굳은 기록이 남아 있으면
         나중에 미응답 통계나 운영 화면이 그 거짓말을 그대로 읽기 때문이다.
         끝을 모르는 통화는 completed가 아니라 failed다 — 지어내지 않는다.
+
+        상태만 옮기고 끝내면 안 된다. 통화를 끝내는 일은 두 가지이고(상태
+        전이 + 스트림 토큰 폐기) 여기서 상태만 옮기면 그 통화의 토큰은
+        인증 없는 /v1/voiceml에서 계속 꺼내진다. 하필 이 경로는 끝 신호가
+        둘 다 유실된 통화, 즉 토큰을 폐기할 다른 기회가 아예 없는 통화다.
+        그래서 접은 기록을 리스너에게 넘겨 lifecycle이 토큰까지 닫게 한다.
         """
         now = self._clock()
+        expired: list[CallRecord] = []
         for call_id, call in list(self._calls.items()):
             if call.elder_id != elder_id or call.status not in ACTIVE_STATUSES:
                 continue
@@ -169,12 +191,43 @@ class InMemoryCallStore:
                 call_id,
                 call.status,
             )
-            self._calls[call_id] = replace(call, status="failed")
+            self._finish(call_id, "failed")
+            expired.append(self._calls[call_id])
+
+        for call in expired:
+            for listener in self._expiry_listeners:
+                try:
+                    listener(call)
+                except Exception:
+                    # 리스너 하나가 터져도 나머지 정리는 끝나야 한다 —
+                    # 여기서 멈추면 어르신이 영구 잠금으로 돌아간다.
+                    logger.exception(
+                        "만료 통보 실패 call_id=%s", call.call_id
+                    )
 
     def attach_sid(self, call_id: int, sid: str) -> None:
+        """사업자 식별자를 붙이고 '울리는 중'으로 옮긴다.
+
+        mark_* 와 같은 멱등 검사를 여기도 둔다. 이것만 검사가 없었고, 그래서
+        이미 끝난(예: 바닥 시간에 failed로 접힌) 기록을 ringing으로 되돌려
+        활성으로 되살릴 수 있는 유일한 전이였다 — 되살아난 기록은 어르신을
+        다시 409로 잠근다. 오늘 그 순서로 불리는 호출부는 없지만, 규칙이
+        한 군데만 빠져 있으면 다음 호출부가 그 구멍으로 들어온다.
+        """
         with self._lock:
+            call = self._calls.get(call_id)
+            if call is None:
+                logger.error("모르는 통화에 sid를 붙이려 했다 call_id=%s", call_id)
+                return
+            if call.status not in ACTIVE_STATUSES:
+                logger.warning(
+                    "이미 끝난 통화에 sid를 붙이려 했다 — 무시한다 call_id=%s status=%s",
+                    call_id,
+                    call.status,
+                )
+                return
             self._calls[call_id] = replace(
-                self._calls[call_id], provider_call_sid=sid, status="ringing"
+                call, provider_call_sid=sid, status="ringing"
             )
 
     def mark_answered(self, call_id: int) -> None:
@@ -218,7 +271,12 @@ class InMemoryCallStore:
         no_answer로 되돌려 지표가 조용히 틀린다.
         """
         with self._lock:
-            call = self._calls[call_id]
+            call = self._calls.get(call_id)
+            if call is None:
+                # KeyError를 던지면 호출부(lifecycle.stream_finished)가 토큰을
+                # 폐기하기도 전에 끊긴다 — 모르는 통화 하나가 토큰을 흘린다.
+                logger.error("모르는 통화를 끝내려 했다 call_id=%s", call_id)
+                return
             if call.status not in ACTIVE_STATUSES:
                 return
             self._calls[call_id] = replace(

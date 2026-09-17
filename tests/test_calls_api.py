@@ -4,13 +4,16 @@
 FakeTelephony 덕분에 ClawOps 계정 없이 전부 검증된다.
 """
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.calls import build_app
+from app.api.lifecycle import CallLifecycle
 from app.api.store import InMemoryCallStore
 from app.media.stream_server import InMemoryCallRegistry
 from app.telephony.client import FakeTelephony
@@ -295,3 +298,109 @@ def test_a_non_terminal_stream_event_does_not_end_the_call():
     assert store.get(call_id).status == "ringing"
     # 토큰도 살아 있어야 한다 — 이제부터 스트림이 붙을 차례다.
     assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 200
+
+
+def token_from(xml: str) -> str:
+    """VoiceML에 심긴 1회용 스트림 토큰. 소켓의 유일한 문이다(설계 7장)."""
+    return re.search(r'name="token" value="([^"]+)"', xml).group(1)
+
+
+def test_an_expired_call_has_its_stream_token_revoked():
+    """바닥 시간이 통화를 접으면 그 통화의 토큰도 같이 접혀야 한다.
+
+    이 경로는 끝 신호가 둘 다 유실된 통화다 — 우리 스트림 종료도, 사업자
+    웹훅도 오지 않았다. 토큰을 폐기할 다른 기회가 아예 없으므로 여기서 안
+    닫으면 그 토큰은 영원히 유효하다. 인증 없는 /v1/voiceml이 끝난 통화의
+    토큰을 계속 내주고, 그 토큰을 쥔 누구든 스트림 소켓에 붙을 수 있다.
+    """
+    now = [1000.0]
+    store = InMemoryCallStore(
+        phones={12: "070-1111-2222"}, clock=lambda: now[0], max_active_seconds=600
+    )
+    client, _, _, registry = make_client(store=store)
+
+    call_id = client.post("/v1/calls/request", json={"elder_id": 12}).json()["call_id"]
+    sid = store.get(call_id).provider_call_sid
+    token = token_from(client.post("/v1/voiceml", data={"CallId": sid}).text)
+
+    now[0] += 601
+    # 재요청이 만료 정리를 돌리는 유일한 경로다.
+    assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202
+    assert store.get(call_id).status == "failed"
+
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 404
+    assert registry.claim(token) is None
+
+
+def test_attach_sid_does_not_reopen_a_finished_call():
+    """끝난 기록을 다시 활성으로 되돌리는 전이가 있으면 안 된다.
+
+    mark_* 는 전부 활성 검사를 하는데 attach_sid만 없었다. 없으면 늦게 온
+    발신 후처리 하나가 failed로 접힌 기록을 ringing으로 되살리고, 되살아난
+    기록은 그 어르신을 다시 409로 잠근다 — 그 잠금은 아무도 풀지 못한다.
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    call = store.create(12, trigger_type="requested")
+    store.mark_failed(call.call_id)
+
+    store.attach_sid(call.call_id, "CA-late")
+
+    assert store.get(call.call_id).status == "failed"
+    assert store.find_active(12) is None
+
+
+def make_lifecycle(store):
+    """앱과 같은 lifecycle을 손에 쥔 채로 조립한다.
+
+    종료 처리의 실패 경로는 라우트를 통해서는 못 건드린다 — 통화를 끝내는
+    쪽은 스트림 소켓이기 때문이다.
+    """
+    registry = InMemoryCallRegistry()
+    lifecycle = CallLifecycle(store, registry)
+    app = build_app(
+        store=store,
+        telephony=FakeTelephony(),
+        registry=registry,
+        public_base_url="https://api.example.com",
+        stream_base_url="wss://api.example.com",
+        lifecycle=lifecycle,
+    )
+    return TestClient(app), lifecycle
+
+
+def test_a_store_failure_at_the_end_still_revokes_the_token():
+    """통화를 끝내는 일은 두 가지이고, 한쪽이 터져도 다른 쪽은 일어나야 한다.
+
+    상태 전이가 예외로 끊기면 폐기는 아예 불리지 않았다 — 그러면 끝나지도
+    않고 토큰도 살아 있는 통화가 남는다. 둘 중 더 나쁜 쪽은 토큰이다:
+    상태는 바닥 시간이 나중에라도 접어 주지만, 남은 토큰은 인증 없는
+    /v1/voiceml에서 계속 꺼내진다.
+    """
+
+    class BrokenStore(InMemoryCallStore):
+        def mark_completed(self, call_id, audio_key):
+            raise RuntimeError("DB 오류")
+
+    store = BrokenStore(phones={12: "070-1111-2222"})
+    client, lifecycle = make_lifecycle(store)
+    call_id = client.post("/v1/calls/request", json={"elder_id": 12}).json()["call_id"]
+    sid = store.get(call_id).provider_call_sid
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 200
+
+    with pytest.raises(RuntimeError):
+        lifecycle.stream_finished(call_id, "a.wav")
+
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 404
+
+
+def test_ending_a_call_we_do_not_know_does_not_raise():
+    """모르는 call_id로 끝이 불려도 KeyError로 터지면 안 된다.
+
+    터지는 지점이 하필 토큰 폐기 앞이라, 예외 하나가 그 통화의 토큰을
+    그대로 흘린다. 모르는 것 때문에 아는 일까지 못 하게 두지 않는다.
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    _, lifecycle = make_lifecycle(store)
+
+    lifecycle.stream_finished(999, "a.wav")
+    store.mark_no_answer(999)
