@@ -18,6 +18,37 @@ DEFAULT_NEGATIVE_STEMS = frozenset(
     {"아프", "아파", "아팠", "아픕", "힘들", "외로", "귀찮", "죽겠", "우울"}
 )
 
+# str.count는 부분 문자열이면 어디든 잡는다. 그런데 "아파트"의 "아파", "아프리카"의
+# "아프"처럼 어간과 우연히 겹치는 일반 명사가 있고, 독거노인 통화에서 가장 자주
+# 나오는 명사가 하필 "아파트"다. 명랑한 통화가 "아파트" 언급 몇 번만으로 부정어
+# 점수(100점 중 20점)를 채우고 오탐 알림을 만들 수 있다.
+#
+# 택한 방법: 어간 뒤에 실제 용언 어미로 이어지는지 다음 글자 하나로 확인한다
+# (완전한 형태소 분석 없이 "그 다음 글자가 어미로 시작하는가"만 본다). "트", "리"
+# 같은 명사 조각은 이 목록에 없으니 "아파트/아프리카"는 자동으로 걸러진다.
+#
+# 이 방법이 놓치는 것 — 정직하게 적어 둔다:
+# 1) 이 목록에 없는 새로운 충돌 명사. 예를 들어 앞으로 다른 어간이 추가되면
+#    "그 어간 + 이 목록의 글자"로 시작하는 명사가 또 오탐을 만들 수 있다.
+#    이 목록은 지금 가진 9개 어간의 실제 활용형만 보고 만든 것이라 완전하지 않다.
+# 2) 어미가 아니라 명사 접미사가 붙어도 진짜 부정 신호인 경우 — 대표적으로
+#    "우울증"의 "증". 순수 어미 규칙만 쓰면 이것도 걸러지는데, 진단명은 놓치면
+#    안 되는 신호라서 _NOUN_SUFFIX_EXCEPTIONS로 어간별 예외를 따로 둔다. 이
+#    예외 목록도 마찬가지로 지금 알려진 것만 담았다 — "귀찮음", "외로움"처럼
+#    또 다른 파생 명사가 있다면 아직 못 잡는다.
+# 3) 통화가 어간 직후에 끊겨 다음 글자가 아예 없는 경우(예: STT가 "...너무
+#    아프"에서 끊김). 다음 글자가 없으면 이 구현은 세지 않는다 — 불완전한
+#    발화를 부정 신호로 지어내지 않기 위한 선택이지만, 실제로 아픈데 놓치는
+#    쪽으로 치우친 결정이라는 점은 감안해야 한다.
+_NEGATIVE_ENDING_STARTS = frozenset(
+    {"다", "요", "네", "어", "아", "고", "니", "지", "워", "웠", "습"}
+)
+
+# 어미 규칙으로는 못 잡는, 그러나 진짜 부정 신호인 명사형 예외.
+_NOUN_SUFFIX_EXCEPTIONS: dict[str, frozenset[str]] = {
+    "우울": frozenset({"증"}),
+}
+
 
 @dataclass(frozen=True)
 class CallMetrics:
@@ -69,7 +100,30 @@ def _total_ms(segments: Sequence[VadSegment]) -> int:
 
 
 def _count_stems(transcript: str, stems: frozenset[str]) -> int:
-    return sum(transcript.count(stem) for stem in stems)
+    """어간이 실제 용언 활용(또는 알려진 명사 예외)으로 이어질 때만 센다.
+
+    str.count는 부분 문자열이면 문맥과 상관없이 다 잡는다. "아파트"의 "아파"가
+    그렇게 잡혀서 부정어로 세어지면, 아파트 얘기만 몇 번 해도 오탐 알림이
+    만들어진다. 어간 뒤 글자 하나를 봐서 그게 정말 어미(또는 알려진 명사
+    예외)로 이어지는지 확인한다. 무엇을 놓치는지는 DEFAULT_NEGATIVE_STEMS
+    옆 주석에 적어 뒀다.
+    """
+    total = 0
+    for stem in stems:
+        exceptions = _NOUN_SUFFIX_EXCEPTIONS.get(stem, frozenset())
+        start = 0
+        while True:
+            idx = transcript.find(stem, start)
+            if idx == -1:
+                break
+            # str.count와 같은 방식으로 어간 길이만큼 건너뛴다(겹치는 매칭은
+            # 세지 않는다) — 기존 동작(및 그걸 검증하는 회귀 테스트)과 맞추기
+            # 위함이다.
+            start = idx + len(stem)
+            next_char = transcript[start : start + 1]
+            if next_char in _NEGATIVE_ENDING_STARTS or next_char in exceptions:
+                total += 1
+    return total
 
 
 def _average_response_delay(

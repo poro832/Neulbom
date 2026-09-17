@@ -102,6 +102,118 @@ def test_ordinary_conversation_has_no_negative_expressions():
     assert metrics.negative_word_count == 0
 
 
+def test_apartment_is_not_a_negative_expression():
+    """'아파트'는 어간 '아파'를 포함하지만 부정 표현이 아니다.
+
+    독거노인 대부분이 아파트에 살고 그 얘기를 자주 한다. str.count처럼
+    부분 문자열로만 잡으면 '아파트'가 매번 부정어 1개로 잡혀 명랑한
+    통화가 위양성 알림을 만든다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아파트 사는 게 좋아요",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
+def test_africa_documentary_is_not_a_negative_expression():
+    """'아프리카'는 어간 '아프'를 포함하지만 부정 표현이 아니다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아프리카 다큐 봤어요",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
+def test_apartment_mentioned_twice_is_still_not_negative():
+    """같은 충돌 단어가 여러 번 나와도 매번 걸러야 한다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="손주가 아파트로 이사 갔어요. 아파트가 참 좋더라",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
+def test_pain_expression_with_neyo_ending_is_still_counted():
+    """'아프네'처럼 흔한 어미가 붙은 형태는 계속 잡혀야 한다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="여기저기 아프네",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_loneliness_expression_is_still_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="혼자라 외로워",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_annoyed_to_death_expression_is_still_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="죽겠다 정말",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_hard_time_expression_is_still_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 힘들어요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_knee_pain_expression_is_still_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="무릎이 아파요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_depression_diagnosis_noun_is_counted_despite_no_verb_ending():
+    """'우울증'은 어미가 아니라 명사 접미사 '증'이 붙었지만 진짜 부정 신호다.
+
+    어미 기준만 쓰면 이런 진단명이 걸러져 버려서 예외로 명시한다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 우울증 진단받았어요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
 # ------------------------------------------------------------ 응답 지연
 
 
