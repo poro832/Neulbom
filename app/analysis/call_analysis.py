@@ -50,13 +50,19 @@ def analyze_call(
     # 발화로 세면 발화 비율이 부풀려진다(설계 3.4).
     clipped = clip_ai_playback(detected, ai_turns)
 
-    # clip_ai_playback은 겹치는 AI 구간이 없으면 입력 구간을 그대로 통과시킨다.
-    # 오늘은 segment_audio가 min_speech_ms(100ms) 미만을 이미 버려서 길이 0인
-    # 구간이 들어올 일이 없지만, 배치 배선이 이 지점 하나뿐이라 여기서 막아
-    # 둔다 — 안 그러면 길이 0인 "구간"이 turn_count에 공짜로 +1을 더한다.
-    segments = [s for s in clipped.segments if s.end_ms - s.start_ms > 0]
+    # 길이가 있는 구간만 남긴다. 판정은 VadSegment.has_duration 하나를 쓴다 —
+    # 같은 규칙을 여기서 다시 손으로 쓰면(전에 그랬다) AI 발화 쪽과 어르신
+    # 발화 쪽이 갈라지고, 길이 0인 "구간"이 turn_count에 공짜로 +1을 더하거나
+    # 뒤집힌 구간이 음수 길이로 들어와 speech_ratio를 음수로 만든다.
+    # clip_ai_playback은 겹치는 AI 구간이 없으면 입력을 그대로 통과시키므로,
+    # 배치 배선이 이 지점 하나뿐인 지금 막을 곳도 여기다.
+    segments = [s for s in clipped.segments if s.has_duration]
 
-    detected_ms = sum(s.end_ms - s.start_ms for s in detected)
+    # detected에도 같은 규칙을 건다. 여기만 빼면 뒤집힌 구간 하나가 음수
+    # 길이로 합계에 들어가 detected_ms를 0 이하로 끌어내리고, 그러면 아래
+    # degraded 판정이 통째로 꺼진다 — 정확도가 낮은 통화가 조용히 '정상'이
+    # 되어 보호자에게 그대로 나간다.
+    detected_ms = sum(s.duration_ms for s in detected if s.has_duration)
     degraded = (
         detected_ms > 0 and clipped.clipped_ms / detected_ms > DEGRADED_CLIP_RATIO
     )

@@ -146,3 +146,37 @@ def test_zero_length_segments_are_dropped_before_metrics(tmp_path, monkeypatch):
         transcript="",
     )
     assert result.metrics.turn_count == 0
+
+
+def test_a_non_positive_segment_cannot_switch_off_the_degraded_flag(
+    tmp_path, monkeypatch
+):
+    """길이 판정을 두 곳에서 손으로 다시 쓰면 두 곳이 갈라진다.
+
+    detected 합계에서만 규칙이 빠져 있으면, 뒤집힌 구간 하나가 음수 길이로
+    합계에 들어가 detected_ms를 0 이하로 끌어내린다. 그러면 degraded 판정이
+    통째로 꺼져서, 에코로 발화의 95%가 잘려 나간 통화가 '정확도 정상'으로
+    보호자에게 나간다 — 근거가 거의 없는 점수가 근거 있는 점수처럼 보인다.
+    규칙은 VadSegment.has_duration 한 군데만 있어야 한다.
+    """
+    path = write_wav(tmp_path / "h.wav", [("speech", 2000), ("silence", 2000)])
+
+    def fake_segments(samples, sample_rate):
+        class _Result:
+            speech = [VadSegment(0, 2000), VadSegment(3000, 1000)]
+
+        return _Result()
+
+    monkeypatch.setattr(call_analysis, "segment_audio", fake_segments)
+
+    result = analyze_call(
+        wav_path=path,
+        ai_turns=[VadSegment(0, 1900)],
+        stream_duration_ms=4000,
+        transcript="",
+    )
+
+    assert result.clipped_ms > 0
+    assert result.degraded is True
+    # 뒤집힌 구간은 지표에도 들어가면 안 된다 — 음수 길이는 발화가 아니다.
+    assert result.metrics.speech_ratio >= 0
