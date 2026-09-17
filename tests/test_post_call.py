@@ -18,7 +18,7 @@ SAMPLE_RATE = 8000
 
 @dataclass
 class FakeSession:
-    """analyze_session이 실제로 읽는 네 가지만 갖춘 대역.
+    """analyze_session이 실제로 읽는 다섯 가지만 갖춘 대역.
 
     진짜 CallSession을 쓰면 mark 왕복까지 재현해야 해서, 무엇이 배선의
     입력인지가 오히려 흐려진다.
@@ -28,6 +28,9 @@ class FakeSession:
     ai_turns: list = field(default_factory=list)
     stream_duration_ms: int = 4000
     unmatched_marks: int = 0
+    # 유실을 메우려고 지어낸 침묵의 총량. 기본값 0은 "전부 실제로 받은
+    # 오디오"라는 뜻이라, 아래의 기존 테스트들은 이 값에 영향받지 않는다.
+    filled_gap_ms: int = 0
 
 
 def write_wav(path, spans):
@@ -91,3 +94,21 @@ def test_transcript_is_empty_because_there_is_no_stt(tmp_path):
     result = analyze_session(FakeSession(stream_duration_ms=2000), path)
 
     assert result.metrics.negative_word_count == 0
+
+
+def test_a_recording_mostly_made_of_fabricated_silence_is_degraded(tmp_path):
+    """채운 침묵은 측정한 오디오가 아니다.
+
+    유실을 메운 침묵은 분모(stream_duration_ms)에는 들어가는데 분자(발화)에는
+    안 들어간다. 그래서 그 양이 커질수록 speech_ratio가 아래로 끌려가고, 그
+    값이 그대로 발화 벌점 35점 쪽으로 간다 — 지어낸 값이 점수가 된다.
+    상한이 그 양을 막아 주지만, 상한 아래에서 이미 쌓인 양은 숫자에 남는다.
+    숫자를 안 내는 대신 근거가 줄었다고 정직하게 표시한다(설계 8장).
+    """
+    path = write_wav(tmp_path / "gap.wav", [("speech", 1000), ("silence", 3000)])
+
+    measured = analyze_session(FakeSession(), path)
+    fabricated = analyze_session(FakeSession(filled_gap_ms=3000), path)
+
+    assert measured.degraded is False
+    assert fabricated.degraded is True

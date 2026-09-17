@@ -21,6 +21,10 @@ from app.media.session import CallSession
 
 logger = logging.getLogger(__name__)
 
+# 녹음의 이만큼이 유실을 메운 침묵이면 지표를 그대로 믿기 어렵다.
+# clip 쪽과 같은 관례를 쓴다(call_analysis.DEGRADED_CLIP_RATIO).
+DEGRADED_FABRICATED_RATIO = 0.3
+
 
 def analyze_session(
     session: CallSession, wav_path: Path, transcript: str = ""
@@ -38,6 +42,21 @@ def analyze_session(
         stream_duration_ms=session.stream_duration_ms,
         transcript=transcript,
     )
+
+    fabricated = session.filled_gap_ms
+    duration = session.stream_duration_ms
+    if duration > 0 and fabricated / duration > DEGRADED_FABRICATED_RATIO:
+        # 녹음의 상당 부분이 우리가 채운 침묵이다. 분모(stream_duration_ms)에는
+        # 들어가는데 분자(발화)에는 안 들어가므로 발화 비율이 아래로 끌린다 —
+        # 지어낸 값이 그대로 발화 벌점 35점 쪽으로 간다. 숫자를 안 내는 대신
+        # 근거가 줄었다고 정직하게 표시한다(설계 8장).
+        logger.warning(
+            "지어낸 침묵이 많다 — degraded로 표시한다 call_id=%s filled=%dms duration=%dms",
+            session.call_id,
+            fabricated,
+            duration,
+        )
+        analysis = replace(analysis, degraded=True)
 
     if session.unmatched_marks:
         # 짝이 안 맞은 표식은 AI 발화 구간 하나를 통째로 잃었다는 뜻이다.

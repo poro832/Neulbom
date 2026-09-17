@@ -48,6 +48,33 @@ _CARRIER_FRAME_MS = 20
 MAX_GAP_FRAMES = 150
 MAX_GAP_MS = MAX_GAP_FRAMES * _CARRIER_FRAME_MS
 
+# 위의 상한은 프레임 하나에만 걸린다. 그래서 그것만으로는 상한이 아니다.
+# 프레임을 받아들일 때마다 세션 시계가 방금 채운 갭만큼 앞으로 가므로, 다음
+# 프레임은 다시 MAX_GAP_MS만큼 앞설 수 있다 — 매번 상한 아래에 머무르면서
+# 총량은 얼마든지 걸어 올라간다. 120바이트짜리 프레임 300장이 900초짜리
+# 침묵(디스크 14.4MB)을 만든다. 400배다.
+#
+# 악의가 없는 현실적인 방아쇠가 따로 있다: 사업자가 timestamp를 ms가 아니라
+# 샘플 수로 보내는 단위 불일치다. 8kHz에서 프레임당 갭이 140ms라 위 상한에
+# 한참 못 미치는데, 녹음은 조용히 8배로 부풀고 speech_ratio는 0으로 끌려가
+# 멀쩡히 대화한 어르신에게 발화 벌점 35점이 만점으로 붙는다.
+#
+# 진짜 불변식은 두 개다.
+#
+# 1) 지어낸 침묵의 총량에 상한이 있다. 채운 침묵은 측정한 오디오가 아니라
+#    "이만큼 유실됐다고 믿기로 한 값"이다. 한 통화에서 30초를 지어냈다면
+#    대화 한 턴이 통째로 없어진 것이고, 그 위에서 계산한 발화/침묵 비율은
+#    더 이상 측정이 아니다. 프레임 하나의 상한(3초)이 열 번 일어난 양을
+#    바닥으로 잡았다. 총량에 붙은 상한이라 위의 걸어 올리기가 닫힌다.
+# 2) 통화에는 그럴듯한 최대 길이가 있다. 저장소가 끝을 확인하지 못한 통화를
+#    20분에 접는 것과 같은 판단이다(store.MAX_ACTIVE_SECONDS) — 그 시점이면
+#    기록은 이미 failed로 접히고 토큰도 폐기됐으므로, 더 받는 오디오는
+#    존재하지 않는 통화에 쌓이는 것이다. 8kHz/16bit에서 이 상한이 곧 녹음
+#    파일의 상한(19.2MB)이 된다.
+MAX_FABRICATED_MS = 30 * 1000
+MAX_CALL_MS = 20 * 60 * 1000
+
+
 class CallRegistry(Protocol):
     def issue(self, token: str, call_id: str) -> None:
         """이 통화에 쓸 1회용 토큰을 등록한다. 트리거 API가 부른다."""
@@ -290,12 +317,34 @@ def _push(session: CallSession, media: dict) -> list:
         # 다른 깨진 프레임과 똑같이 다룬다 — 버리고 통화는 살린다. 여기서
         # 대신 시계를 그 값에 맞춰 주면(유실을 사실로 인정해 버리면) 있지도
         # 않은 침묵이 지표에 들어가 점수가 조용히 틀린다. 지어내느니 세지
-        # 않는다. 진짜로 10초 넘게 끊긴 통화라면 이후 프레임도 계속 버려져
+        # 않는다. 진짜로 3초 넘게 끊긴 통화라면 이후 프레임도 계속 버려져
         # 사실상 귀를 닫게 되는데, 그건 이미 통화라고 부를 수 없는 상태이고
         # 틀린 점수를 내느니 아무 점수도 내지 않는 쪽이 낫다.
         logger.warning(
             "timestamp가 믿을 수 없을 만큼 앞서 있다 — 버린다 call_id=%s gap=%dms",
             session.call_id,
+            gap_ms,
+        )
+        return []
+
+    if timestamp_ms > MAX_CALL_MS:
+        # 통화 하나가 가질 수 있는 최대 길이를 넘었다. 저장소는 이 시점에
+        # 이미 기록을 접었다 — 여기부터는 없는 통화에 오디오를 붙이는 것이다.
+        logger.warning(
+            "통화 최대 길이를 넘은 timestamp — 버린다 call_id=%s timestamp=%dms",
+            session.call_id,
+            timestamp_ms,
+        )
+        return []
+
+    if gap_ms > 0 and session.filled_gap_ms + gap_ms > MAX_FABRICATED_MS:
+        # 프레임 하나씩은 다 상한 아래였는데 총량이 넘었다. 여기부터 채우면
+        # 녹음의 대부분이 우리가 지어낸 침묵이 되고, 그 위에서 나온 발화
+        # 비율은 측정이 아니라 창작이다. 지어내느니 세지 않는다.
+        logger.warning(
+            "지어낸 침묵이 상한을 넘었다 — 버린다 call_id=%s filled=%dms gap=%dms",
+            session.call_id,
+            session.filled_gap_ms,
             gap_ms,
         )
         return []

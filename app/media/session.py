@@ -81,6 +81,11 @@ class CallSession:
         self._next_timestamp_ms = 0
         self._last_timestamp_ms = 0
 
+        # 유실을 메우려고 지어낸 침묵의 총량. 녹음에 들어 있지만 우리가 실제로
+        # 받은 오디오는 아니다 — 지표의 분모에는 들어가면서 분자에는 안 들어가,
+        # 이 값이 커질수록 발화 비율이 조용히 0으로 끌려간다. 그래서 따로 센다.
+        self._filled_gap_ms = 0
+
         # AI 발화 구간을 mark 왕복으로 잡는다(설계 3.2). turn_index로 이름을
         # 지어 begin/end를 짝짓고, 짝이 안 맞으면 지어내지 않고 세기만 한다.
         self._turn_index = 0
@@ -131,6 +136,7 @@ class CallSession:
             filler = b"\x00" * self._bytes_for(gap_ms)
             self._recorded.extend(filler)
             self._pending += filler
+            self._filled_gap_ms += gap_ms
 
         self._recorded.extend(pcm)
         self._pending += pcm
@@ -156,6 +162,16 @@ class CallSession:
             if ended is not None:
                 outgoing.extend(self._on_speech_end(ended.start_ms, ended.end_ms))
         return outgoing
+
+    @property
+    def filled_gap_ms(self) -> int:
+        """이 통화에서 지어낸 침묵의 총량.
+
+        호출부가 상한을 걸 수 있게 내놓는다. 프레임 하나의 갭에만 상한이
+        있으면 매 프레임이 다시 상한만큼 앞설 수 있어 총량은 얼마든지
+        걸어 올릴 수 있다 — 상한이 총량에 붙어야 상한이다.
+        """
+        return self._filled_gap_ms
 
     @property
     def stream_duration_ms(self) -> int:

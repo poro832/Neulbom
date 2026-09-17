@@ -13,7 +13,13 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from app.media import ulaw
-from app.media.stream_server import InMemoryCallRegistry, build_app
+from app.media import stream_server
+from app.media.stream_server import (
+    MAX_FABRICATED_MS,
+    MAX_GAP_MS,
+    InMemoryCallRegistry,
+    build_app,
+)
 
 FRAME_SAMPLES = 160
 
@@ -323,6 +329,60 @@ def test_a_real_packet_loss_gap_is_still_filled(tmp_path):
     with wave.open(str(recording(tmp_path)), "rb") as wav:
         # 20ms + 980ms 침묵 + 20ms = 1020ms
         assert wav.getnframes() == 8000 * 1020 // 1000
+
+
+def test_small_gaps_cannot_walk_the_recording_past_the_total_cap(tmp_path):
+    """프레임 하나에만 걸린 상한은 상한이 아니다.
+
+    프레임을 받아들일 때마다 세션 시계가 방금 채운 갭만큼 앞으로 간다.
+    그래서 다음 프레임은 다시 상한 바로 아래만큼 앞설 수 있고, 매번 검사를
+    통과하면서 총량은 얼마든지 걸어 올라간다. 여기서는 120바이트짜리 프레임
+    60장이 180초(2.9MB)를 만든다 — 상한이 없던 시절과 같은 400배 증폭이다.
+
+    악의 없는 방아쇠가 따로 있다: 사업자가 timestamp를 ms가 아니라 샘플
+    수로 보내면 8kHz에서 프레임당 갭이 140ms라 위 상한에 한참 못 미치는데,
+    녹음은 조용히 8배로 부풀고 speech_ratio가 0으로 끌려가 멀쩡히 대화한
+    어르신에게 발화 벌점 35점이 만점으로 붙는다.
+    """
+    client, _ = make_client(tmp_path)
+    frames = 60
+    step = MAX_GAP_MS + 20  # 매 프레임이 상한 바로 아래(=상한과 같은) 갭을 만든다
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        for index in range(frames):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * step)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
+        duration_ms = wav.getnframes() * 1000 // 8000
+
+    real_audio_ms = frames * 20
+    assert duration_ms <= MAX_FABRICATED_MS + real_audio_ms
+    # 그렇다고 전부 버리는 것은 아니다 — 진짜 유실은 여전히 채워진다.
+    assert duration_ms > MAX_GAP_MS
+
+
+def test_a_call_cannot_grow_past_its_maximum_length(tmp_path, monkeypatch):
+    """통화에는 그럴듯한 최대 길이가 있고, 녹음 파일 크기는 거기서 나온다.
+
+    저장소는 끝을 확인하지 못한 통화를 20분에 접는다 — 그 시점이면 기록은
+    failed로 접히고 토큰도 폐기됐으므로, 더 받는 오디오는 존재하지 않는
+    통화에 쌓이는 것이다. 상한을 작게 바꿔 두고 경계만 본다(실시간으로
+    20분을 흘려보내지 않고도 같은 규칙을 검증할 수 있다).
+    """
+    monkeypatch.setattr(stream_server, "MAX_CALL_MS", 200)
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        for index in range(20):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
+        duration_ms = wav.getnframes() * 1000 // 8000
+
+    # 0..200ms의 프레임 11장만 남는다. 그 뒤는 없는 통화의 오디오다.
+    assert duration_ms == 220
 
 
 def _expect_disconnect():
