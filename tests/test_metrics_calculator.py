@@ -214,6 +214,138 @@ def test_depression_diagnosis_noun_is_counted_despite_no_verb_ending():
     assert metrics.negative_word_count == 1
 
 
+def test_afghanistan_is_not_a_negative_expression():
+    """'아프간'은 어간 '아프'를 포함하지만 나라 이름이다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아프간 전쟁 다큐 봤어요",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
+# -------------------------------------------- 해체 종결형(문장이 어간에서 끝남)
+
+
+def test_pain_expression_ending_in_a_period_is_counted():
+    """'무릎이 아파.'는 잘린 문장이 아니라 완결된 해체 종결형이다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="무릎이 아파.",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_pain_expression_at_end_of_transcript_is_counted():
+    """뒤에 아무 글자도 없어도(전사가 거기서 끝나도) 완결된 발화다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="무릎이 아파",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_pain_expression_ending_in_exclamation_is_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="여기가 아파!",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_pain_expression_as_a_bare_question_is_counted():
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아파?",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_bare_stem_trailing_off_at_end_of_string_is_counted():
+    """'너무 힘들'처럼 어미 없이 어간에서 말이 끊겨도 놓치면 안 된다.
+
+    위음성(아픈데 못 세는 것)이 위양성보다 이 서비스에 더 위험한 오차라서,
+    다음 글자가 아예 없는 경우는 세는 쪽으로 기운다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="너무 힘들",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_depression_haeyo_conjugation_is_counted():
+    """'우울해요'는 '우울하다'가 '해'로 활용한 형태다.
+
+    '하/해/했'은 어미 화이트리스트가 아니라 '우울' 전용 추가 목록에 있다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="우울해요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_annoying_attributive_form_is_counted():
+    """'귀찮은 일'처럼 관형형(-은)이 붙어도 잡아야 한다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 귀찮은 일이 많아요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_lonely_attributive_form_is_counted():
+    """'외로운'처럼 ㅂ불규칙 관형형도 잡아야 한다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="외로운 하루였어요",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_apartment_still_not_negative_after_sentence_end_rule():
+    """문장 종결 규칙을 추가해도 '아파트' 오탐이 다시 열리면 안 된다.
+
+    '아파트'는 항상 한글 음절('트')로 이어지므로 이 규칙의 적용 대상이
+    아니다 — 그걸 테스트로 못박아 둔다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아파트 사는 게 좋아요. 아파트 최고",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
 # ------------------------------------------------------------ 응답 지연
 
 
