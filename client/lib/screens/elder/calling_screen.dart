@@ -11,12 +11,14 @@ import '../../theme/app_theme.dart';
 /// 앱이 전화망 통화를 끊을 수 없기 때문이다 — 눌렀는데 안 끊기면
 /// 가장 나쁜 종류의 혼란이 된다.
 class CallingScreen extends StatefulWidget {
-  final String callerName;
+  // callerName을 받던 자리다. 한 번도 읽히지 않으면서 required였다 —
+  // 이 화면이 누가 거는지 표시하지 않기 때문이다(화면에 뜨는 것은 "곧
+  // 전화가 갑니다"뿐이다). 안 쓰는 값을 계속 요구하면 다음 사람은 그게
+  // 화면 어딘가에 나온다고 믿고 값을 맞추려 든다.
   final int elderId;
 
   const CallingScreen({
     super.key,
-    required this.callerName,
     this.elderId = 1,
   });
 

@@ -38,9 +38,7 @@ class MainScreen extends StatelessWidget {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const CallingScreen(
-                          callerName: 'AI 친구',
-                        ),
+                        builder: (context) => const CallingScreen(),
                       ),
                     );
                   },
