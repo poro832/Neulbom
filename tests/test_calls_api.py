@@ -273,3 +273,25 @@ def test_a_lost_webhook_does_not_lock_the_elder_forever():
     now[0] += 2
     assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202
     assert len(telephony.placed) == 2
+
+
+def test_a_non_terminal_stream_event_does_not_end_the_call():
+    """action URL로 오는 것이 전부 '끝'은 아니다.
+
+    StreamEvent를 로그에만 쓰고 버리던 동안은 '스트림이 시작됐다'는 통보
+    하나가 통화를 끝내 버렸다 — 어르신은 방금 받았는데 기록은 미응답이
+    되고, 토큰까지 폐기돼 실제로 오디오가 붙지 못한다. /v1/stream-ended에는
+    인증이 없어서 CallId만 알면 누구나 이 값을 보낼 수 있다.
+    """
+    client, store, _, _ = make_client()
+    call_id = client.post("/v1/calls/request", json={"elder_id": 12}).json()["call_id"]
+    sid = store.get(call_id).provider_call_sid
+
+    response = client.post(
+        "/v1/stream-ended", data={"CallId": sid, "StreamEvent": "stream-started"}
+    )
+
+    assert response.status_code == 200
+    assert store.get(call_id).status == "ringing"
+    # 토큰도 살아 있어야 한다 — 이제부터 스트림이 붙을 차례다.
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 200

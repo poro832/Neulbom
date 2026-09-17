@@ -17,6 +17,13 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 # 통화가 아직 끝나지 않았다고 보는 상태들. 이 동안 재요청은 409다.
+#
+# 'answered'는 우리 스트림 소켓이 실제로 붙은 통화다. 이 상태를 아무도 쓰지
+# 않던 동안 종료 처리는 "여기까지 활성이면 오디오가 안 붙은 것"이라고
+# 추론할 수밖에 없었는데, 그 추론이 틀렸다 — 사업자 웹훅과 우리 소켓 종료는
+# 서로 다른 경로라 통화 중에 웹훅이 먼저 도착한다. 그러면 멀쩡히 통화하고
+# 녹음까지 남긴 어르신이 '전화를 받지 않은 사람'으로 기록된다. 상태 기계가
+# 이 둘을 말로 구분할 수 있어야 추론을 안 한다.
 ACTIVE_STATUSES = frozenset({"scheduled", "ringing", "answered"})
 
 # 이 시간이 지나도록 끝을 확인하지 못한 통화는 더 이상 '진행 중'이 아니다.
@@ -65,6 +72,10 @@ class CallStore(Protocol):
         ...
 
     def attach_sid(self, call_id: int, sid: str) -> None: ...
+    def mark_answered(self, call_id: int) -> None:
+        """우리 스트림이 이 통화에 붙었다 — 어르신이 실제로 받았다는 증거다."""
+        ...
+
     def mark_failed(self, call_id: int) -> None: ...
     def mark_completed(self, call_id: int, audio_key: str) -> None:
         """통화가 정상적으로 끝났다. 녹음이 있어야 끝난 것이다."""
@@ -165,6 +176,29 @@ class InMemoryCallStore:
             self._calls[call_id] = replace(
                 self._calls[call_id], provider_call_sid=sid, status="ringing"
             )
+
+    def mark_answered(self, call_id: int) -> None:
+        """우리 스트림이 붙었다. 아직 진행 중이지만 '받은' 통화다.
+
+        종료 상태가 아니므로 _finish가 아니다. 이 전이가 있어야 종료 처리가
+        "받았는데 웹훅이 먼저 왔다"와 "아예 받지 않았다"를 추론이 아니라
+        기록으로 구분한다(ACTIVE_STATUSES 주석 참고).
+        """
+        with self._lock:
+            call = self._calls.get(call_id)
+            if call is None:
+                logger.error("모르는 통화가 스트림에 붙었다 call_id=%s", call_id)
+                return
+            if call.status not in ACTIVE_STATUSES:
+                # 이미 끝난 통화를 되살리지 않는다. 늦게 붙은 스트림 하나가
+                # 종료된 기록을 활성으로 돌려놓으면 어르신이 다시 잠긴다.
+                logger.warning(
+                    "이미 끝난 통화에 스트림이 붙었다 call_id=%s status=%s",
+                    call_id,
+                    call.status,
+                )
+                return
+            self._calls[call_id] = replace(call, status="answered")
 
     def mark_failed(self, call_id: int) -> None:
         # 실패한 통화가 '진행 중'으로 남으면 그 어르신은 영원히 409를 받는다.

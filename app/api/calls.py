@@ -125,9 +125,13 @@ def build_app(
         끝을 알리는 유일한 신호이기 때문이다 — 스트림 쪽 종료 처리만 두면
         그런 통화는 영원히 '진행 중'으로 남아 그 어르신을 잠근다.
         스트림이 이미 끝내 놓은 통화라면 store가 멱등하게 무시한다.
+
+        StreamEvent를 그냥 넘긴다. 이 필드를 로그에만 쓰고 버리던 동안은
+        '스트림이 시작됐다' 같은 비종료 통보 하나가 통화를 끝내 버렸다 —
+        어느 값이 끝인지는 lifecycle이 판정한다.
         """
         logger.info("스트림 종료 CallId=%s event=%s", CallId, StreamEvent)
-        lifecycle.carrier_finished(CallId)
+        lifecycle.carrier_finished(CallId, StreamEvent)
         return Response(
             content=say_and_hangup("오늘도 좋은 하루 보내세요. 안녕히 계세요."),
             media_type="application/xml",

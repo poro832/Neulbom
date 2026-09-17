@@ -84,8 +84,27 @@ def build_server(
         responder_factory=responder_factory,
         recordings_dir=recordings_dir,
         on_call_end=_end_of_call(lifecycle, sink),
+        on_call_start=_start_of_call(lifecycle),
     )
     return app
+
+
+def _start_of_call(lifecycle: CallLifecycle):
+    """스트림이 붙는 순간 — 어르신이 실제로 받았다는 것을 아는 유일한 지점이다.
+
+    이 배선이 없던 동안 'answered'는 아무도 쓰지 않는 상태였고, 그래서 종료
+    처리는 "여기까지 활성이면 오디오가 안 붙었다"고 추론할 수밖에 없었다.
+    그 추론 때문에 통화 중에 도착한 사업자 웹훅 하나가 녹음까지 남은 통화를
+    no_answer로 적었다.
+    """
+
+    def handle(session: CallSession) -> None:
+        call_id = _numeric_call_id(session.call_id)
+        if call_id is None:
+            return
+        lifecycle.stream_started(call_id)
+
+    return handle
 
 
 def _end_of_call(lifecycle: CallLifecycle, sink: AnalysisSink):

@@ -217,3 +217,56 @@ def test_the_module_level_app_serves_both_halves():
     assert "/v1/voiceml" in paths
     assert "/v1/stream-ended" in paths
     assert "/v1/stream" in paths
+
+
+def test_a_webhook_during_the_call_does_not_file_it_as_no_answer(tmp_path):
+    """사업자 웹훅과 우리 소켓 종료는 서로 다른 경로다 — 순서가 뒤집힌다.
+
+    <Connect action>의 POST는 우리가 소켓을 닫는 바로 그 순간에 온다. 통화
+    중에 먼저 도착하는 것이 정상이라는 뜻이다. "여기까지 활성이면 오디오가
+    안 붙었다"고 추론하면 그 순간 받아서 대화하고 녹음까지 남긴 통화가
+    no_answer로 기록된다. 그 값은 위험 점수의 입력이고(미응답 이력 20점),
+    녹음이 있는데 audio_key가 없는 행이 되어 스키마 규칙과도 어긋난다.
+    조용히 틀린 숫자라 아무도 알아채지 못한다.
+
+    이미 있는 test_a_late_carrier_webhook_does_not_rewrite_the_result는
+    소켓이 닫힌 뒤를 본다. 문제가 되는 순서는 이쪽이다.
+    """
+    client, store, _ = make_server(tmp_path)
+    call_id, sid, token = place_call(client, store)
+
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event(token)))
+        index = 0
+        for _ in range(20):
+            socket.send_text(json.dumps(media_event(speech_payload(), index * 20)))
+            index += 1
+        for _ in range(45):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        # 나가는 mark/오디오를 받아 서버가 여기까지 실제로 읽었음을 확인한다.
+        # 이게 없으면 웹훅이 start보다 먼저 처리돼 이 테스트가 증명하려는
+        # 순서가 아니게 된다.
+        for _ in range(3):
+            socket.receive_text()
+
+        # 스트림이 붙었다는 사실이 기록에 남아야 한다 — 이게 '받았다'와
+        # '받지 않았다'를 추론이 아니라 기록으로 가르는 값이다.
+        assert store.get(call_id).status == "answered"
+
+        webhook = client.post(
+            "/v1/stream-ended", data={"CallId": sid, "StreamEvent": "stop"}
+        )
+        assert webhook.status_code == 200
+        assert store.get(call_id).status != "no_answer"
+
+        for _ in range(10):
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    record = store.get(call_id)
+    assert record.status == "completed"
+    # 녹음이 있는 통화에는 audio_key가 있어야 한다(스키마의 제약과 같은 규칙).
+    assert record.audio_key
+    assert (tmp_path / record.audio_key).exists()

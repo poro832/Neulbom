@@ -23,6 +23,18 @@ from app.media.stream_server import CallRegistry
 
 logger = logging.getLogger(__name__)
 
+# 사업자가 action URL로 보내는 StreamEvent 중 '아직 안 끝났다'는 뜻인 값들.
+#
+# 이 필드는 지금까지 받아서 로그만 찍고 버렸다. 그래서 스트림이 시작됐다는
+# 통보 하나가 통화를 통째로 끝내 버렸다 — 어르신은 이제 막 받았는데 기록은
+# 끝난다. 여기 없는 값은 여전히 종료로 본다(빈 문자열 포함): 사업자가
+# 우리가 모르는 종료 이름을 쓰더라도 통화는 끝나야 하고, 그러지 않으면
+# 미응답 통화가 바닥 시간까지 20분간 어르신을 잠근다. 이 목록에 없는
+# 비종료 이벤트가 새로 생기면 그때 여기에 더한다.
+NON_TERMINAL_STREAM_EVENTS = frozenset(
+    {"start", "started", "stream-started", "connected", "media", "mark"}
+)
+
 
 class CallLifecycle:
     def __init__(self, store: CallStore, registry: CallRegistry) -> None:
@@ -49,6 +61,15 @@ class CallLifecycle:
         """발신 후처리가 실패했을 때처럼, 통화가 시작되기도 전에 접는다."""
         self._revoke(sid)
 
+    def stream_started(self, call_id: int) -> None:
+        """우리 소켓에 스트림이 붙었다 — 어르신이 받았다는 우리 쪽 증거다.
+
+        이 기록이 없으면 종료 처리가 "여기까지 활성이면 오디오가 안 붙었다"고
+        추론하는 수밖에 없고, 그 추론은 사업자 웹훅이 통화 중에 도착하는
+        순간 틀린다 — 녹음까지 남긴 통화가 no_answer로 기록된다.
+        """
+        self._store.mark_answered(call_id)
+
     def stream_finished(self, call_id: int, audio_key: str | None) -> None:
         """우리 스트림이 닫혔다 — 이 통화의 끝을 우리가 직접 본 유일한 순간이다.
 
@@ -68,18 +89,47 @@ class CallLifecycle:
             self._store.mark_completed(call_id, audio_key)
         self._revoke_for_call(call_id)
 
-    def carrier_finished(self, sid: str) -> None:
+    def carrier_finished(self, sid: str, event: str = "") -> None:
         """사업자가 스트림 종료를 알려 왔다.
 
         스트림이 우리 쪽에 한 번도 붙지 않은 통화(어르신이 받지 않았거나
         VoiceML이 404로 끝난 경우)는 이 신호가 유일한 끝이다. 이미 스트림이
         끝내 놓은 통화라면 store가 멱등하게 무시한다.
         """
+        if event in NON_TERMINAL_STREAM_EVENTS:
+            # 끝이 아니라 진행 상황 통보다. 이걸 끝으로 세면 방금 시작한
+            # 통화가 끝난 것으로 기록된다(위 상수 설명).
+            logger.info("종료가 아닌 스트림 이벤트 CallId=%s event=%s", sid, event)
+            return
+
         call = self._store.find_by_sid(sid)
         if call is None:
             logger.warning("모르는 CallId의 스트림 종료 CallId=%s", sid)
             return
-        # 여기까지 활성으로 남아 있다는 것은 오디오가 한 번도 붙지 않았다는
+
+        if call.status == "answered":
+            # 우리 소켓에 스트림이 붙었던 통화다. 사업자 웹훅과 우리 소켓
+            # 종료는 서로 다른 경로여서, <Connect action>의 POST는 우리가
+            # 소켓을 닫는 바로 그 순간에 온다 — 통화 중에 먼저 도착한다.
+            # 여기서 no_answer로 적으면 받아서 대화하고 녹음까지 남은 통화가
+            # '전화를 받지 않음'이 되고, 그 값은 위험 점수의 입력이다(미응답
+            # 이력 20점). 게다가 녹음이 있는 통화에 audio_key가 없게 되어
+            # 스키마 규칙과도 어긋난다.
+            #
+            # 그래서 결론은 스트림 쪽에 맡긴다. 그쪽은 녹음이 있었는지를
+            # 실제로 알고 completed/failed를 정확히 가른다. 소켓이 끝내
+            # 닫히지 않으면 바닥 시간이 failed로 접는다 — 'no_answer'라고
+            # 지어내는 것보다 '모른다'가 낫다.
+            logger.info(
+                "스트림이 붙었던 통화의 사업자 종료 웹훅 — 결과는 스트림이 정한다"
+                " call_id=%s event=%s",
+                call.call_id,
+                event,
+            )
+            self._revoke(sid)
+            return
+
+        # 여기까지 'answered'가 아니라는 것은 오디오가 한 번도 붙지 않았다는
         # 뜻이다 — 실패가 아니라 미응답이다. 지표는 이 둘을 다르게 센다.
         self._store.mark_no_answer(call.call_id)
         self._revoke(sid)

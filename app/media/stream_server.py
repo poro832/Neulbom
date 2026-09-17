@@ -95,6 +95,10 @@ def default_responder() -> Responder:
 # 불린다 — 녹음을 못 남긴 것과 통화가 안 끝난 것은 다른 일이다.
 CallEndHook = Callable[[CallSession, "Path | None"], None]
 
+# 스트림이 이 통화에 붙는 순간 불린다. 통화 기록을 '받았다'로 옮기는 곳이
+# 여기다 — 우리 쪽에서 어르신이 실제로 받았다는 것을 아는 유일한 시점이다.
+CallStartHook = Callable[[CallSession], None]
+
 
 def add_stream_route(
     app: FastAPI,
@@ -102,6 +106,7 @@ def add_stream_route(
     responder_factory: Callable[[], Responder] = default_responder,
     recordings_dir: Path = RECORDINGS_DIR,
     on_call_end: CallEndHook | None = None,
+    on_call_start: CallStartHook | None = None,
 ) -> None:
     """스트림 소켓을 이미 있는 앱에 붙인다.
 
@@ -148,6 +153,7 @@ def add_stream_route(
                     if session is None:
                         await websocket.close(code=_POLICY_VIOLATION)
                         return
+                    _started(session, on_call_start)
                 elif session is None:
                     # start 전에 온 것은 시각도 세션도 없이 해석할 수 없다.
                     continue
@@ -186,11 +192,28 @@ def build_app(
     responder_factory: Callable[[], Responder] = default_responder,
     recordings_dir: Path = RECORDINGS_DIR,
     on_call_end: CallEndHook | None = None,
+    on_call_start: CallStartHook | None = None,
 ) -> FastAPI:
     """스트림만 있는 앱. 어댑터 단위 테스트가 쓴다 — 실행용이 아니다."""
     app = FastAPI(title="늘봄 전화망 스트림")
-    add_stream_route(app, registry, responder_factory, recordings_dir, on_call_end)
+    add_stream_route(
+        app, registry, responder_factory, recordings_dir, on_call_end, on_call_start
+    )
     return app
+
+
+def _started(session: CallSession, on_call_start: CallStartHook | None) -> None:
+    """스트림이 붙었다는 사실을 바깥에 알린다.
+
+    통화를 끊지 않는다. 이 통보가 실패해도 어르신은 이미 전화기를 들고
+    있고, 그 통화를 끊는 것이 기록 하나를 못 옮긴 것보다 나쁘다.
+    """
+    if on_call_start is None:
+        return
+    try:
+        on_call_start(session)
+    except Exception:
+        logger.exception("스트림 시작 처리 실패 call_id=%s", session.call_id)
 
 
 def _end_call(
