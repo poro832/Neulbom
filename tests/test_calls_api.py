@@ -5,6 +5,7 @@ FakeTelephony 덕분에 ClawOps 계정 없이 전부 검증된다.
 """
 
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
@@ -166,16 +167,38 @@ def test_post_dial_failure_does_not_leave_a_stuck_call():
     assert retry.status_code == 202
 
 
+class WideWindowStore(InMemoryCallStore):
+    """검사와 생성 사이를 일부러 벌린 저장소.
+
+    이게 없으면 이 테스트는 자기가 증명한다고 적어 둔 것을 증명하지 못한다.
+    find_active와 create 사이가 몇 마이크로초라, 락을 통째로 들어내도 다른
+    스레드가 하필 그 사이에 끼어들 확률이 낮아 경합이 거의 재현되지 않는다
+    (리뷰에서 락 없는 저장소로 30번 돌려 0번 검출).
+
+    "활성 통화 없음"을 본 스레드를 붙잡아 두면 판이 뒤집힌다. 락이 있으면
+    다른 스레드는 그동안 find_active_or_create에 들어오지도 못하므로 결과가
+    스케줄링과 무관하게 늘 같고, 락이 없으면 모든 스레드가 이 틈에서 만나
+    전부 "없음"을 보고 각자 전화를 건다 — 그래서 락이 깨지면 매번 드러난다.
+    """
+
+    def find_active(self, elder_id):
+        found = super().find_active(elder_id)
+        if found is None:
+            time.sleep(0.05)
+        return found
+
+
 def test_concurrent_double_press_places_only_one_call():
     """동시에 두 번 눌러도 실제 전화는 한 번만 걸려야 한다.
 
     FastAPI는 sync 라우트를 스레드풀에서 돌린다. find_active와 create가
-    따로 놀면 여러 스레드가 모두 "활성 통화 없음"을 본 뒤에야 각자
-    create를 부를 수 있다. store의 락은 스케줄링과 무관하게 상호 배제를
-    강제하므로, 이 테스트는 매번 결정적으로 통과한다 — 통과 여부가
-    타이밍에 좌우되지 않는다(락이 깨지면 매번 실패로 드러난다).
+    따로 놀면 여러 스레드가 모두 "활성 통화 없음"을 본 뒤에야 각자 create를
+    부를 수 있다. store의 락은 스케줄링과 무관하게 상호 배제를 강제하므로
+    이 테스트는 매번 결정적으로 통과하고, WideWindowStore가 검사와 생성
+    사이를 벌려 두었으므로 락이 깨지면 매번 실패로 드러난다.
     """
-    client, _, telephony, _ = make_client()
+    store = WideWindowStore(phones={12: "070-1111-2222"})
+    client, _, telephony, _ = make_client(store=store)
     threads_count = 8
     barrier = threading.Barrier(threads_count)
 
