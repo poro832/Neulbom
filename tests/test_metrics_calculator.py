@@ -330,6 +330,104 @@ def test_lonely_attributive_form_is_counted():
     assert metrics.negative_word_count == 1
 
 
+# -------------------------------------------- 합니다체(격식체)와 불규칙 활용
+
+
+def test_formal_register_pain_is_counted():
+    """'아픕니다'는 원래도 되던 케이스 — 회귀 확인용."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="무릎이 아픕니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_formal_register_annoyance_is_counted():
+    """'귀찮습니다'도 원래 되던 케이스 — 회귀 확인용."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 다 귀찮습니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_formal_register_annoyed_to_death_is_counted():
+    """'죽겠습니다'도 원래 되던 케이스 — 회귀 확인용."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="아이고 죽겠습니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_formal_register_hard_time_is_counted_despite_irregular_stem():
+    """'힘듭니다'는 어미가 바뀐 게 아니라 어간 자체가 'ㄹ 탈락'으로 바뀐다.
+
+    '힘들'이 문자열에 아예 없으니 어미 화이트리스트로는 못 잡는다.
+    불규칙 표면형 '힘듭'을 사전에 그대로 추가해야 한다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 힘듭니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_formal_register_loneliness_is_counted_despite_irregular_stem():
+    """'외롭습니다'도 마찬가지다 — 'ㅂ 불규칙'이라 '외로'가 아니라 '외롭'이 표면형이다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="혼자 있으니 외롭습니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_formal_register_depression_is_counted_despite_syllable_fusion():
+    """'우울합니다'의 '합'은 '하'와 다른 완성 음절이라 별도 예외가 필요하다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="요즘 마음이 우울합니다",
+    )
+
+    assert metrics.negative_word_count == 1
+
+
+def test_new_irregular_stems_do_not_swallow_arbitrary_continuations():
+    """'힘듭'/'외롭'을 사전에 추가해도 무조건 다 세는 와일드카드가 되면 안 된다.
+
+    실제로 '힘듭'/'외롭'으로 시작하면서 이 두 형용사와 무관한 일반 명사는
+    조사한 범위에서 찾지 못했다 — 그래서 여기서는 대신 메커니즘 자체를
+    검증한다: 화이트리스트에 없는 글자가 이어지면(가상의 예시라도) 여전히
+    걸러져야 한다. '아파트'를 걸렀던 것과 같은 규칙이 새 어간에도 그대로
+    적용된다는 뜻이다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[],
+        ai_turns=[],
+        transcript="힘듭카페에서 만나요",
+    )
+
+    assert metrics.negative_word_count == 0
+
+
 def test_apartment_still_not_negative_after_sentence_end_rule():
     """문장 종결 규칙을 추가해도 '아파트' 오탐이 다시 열리면 안 된다.
 
