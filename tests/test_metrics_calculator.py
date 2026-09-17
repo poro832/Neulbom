@@ -296,3 +296,40 @@ def test_a_reply_before_the_next_turn_still_counts():
 
     # 500ms, 1000ms → 평균 750ms
     assert metrics.avg_response_delay_ms == 750
+
+
+def test_a_zero_length_ai_turn_is_not_a_turn():
+    """길이 0인 AI 발화는 재생된 적이 없다 — 두 소비자가 같게 봐야 한다.
+
+    에코 제거(echo._merge)는 이미 이런 구간을 버린다. 지표 계산만 세면 같은
+    구간이 한쪽에서는 없는 것이고 다른 쪽에서는 있는 것이 된다. 게다가 길이
+    0인 턴의 end_ms는 재생이 '시작'된 시각이라, 거기서부터 지연을 재면 AI가
+    말한 시간 전체가 조용히 어르신의 응답 지연에 들어간다.
+    """
+    mark_returned_late = calculate_metrics(
+        call_duration_ms=20_000,
+        elder_speech=[seg(5_000, 6_000)],
+        ai_turns=[seg(1_000, 1_000)],
+        transcript="",
+    )
+
+    # 잴 수 있는 AI 발화가 없다. 4000ms짜리 지연을 지어내면 안 된다.
+    assert mark_returned_late.avg_response_delay_ms is None
+
+
+def test_a_zero_length_ai_turn_does_not_shift_the_silence_ratio():
+    """길이 없는 턴이 'AI가 말한 시간'에 끼어들면 침묵 비율이 흔들린다."""
+    with_empty = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(0, 2_000)],
+        ai_turns=[seg(3_000, 5_000), seg(7_000, 7_000)],
+        transcript="",
+    )
+    without_empty = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(0, 2_000)],
+        ai_turns=[seg(3_000, 5_000)],
+        transcript="",
+    )
+
+    assert with_empty == without_empty

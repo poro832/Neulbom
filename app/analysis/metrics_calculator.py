@@ -37,6 +37,13 @@ def calculate_metrics(
     transcript: str,
     negative_stems: frozenset[str] = DEFAULT_NEGATIVE_STEMS,
 ) -> CallMetrics:
+    # 길이 없는 구간은 재생 시간이 없으므로 AI 발화가 아니다. echo._merge가
+    # 이미 같은 규칙으로 버리는데 여기서만 세면 같은 구간이 한쪽에서는 없는
+    # 것이 되고 다른 쪽에서는 있는 것이 된다. 특히 응답 지연에서 이게
+    # 위험한데, 길이 0인 턴의 end_ms는 재생이 '시작'된 시각이라 거기서부터
+    # 재면 AI가 말한 시간까지 통째로 어르신의 지연으로 들어간다.
+    ai_turns = [turn for turn in ai_turns if turn.has_duration]
+
     elder_ms = _total_ms(elder_speech)
     ai_ms = _total_ms(ai_turns)
 
@@ -58,7 +65,7 @@ def calculate_metrics(
 
 
 def _total_ms(segments: Sequence[VadSegment]) -> int:
-    return sum(segment.end_ms - segment.start_ms for segment in segments)
+    return sum(segment.duration_ms for segment in segments)
 
 
 def _count_stems(transcript: str, stems: frozenset[str]) -> int:

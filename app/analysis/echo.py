@@ -53,7 +53,7 @@ def _merge(turns: Sequence[VadSegment]) -> list[VadSegment]:
     merged: list[VadSegment] = []
     for turn in sorted(turns, key=lambda t: t.start_ms):
         # zero-length나 inverted 윈도우는 무시 — 재생 시간이 없다.
-        if turn.start_ms >= turn.end_ms:
+        if not turn.has_duration:
             continue
         if merged and turn.start_ms <= merged[-1].end_ms:
             last = merged[-1]
