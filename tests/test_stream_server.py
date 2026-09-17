@@ -76,6 +76,19 @@ def make_client(tmp_path, responder=None):
     return TestClient(app), registry
 
 
+def recording(tmp_path, call_id="call-1"):
+    """이 통화의 녹음 파일.
+
+    이름 뒤에 통화를 유일하게 만드는 꼬리(시각+난수)가 붙는다 — call_id는
+    프로세스가 재시작하면 1부터 다시 나오므로, 이름이 call_id뿐이면 이튿날
+    첫 통화가 전날 녹음을 덮어쓴다. 한 통화에 녹음이 정확히 하나라는 사실은
+    그대로이고, 이 헬퍼가 그것까지 확인한다.
+    """
+    matches = sorted(tmp_path.glob(f"{call_id}-*.wav"))
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
 def test_unknown_token_is_rejected(tmp_path):
     """스트림 소켓에는 ClawOps 서명이 없다. 토큰이 유일한 문이다."""
     client, _ = make_client(tmp_path)
@@ -100,8 +113,7 @@ def test_media_is_decoded_and_recorded(tmp_path):
             socket.send_text(json.dumps(media_event(silence_payload(), i * 20)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    saved = tmp_path / "call-1.wav"
-    assert saved.exists()
+    assert recording(tmp_path).exists()
 
 
 def test_speech_then_silence_sends_marked_audio(tmp_path):
@@ -155,7 +167,7 @@ def test_mark_from_platform_records_an_ai_turn(tmp_path):
 
     # 소켓이 닫힌 뒤 세션이 남긴 wav가 있으면 충분하다. 구간 자체는
     # Task 4의 단위 테스트가 이미 고정하고 있다.
-    assert (tmp_path / "call-1.wav").exists()
+    assert recording(tmp_path).exists()
 
 
 def test_garbage_frame_does_not_kill_the_call(tmp_path):
@@ -167,7 +179,7 @@ def test_garbage_frame_does_not_kill_the_call(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 0)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    assert (tmp_path / "call-1.wav").exists()
+    assert recording(tmp_path).exists()
 
 
 def test_null_media_field_does_not_kill_the_call(tmp_path):
@@ -184,7 +196,7 @@ def test_null_media_field_does_not_kill_the_call(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 0)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES
 
 
@@ -197,7 +209,7 @@ def test_null_mark_field_does_not_kill_the_call(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 0)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES
 
 
@@ -212,7 +224,7 @@ def test_null_start_field_does_not_kill_the_call(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 0)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES
 
 
@@ -231,9 +243,9 @@ def test_second_start_with_different_valid_token_is_ignored(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 20)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    assert (tmp_path / "call-1.wav").exists()
-    assert not (tmp_path / "call-2.wav").exists()
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    assert recording(tmp_path).exists()
+    assert not list(tmp_path.glob("call-2-*.wav"))
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES * 2
     # 무시됐을 뿐 소모되지는 않았다 — 다음 통화에 이 토큰을 다시 쓸 수 있다.
     assert registry.claim("tok-good-2") == "call-2"
@@ -253,7 +265,7 @@ def test_second_start_with_bad_token_is_ignored(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 20)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES * 2
 
 
@@ -272,7 +284,7 @@ def test_an_absurd_timestamp_does_not_allocate_memory(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 20)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         # 정상 프레임 둘만 남는다. 깨진 프레임은 없던 일이다.
         assert wav.getnframes() == FRAME_SAMPLES * 2
 
@@ -291,7 +303,7 @@ def test_a_plausible_but_huge_gap_does_not_fake_an_hour_of_silence(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 3_600_000)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         assert wav.getnframes() == FRAME_SAMPLES
 
 
@@ -308,7 +320,7 @@ def test_a_real_packet_loss_gap_is_still_filled(tmp_path):
         socket.send_text(json.dumps(media_event(silence_payload(), 1_000)))
         socket.send_text(json.dumps({"event": "stop"}))
 
-    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+    with wave.open(str(recording(tmp_path)), "rb") as wav:
         # 20ms + 980ms 침묵 + 20ms = 1020ms
         assert wav.getnframes() == 8000 * 1020 // 1000
 

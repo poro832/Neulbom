@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import logging
+import re
+import secrets
 import wave
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -88,6 +91,10 @@ class CallSession:
         self._resolved_marks: set[str] = set()
         self._ai_turns: list[VadSegment] = []
         self._unmatched_marks = 0
+
+        # 녹음 파일 이름을 여기서 한 번만 정한다. finish가 언제 불리든 같은
+        # 파일을 가리켜야 하기 때문이다.
+        self._recording_name = _recording_name(call_id)
 
     @property
     def call_id(self) -> str:
@@ -179,9 +186,14 @@ class CallSession:
         """누적한 원본을 wav로 남긴다.
 
         앱이 갑자기 끊겨도 호출된다. 통화 기록이 사라지면 안 된다.
+
+        그래서 파일 이름이 call_id만이어서는 안 됐다. call_id는 메모리
+        저장소의 itertools.count(1)에서 나오고 그 카운터는 프로세스가
+        재시작하면 1부터 다시 센다 — 이튿날 첫 통화가 전날 첫 통화의 녹음을
+        말없이 덮어썼다. 지워진 것은 어제 어르신의 통화다.
         """
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{self._call_id}.wav"
+        path = directory / self._recording_name
         with wave.open(str(path), "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(_BYTES_PER_SAMPLE)
@@ -268,6 +280,21 @@ class CallSession:
     def unmatched_marks(self) -> int:
         """짝이 안 맞은 표식 수. 크면 degraded로 표시한다(설계 8장)."""
         return self._unmatched_marks + len(self._mark_times)
+
+
+def _recording_name(call_id: str) -> str:
+    """이 통화의 녹음 파일 이름. 프로세스 수명에 기대지 않고 유일하다.
+
+    UTC 시각이 날짜가 다른 통화를 가르고, 짧은 난수가 같은 초에 시작한
+    통화(재시작 직후 같은 call_id가 다시 나오는 경우)까지 가른다. 시각을
+    앞에 두지 않고 call_id를 앞에 두는 이유는, 사람이 파일 목록에서 통화를
+    call_id로 찾기 때문이다.
+    """
+    # call_id는 레지스트리가 준 문자열이다. 지금은 우리 API가 넣은 숫자뿐이지만
+    # 파일 이름에 그대로 넣는 값이므로 경로로 해석될 수 있는 문자는 지운다.
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", call_id) or "unknown"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    return f"{safe_id}-{stamp}-{secrets.token_hex(3)}.wav"
 
 
 def _to_float32(pcm: bytes) -> np.ndarray:

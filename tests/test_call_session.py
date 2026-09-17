@@ -125,7 +125,11 @@ def test_finish_writes_the_whole_call_as_wav(tmp_path):
 
     path = session.finish(tmp_path)
 
-    assert path == tmp_path / "c1.wav"
+    # 이름에는 통화를 유일하게 만드는 꼬리가 붙는다(프로세스가 재시작해도
+    # 전날 녹음을 덮어쓰지 않기 위해서다). 어느 통화의 녹음인지는 그대로 읽힌다.
+    assert path.parent == tmp_path
+    assert path.name.startswith("c1-")
+    assert path.suffix == ".wav"
     with wave.open(str(path), "rb") as wav:
         assert wav.getnchannels() == 1
         assert wav.getsampwidth() == 2
@@ -411,3 +415,37 @@ def test_duplicate_end_mark_after_a_match_is_a_no_op():
 
     assert session.ai_turns == [VadSegment(start_ms=1320, end_ms=1600)]
     assert session.unmatched_marks == 0
+
+
+def test_two_calls_with_the_same_id_do_not_overwrite_each_other(tmp_path):
+    """call_id는 프로세스가 재시작하면 1부터 다시 나온다.
+
+    메모리 저장소의 itertools.count(1) 때문이다. 이름이 call_id뿐이면
+    이튿날 첫 통화가 전날 첫 통화의 wav를 말없이 덮어쓴다 — 지워지는 것은
+    어제 어르신의 통화이고, 아무도 알아채지 못한다.
+    """
+    first = CallSession("c1", SAMPLE_RATE, FakeResponder())
+    drain(first, pcm16(("speech", 500), ("silence", 1000)))
+    second = CallSession("c1", SAMPLE_RATE, FakeResponder())
+
+    first_path = first.finish(tmp_path)
+    second_path = second.finish(tmp_path)
+
+    assert first_path != second_path
+    assert len(list(tmp_path.glob("*.wav"))) == 2
+    # 덮어쓰이지 않았다 — 첫 통화의 오디오가 그대로 남아 있다.
+    with wave.open(str(first_path), "rb") as wav:
+        assert wav.getnframes() > 0
+
+
+def test_finish_twice_writes_the_same_file(tmp_path):
+    """이름은 세션마다 한 번만 정해진다.
+
+    finish가 불릴 때마다 새 이름을 지으면, 종료 경로가 두 번 도는 순간
+    같은 통화의 녹음이 둘로 갈라져 어느 쪽이 진짜인지 알 수 없게 된다.
+    """
+    session = CallSession("c1", SAMPLE_RATE, FakeResponder())
+    drain(session, pcm16(("speech", 500), ("silence", 1000)))
+
+    assert session.finish(tmp_path) == session.finish(tmp_path)
+    assert len(list(tmp_path.glob("*.wav"))) == 1
