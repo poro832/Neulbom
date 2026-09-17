@@ -833,3 +833,31 @@ def test_new_stems_do_not_swallow_arbitrary_continuations(description, transcrip
     )
 
     assert metrics.negative_word_count == 0
+
+
+def test_elder_speech_without_duration_is_not_counted():
+    """길이 없는 어르신 구간은 발화가 아니다 — ai_turns와 같은 규칙을 쓴다.
+
+    뒤집힌 구간이 들어오면 _total_ms가 음수가 되어 speech_ratio가 음수,
+    silence_ratio가 1을 넘는다. 둘 다 비율로서 불가능한 값이라 그 위에서
+    계산하는 위험 점수가 의미를 잃는다. 길이 0인 구간은 발화 턴 수만
+    공짜로 올린다. 실제 파이프라인에서는 segment_audio가 min_speech_ms로
+    걸러 주지만, 이 함수는 직접 호출도 받으므로 여기서도 막는다.
+    """
+    inverted = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[VadSegment(2_000, 1_000)],
+        ai_turns=[],
+        transcript="",
+    )
+    assert inverted.speech_ratio == 0.0
+    assert inverted.silence_ratio == 1.0
+    assert inverted.turn_count == 0
+
+    zero_length = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[VadSegment(1_000, 1_000)],
+        ai_turns=[],
+        transcript="",
+    )
+    assert zero_length.turn_count == 0
