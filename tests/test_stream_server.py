@@ -257,6 +257,62 @@ def test_second_start_with_bad_token_is_ignored(tmp_path):
         assert wav.getnframes() == FRAME_SAMPLES * 2
 
 
+def test_an_absurd_timestamp_does_not_allocate_memory(tmp_path):
+    """timestamp는 사업자가 준 문자열일 뿐이고 아무도 검증하지 않는다.
+
+    2**31을 그대로 믿으면 세션이 24일치 침묵을 할당하려다 MemoryError로
+    통화를 죽인다. 깨진 프레임 하나가 통화를 끊으면 안 된다는 이 파일의
+    규칙이 여기에도 그대로 적용된다 — 버리고 통화는 잇는다.
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps(media_event(silence_payload(), 2**31)))
+        socket.send_text(json.dumps(media_event(silence_payload(), 20)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        # 정상 프레임 둘만 남는다. 깨진 프레임은 없던 일이다.
+        assert wav.getnframes() == FRAME_SAMPLES * 2
+
+
+def test_a_plausible_but_huge_gap_does_not_fake_an_hour_of_silence(tmp_path):
+    """죽지 않는 값이 더 위험하다.
+
+    1시간(3_600_000ms)은 성공적으로 할당된다 — 57MB의 침묵이 녹음에 들어가고
+    발화 비율이 0에 수렴해, 멀쩡히 대화한 어르신에게 발화 벌점 35점이
+    만점으로 붙는다. 터지지 않으므로 아무도 알아채지 못한다.
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps(media_event(silence_payload(), 3_600_000)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        assert wav.getnframes() == FRAME_SAMPLES
+
+
+def test_a_real_packet_loss_gap_is_still_filled(tmp_path):
+    """진짜 유실은 막으면 안 된다. 침묵으로 채워야 뒤의 구간이 안 밀린다.
+
+    상한을 두는 것과 유실을 무시하는 것은 다른 일이다. 1초짜리 구멍은
+    실제로 일어나고, 그건 그대로 녹음에 들어가야 한다(설계 3.2).
+    """
+    client, _ = make_client(tmp_path)
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        socket.send_text(json.dumps(media_event(silence_payload(), 0)))
+        socket.send_text(json.dumps(media_event(silence_payload(), 1_000)))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    with wave.open(str(tmp_path / "call-1.wav"), "rb") as wav:
+        # 20ms + 980ms 침묵 + 20ms = 1020ms
+        assert wav.getnframes() == 8000 * 1020 // 1000
+
+
 def _expect_disconnect():
     """pytest_ 로 시작하는 이름은 훅으로 오인되므로 밑줄로 시작한다."""
     import pytest

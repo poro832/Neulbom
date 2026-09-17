@@ -98,6 +98,11 @@ class CallSession:
 
         시각은 전송 계층이 준 것을 그대로 쓴다. 벽시계를 쓰면 네트워크
         지연이 섞여 들어가 같은 통화를 다시 분석해도 다른 값이 나온다.
+
+        timestamp_ms는 이미 검증된 값이어야 한다. 아래에서 갭만큼 침묵을
+        할당하므로, 검사 없이 사업자가 준 값을 그대로 흘려보내면 프레임
+        하나로 메모리를 통째로 요구하게 된다 — 그 문은 호출부인
+        stream_server._push가 지킨다(MAX_GAP_MS).
         """
         gap_ms = timestamp_ms - self._next_timestamp_ms
         if gap_ms < 0:

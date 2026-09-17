@@ -31,6 +31,23 @@ RECORDINGS_DIR = Path("recordings")
 # 정책 위반이 아니라 인증 실패이므로 1008(Policy Violation).
 _POLICY_VIOLATION = 1008
 
+# 이 스트림은 20ms짜리 프레임을 쉬지 않고 보낸다 — 어르신이 말하지 않는
+# 동안에도 침묵이 담긴 프레임이 계속 온다. 그래서 타임스탬프의 '간격'은 곧
+# 연속으로 유실된 프레임 수다(간격 ÷ 20ms). 150프레임은 3초 내내 한 장도
+# 도착하지 않았다는 뜻이고, 그건 지터나 재전송이 감당하는 범위가 아니라
+# 이미 끊어진 연결이다. 반대로 흔한 유실(한 자리 수 프레임, 수백 ms)은
+# 이 아래에 들어오므로 그대로 침묵으로 채워진다 — 채워야 뒤의 모든 발화
+# 구간이 제자리에 남는다.
+#
+# 상한이 없으면 timestamp를 그대로 믿고 그만큼 침묵을 할당한다. 그런데
+# timestamp는 사업자가 준 문자열일 뿐 아무도 검증하지 않는다. 2**31이면
+# 24일치를 할당하려다 MemoryError로 통화가 죽고, 더 나쁜 것은 죽지 않는
+# 값이다: 1시간(3_600_000)이면 57MB의 침묵이 녹음에 들어가 발화 비율이 0에
+# 수렴하고, 멀쩡히 대화한 어르신에게 발화 벌점 35점이 만점으로 붙는다.
+_CARRIER_FRAME_MS = 20
+MAX_GAP_FRAMES = 150
+MAX_GAP_MS = MAX_GAP_FRAMES * _CARRIER_FRAME_MS
+
 class CallRegistry(Protocol):
     def issue(self, token: str, call_id: str) -> None:
         """이 통화에 쓸 1회용 토큰을 등록한다. 트리거 API가 부른다."""
@@ -234,6 +251,30 @@ def _push(session: CallSession, media: dict) -> list:
         timestamp_ms = int(media.get("timestamp", "0"))
     except (binascii.Error, ValueError):
         logger.warning("media 프레임이 깨졌다 — 버린다 call_id=%s", session.call_id)
+        return []
+
+    # 검사는 세션이 아니라 여기, 프로토콜 경계에서 한다. timestamp는 방금
+    # 파싱한 신뢰할 수 없는 입력이고, 바로 위에서 base64와 int를 검사해
+    # 깨진 프레임을 버리는 것과 같은 성격의 일이다. CallSession은 검증이
+    # 끝난 값을 받는 쪽이며 '샘플 위치 = 통화 내 시각'을 전제로 동작한다 —
+    # 그 전제를 지키는 문이 이 지점이다. push_audio를 부르는 곳은 여기
+    # 하나뿐이고, 다른 호출부가 생기면 그쪽도 이 검사를 지나야 한다.
+    #
+    # stream_duration_ms는 다음 프레임이 시작해야 할 시각과 같은 값이다(둘 다
+    # recorded 버퍼 길이에서 구한다). 세션이 채울 침묵의 양이 곧 이 차이다.
+    gap_ms = timestamp_ms - session.stream_duration_ms
+    if gap_ms > MAX_GAP_MS:
+        # 다른 깨진 프레임과 똑같이 다룬다 — 버리고 통화는 살린다. 여기서
+        # 대신 시계를 그 값에 맞춰 주면(유실을 사실로 인정해 버리면) 있지도
+        # 않은 침묵이 지표에 들어가 점수가 조용히 틀린다. 지어내느니 세지
+        # 않는다. 진짜로 10초 넘게 끊긴 통화라면 이후 프레임도 계속 버려져
+        # 사실상 귀를 닫게 되는데, 그건 이미 통화라고 부를 수 없는 상태이고
+        # 틀린 점수를 내느니 아무 점수도 내지 않는 쪽이 낫다.
+        logger.warning(
+            "timestamp가 믿을 수 없을 만큼 앞서 있다 — 버린다 call_id=%s gap=%dms",
+            session.call_id,
+            gap_ms,
+        )
         return []
 
     return session.push_audio(ulaw.decode_to_pcm16(payload), timestamp_ms=timestamp_ms)
