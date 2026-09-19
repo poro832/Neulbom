@@ -189,3 +189,38 @@ def test_a_failing_outcome_store_does_not_escape_the_sink():
     sink = build_risk_sink(store, _ExplodingOutcomeStore())
 
     sink(call.call_id, analysis_of())  # 예외가 나면 안 된다
+
+
+def test_a_degraded_call_is_recorded_as_degraded():
+    """analysis.degraded가 CallOutcome까지 그대로 전달된다.
+
+    이 값이 새면(예: 하드코딩된 False로 바뀌면) degraded 통화가 멀쩡한
+    통화로 저장되고, compute_baseline이 그 통화를 걸러낼 방법이 없어져
+    오염된 지표가 그대로 14통짜리 기준선에 들어간다(설계 3.2). 지금은
+    체인이 맞게 동작하지만 이 값 하나를 고정하는 테스트가 없었다.
+    """
+    _, outcomes, sink, call = make()
+
+    sink(call.call_id, analysis_of(degraded=True))
+
+    assert recorded_for(outcomes, call.call_id).degraded is True
+
+
+def test_degraded_history_never_seeds_the_next_baseline():
+    """degraded 통화만 쌓여도 기준선이 서지 않는다 — 저장부터 배제까지.
+
+    compute_baseline은 degraded 통화를 거르므로(설계 3.2), 최근 통화가
+    전부 degraded면 사용 가능한 과거가 0통이라 기준선이 없어야 한다. 이
+    테스트는 위 test_a_degraded_call_is_recorded_as_degraded가 확인한
+    "저장" 쪽과 baseline 모듈의 "배제" 쪽이 실제로 맞물리는지를 sink를
+    통해 끝에서 끝까지 본다.
+    """
+    store, outcomes, sink, _ = make()
+    for _ in range(4):
+        degraded_call = store.create(elder_id=12, trigger_type="scheduled")
+        sink(degraded_call.call_id, analysis_of(degraded=True))
+    call = store.create(elder_id=12, trigger_type="scheduled")
+
+    sink(call.call_id, analysis_of())
+
+    assert recorded_for(outcomes, call.call_id).risk.baseline_delta is None
