@@ -18,9 +18,13 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from app.analysis.baseline import BASELINE_WINDOW, compute_baseline
 from app.analysis.call_analysis import CallAnalysis
+from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
+from app.analysis.outcome import CallOutcome
 from app.api import calls
 from app.api.lifecycle import CallLifecycle
+from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
 from app.media.responder import Responder
 from app.media.session import CallSession
@@ -36,23 +40,76 @@ from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
 
 logger = logging.getLogger(__name__)
 
-# 분석 결과를 받는 곳. 지금은 로그뿐이다 — call_metrics 테이블에 쓰는
+# 분석 결과를 받는 곳. 지금은 메모리에 쌓는다 — call_metrics 테이블에 쓰는
 # 구현이 DB와 함께 들어온다. 규약을 먼저 뚫어 두면 그때 이 파일만 바뀐다.
 AnalysisSink = Callable[[int, CallAnalysis], None]
 
+# 미응답 이력을 몇 건까지 보는가. db/schema.sql의 no_answer_recent_7이
+# 0~7을 강제하므로 그 이름과 맞춘다.
+NO_ANSWER_WINDOW = 7
 
-def log_analysis(call_id: int, analysis: CallAnalysis) -> None:
-    logger.info(
-        "통화 분석 call_id=%s speech_ratio=%.3f silence_ratio=%.3f turns=%d "
-        "delay_ms=%s clipped_ms=%d degraded=%s",
-        call_id,
-        analysis.metrics.speech_ratio,
-        analysis.metrics.silence_ratio,
-        analysis.metrics.turn_count,
-        analysis.metrics.avg_response_delay_ms,
-        analysis.clipped_ms,
-        analysis.degraded,
-    )
+
+def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
+    """지표를 위험 점수로 환산해 남긴다 (설계 4.5).
+
+    이 배선이 없던 동안 assess_risk는 테스트에서만 불렸다. 지표까지 만들어
+    놓고 점수로 바꾸지 않았다는 뜻이고, 그러면 "위험 점수는 지어내는 게
+    아니라 재는 것"이라는 간판 주장이 전화 경로에서 증명되지 않는다.
+
+    순서가 중요하다. 기준선을 먼저 구하고 그다음에 기록한다 — 뒤집으면
+    현재 통화가 자기 기준선에 섞여 델타가 희석되고, 나쁜 통화가 정상으로
+    보인다. 아무 오류도 나지 않는다.
+    """
+
+    def sink(call_id: int, analysis: CallAnalysis) -> None:
+        try:
+            elder_id = store.get(call_id).elder_id
+        except KeyError:
+            logger.error("모르는 통화의 분석 결과다 — 버린다 call_id=%s", call_id)
+            return
+
+        try:
+            # 아직 기록하지 않았으므로 이 조회에 현재 통화는 들어 있지 않다.
+            baseline = compute_baseline(outcomes.recent(elder_id, BASELINE_WINDOW))
+            history = store.recent_scheduled(
+                elder_id, NO_ANSWER_WINDOW, exclude_call_id=call_id
+            )
+            no_answer = sum(1 for call in history if call.status == "no_answer")
+
+            risk = assess_risk(
+                analysis.metrics, baseline=baseline, no_answer_recent_7=no_answer
+            )
+            outcomes.record(
+                CallOutcome(
+                    call_id=call_id,
+                    elder_id=elder_id,
+                    metrics=analysis.metrics,
+                    risk=risk,
+                    no_answer_recent_7=no_answer,
+                    clipped_ms=analysis.clipped_ms,
+                    degraded=analysis.degraded,
+                    calculator_version=CALCULATOR_VERSION,
+                )
+            )
+            logger.info(
+                "위험 판정 call_id=%s elder_id=%s score=%d level=%s 기준선=%s "
+                "no_answer=%d speech_ratio=%.3f delay_ms=%s degraded=%s",
+                call_id,
+                elder_id,
+                risk.risk_score,
+                risk.risk_level,
+                "있음" if baseline is not None else "없음",
+                no_answer,
+                analysis.metrics.speech_ratio,
+                analysis.metrics.avg_response_delay_ms,
+                analysis.degraded,
+            )
+        except Exception:
+            # 점수를 못 내는 것보다 통화가 안 끝나는 쪽이 훨씬 나쁘다.
+            # 여기서 막지 않으면 예외가 스트림 종료 처리 뒤로 올라간다.
+            logger.exception("위험 판정 실패 call_id=%s", call_id)
+
+    return sink
 
 
 def build_server(
@@ -64,9 +121,15 @@ def build_server(
     registry: CallRegistry | None = None,
     responder_factory: Callable[[], Responder] = default_responder,
     recordings_dir: Path = RECORDINGS_DIR,
-    sink: AnalysisSink = log_analysis,
+    outcomes: OutcomeStore | None = None,
+    sink: AnalysisSink | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
+    # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
+    # 이긴다 — 분석 훅만 보고 싶은 기존 테스트들이 그렇게 쓴다.
+    outcomes = outcomes if outcomes is not None else InMemoryOutcomeStore()
+    sink = sink if sink is not None else build_risk_sink(store, outcomes)
+
     registry = registry if registry is not None else InMemoryCallRegistry()
     lifecycle = CallLifecycle(store, registry)
 

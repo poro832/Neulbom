@@ -17,6 +17,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 from app.main import build_server
+from app.api.outcome_store import InMemoryOutcomeStore
 from app.api.store import InMemoryCallStore
 from app.media import ulaw
 from app.telephony.client import FakeTelephony
@@ -63,7 +64,7 @@ class _Beep:
         return b"\x01\x02" * 400
 
 
-def make_server(tmp_path, sink=None):
+def make_server(tmp_path, sink=None, outcomes=None):
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
     app = build_server(
@@ -73,7 +74,8 @@ def make_server(tmp_path, sink=None):
         stream_base_url="wss://api.example.com",
         responder_factory=_Beep,
         recordings_dir=tmp_path,
-        sink=sink or (lambda call_id, analysis: None),
+        outcomes=outcomes,
+        sink=sink,
     )
     return TestClient(app), store, telephony
 
@@ -270,3 +272,23 @@ def test_a_webhook_during_the_call_does_not_file_it_as_no_answer(tmp_path):
     # 녹음이 있는 통화에는 audio_key가 있어야 한다(스키마의 제약과 같은 규칙).
     assert record.audio_key
     assert (tmp_path / record.audio_key).exists()
+
+
+def test_a_real_call_produces_a_risk_score(tmp_path):
+    """조립 기본값이 실제로 점수를 낸다 — sink를 주입하지 않은 경로다.
+
+    단위 테스트는 sink를 직접 불러 숫자를 고정한다. 여기서 보는 것은
+    "그 sink가 기본 조립에 실제로 달려 있는가" 하나다.
+    """
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes)
+    call_id, _, token = place_call(client, store)
+
+    run_stream(client, token)
+
+    results = outcomes.recent(12, 14)
+    assert len(results) == 1
+    assert results[0].call_id == call_id
+    assert 0 <= results[0].risk.risk_score <= 100
+    # STT가 없어 부정 표현은 항상 0이다 — 없는 부정어를 지어내지 않는다.
+    assert results[0].metrics.negative_word_count == 0
