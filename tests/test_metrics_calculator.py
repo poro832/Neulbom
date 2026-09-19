@@ -53,8 +53,9 @@ def test_silence_ratio_excludes_ai_speech():
         transcript="",
     )
 
-    # 통화 10초 중 AI 3초, 어르신 2초 → 나머지 5초가 침묵
-    assert metrics.silence_ratio == 0.5
+    # 통화 10초 중 AI가 3초를 썼으므로 어르신의 차례는 7초였고, 그중 2초를
+    # 말하고 5초를 침묵했다. 분모는 통화 전체가 아니라 그 7초다.
+    assert metrics.silence_ratio == 5 / 7
 
 
 def test_empty_call_does_not_divide_by_zero():
@@ -897,3 +898,50 @@ def test_elder_speech_without_duration_is_not_counted():
         transcript="",
     )
     assert zero_length.turn_count == 0
+
+
+# ------------------------------------------- AI 발화는 분모에서 빠진다 (v2)
+
+
+def test_speech_ratio_denominator_excludes_ai_talk_time():
+    """AI가 말한 시간은 어르신이 말할 수 있었던 시간이 아니다.
+
+    분모를 통화 전체로 두면 AI가 질문을 길게 한 날 어르신의 발화 비율이
+    떨어진다 — 어르신은 똑같이 말했는데 점수가 나빠진다. 응답 생성이 LLM으로
+    바뀌면 AI 발화량이 날마다 달라지므로 이 오차가 그대로 점수에 실린다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(0, 2_000)],
+        ai_turns=[seg(2_000, 4_000)],
+        transcript="",
+    )
+
+    # 어르신이 말할 수 있었던 시간은 10초가 아니라 8초다.
+    assert metrics.speech_ratio == 0.25
+
+
+def test_speech_and_silence_split_the_same_denominator():
+    """둘의 분모가 같아야 '발화 + 침묵 = 1'로 읽힌다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(0, 2_000)],
+        ai_turns=[seg(2_000, 4_000)],
+        transcript="",
+    )
+
+    assert metrics.silence_ratio == 0.75
+    assert metrics.speech_ratio + metrics.silence_ratio == 1.0
+
+
+def test_a_call_that_was_all_ai_has_no_measurable_ratios():
+    """어르신이 말할 틈이 없었으면 비율을 0으로 둔다 — 0으로 나누지 않는다."""
+    metrics = calculate_metrics(
+        call_duration_ms=2_000,
+        elder_speech=[],
+        ai_turns=[seg(0, 2_000)],
+        transcript="",
+    )
+
+    assert metrics.speech_ratio == 0.0
+    assert metrics.silence_ratio == 0.0

@@ -186,13 +186,25 @@ def calculate_metrics(
     elder_ms = _total_ms(elder_speech)
     ai_ms = _total_ms(ai_turns)
 
-    if call_duration_ms <= 0:
+    # 어르신이 말할 수 있었던 시간. AI가 말하는 동안은 어르신의 차례가
+    # 아니므로 분모에서 뺀다.
+    #
+    # 통화 전체를 분모로 두면 AI가 질문을 길게 한 날 어르신의 발화 비율이
+    # 떨어진다 — 어르신은 똑같이 말했는데 점수가 나빠진다. 지금은 응답이
+    # 고정 비프라 드러나지 않지만, 응답 생성이 LLM으로 바뀌면 AI 발화량이
+    # 날마다 달라지고 그 차이가 그대로 발화 벌점 35점에 실린다. 어르신의
+    # 상태가 아니라 우리 프롬프트가 점수를 움직이게 된다.
+    available_ms = call_duration_ms - ai_ms
+
+    if available_ms <= 0:
+        # AI가 통화 내내 말했거나 길이를 알 수 없다. 어르신이 말할 틈이
+        # 없었던 것을 "말을 안 했다"로 적지 않는다.
         speech_ratio = 0.0
         silence_ratio = 0.0
     else:
-        speech_ratio = elder_ms / call_duration_ms
-        # AI가 말하는 동안은 '어르신의 침묵'이 아니다.
-        silence_ratio = max(0, call_duration_ms - elder_ms - ai_ms) / call_duration_ms
+        speech_ratio = elder_ms / available_ms
+        # 같은 분모를 쓴다 — 그래야 발화 + 침묵 = 1로 읽힌다.
+        silence_ratio = max(0, available_ms - elder_ms) / available_ms
 
     return CallMetrics(
         avg_response_delay_ms=_average_response_delay(elder_speech, ai_turns),
@@ -322,7 +334,7 @@ _ALERT_THRESHOLD = 60
 # 이 숫자들 중 하나라도 바꾸면 이전 점수와 비교할 수 없다 — 어제 42점과
 # 오늘 42점이 다른 뜻이 된다. 결과에 함께 남겨서 나중에 구분할 수 있게 한다
 # (db/schema.sql의 call_metrics.calculator_version).
-CALCULATOR_VERSION = "1.0.0"
+CALCULATOR_VERSION = "2.0.0"
 
 
 @dataclass(frozen=True)

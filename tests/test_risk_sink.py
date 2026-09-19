@@ -69,7 +69,7 @@ def test_a_finished_call_gets_a_risk_score():
     result = recorded_for(outcomes, call.call_id)
     assert 0 <= result.risk.risk_score <= 100
     assert result.risk.risk_level in {"normal", "watch", "alert"}
-    assert result.calculator_version == "1.0.0"
+    assert result.calculator_version == "2.0.0"
 
 
 def test_the_first_call_has_no_baseline():
