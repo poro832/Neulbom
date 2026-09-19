@@ -10,13 +10,15 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     # /v1/voiceml, /v1/stream-ended가 Form()으로 받는다. urlencoded도 이걸 요구한다.
     "python-multipart>=0.0.9",
+    # app/telephony/client.py와 app/media/clova_voice.py가 모듈 최상단에서
+    # import한다. dev 그룹에만 있으면 `pip install .` 뒤 uvicorn이 뜨자마자
+    # ImportError로 죽는다 — 배포 당일에 발견하기 딱 좋은 자리였다.
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    # TestClient의 WebSocket 지원이 httpx를 요구한다.
-    "httpx>=0.27",
 ]
 
 [tool.pytest.ini_options]
