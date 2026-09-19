@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # 이 둘을 말로 구분할 수 있어야 추론을 안 한다.
 ACTIVE_STATUSES = frozenset({"scheduled", "ringing", "answered"})
 
+# 끝이 확인된 통화들. 미응답 이력은 이 중에서만 센다 — 결과가 미정인 통화가
+# 창의 한 칸을 차지하면 실제 미응답 이력이 희석된다(설계 3.3).
+FINISHED_STATUSES = frozenset({"completed", "no_answer", "failed"})
+
 # 이 시간이 지나도록 끝을 확인하지 못한 통화는 더 이상 '진행 중'이 아니다.
 # 스트림 종료도 사업자 웹훅도 유실될 수 있는데, 그 한 번의 유실이 어르신을
 # 영구히 잠가 버리면(다시는 전화를 요청할 수 없다) 복구할 방법이 없다.
@@ -91,6 +95,16 @@ class CallStore(Protocol):
 
     def mark_no_answer(self, call_id: int) -> None:
         """전화는 걸렸지만 오디오가 한 번도 붙지 않았다."""
+        ...
+
+    def recent_scheduled(
+        self, elder_id: int, limit: int, exclude_call_id: int | None = None
+    ) -> list[CallRecord]:
+        """끝난 예약 통화를 최신순(call_id 내림차순)으로 limit개까지.
+
+        위험 점수의 미응답 항목(20점)이 이 목록에서 나온다. 최신순은 규약이다
+        — 순서가 틀리면 엉뚱한 구간을 세고도 아무 오류가 나지 않는다.
+        """
         ...
 
 
@@ -262,6 +276,30 @@ class InMemoryCallStore:
 
     def mark_no_answer(self, call_id: int) -> None:
         self._finish(call_id, "no_answer")
+
+    def recent_scheduled(
+        self, elder_id: int, limit: int, exclude_call_id: int | None = None
+    ) -> list[CallRecord]:
+        """끝난 예약 통화를 최신순으로 (설계 3.3).
+
+        요청 통화는 세지 않는다. 그 미응답은 어르신이 버튼을 누르고 전화기를
+        못 찾은 것일 뿐이라, 위험 신호로 세면 활발한 분이 오히려 감점된다
+        (db/schema.sql의 calls.trigger_type 주석).
+
+        날짜가 아니라 건수로 세는 이유는 created_at이 time.monotonic()이라
+        날짜가 없기 때문이다. 벽시계를 들이면 시간 되감기에 순서가 뒤집힌다.
+        """
+        with self._lock:
+            found = [
+                call
+                for call in self._calls.values()
+                if call.elder_id == elder_id
+                and call.trigger_type == "scheduled"
+                and call.status in FINISHED_STATUSES
+                and call.call_id != exclude_call_id
+            ]
+        found.sort(key=lambda call: call.call_id, reverse=True)
+        return found[:limit]
 
     def _finish(self, call_id: int, status: str, audio_key: str | None = None) -> None:
         """활성 상태일 때만 종료 상태로 옮긴다.

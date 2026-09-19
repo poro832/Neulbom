@@ -404,3 +404,74 @@ def test_ending_a_call_we_do_not_know_does_not_raise():
 
     lifecycle.stream_finished(999, "a.wav")
     store.mark_no_answer(999)
+
+
+# ------------------------------------------------- 미응답 집계의 재료 (설계 3.3)
+
+
+def finished_call(store, elder_id, trigger_type, status):
+    """끝난 통화 하나를 만든다. 상태 전이는 실제 경로를 그대로 쓴다."""
+    call = store.create(elder_id=elder_id, trigger_type=trigger_type)
+    if status == "no_answer":
+        store.mark_no_answer(call.call_id)
+    elif status == "failed":
+        store.mark_failed(call.call_id)
+    else:
+        store.mark_completed(call.call_id, audio_key=f"{call.call_id}.wav")
+    return call
+
+
+def test_requested_calls_are_not_counted_as_no_answer_history():
+    """요청 통화의 미응답은 "버튼을 누르고 전화기를 못 찾았다"일 뿐이다.
+
+    위험 신호로 세면 활발한 어르신이 오히려 감점된다(db/schema.sql 주석).
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    finished_call(store, 12, "requested", "no_answer")
+    scheduled = finished_call(store, 12, "scheduled", "completed")
+
+    found = store.recent_scheduled(12, 7)
+
+    assert [call.call_id for call in found] == [scheduled.call_id]
+
+
+def test_calls_still_in_progress_do_not_take_a_slot():
+    """결과가 미정인 통화가 창의 한 칸을 먹으면 실제 미응답 이력이 희석된다."""
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    done = finished_call(store, 12, "scheduled", "no_answer")
+    store.create(elder_id=12, trigger_type="scheduled")  # 아직 진행 중
+
+    found = store.recent_scheduled(12, 7)
+
+    assert [call.call_id for call in found] == [done.call_id]
+
+
+def test_the_current_call_can_be_excluded():
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    older = finished_call(store, 12, "scheduled", "completed")
+    current = finished_call(store, 12, "scheduled", "completed")
+
+    found = store.recent_scheduled(12, 7, exclude_call_id=current.call_id)
+
+    assert [call.call_id for call in found] == [older.call_id]
+
+
+def test_recent_scheduled_is_newest_first_and_capped():
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    made = [finished_call(store, 12, "scheduled", "completed") for _ in range(10)]
+
+    found = store.recent_scheduled(12, 7)
+
+    assert [call.call_id for call in found] == [
+        call.call_id for call in reversed(made[-7:])
+    ]
+
+
+def test_another_elders_calls_are_not_counted():
+    store = InMemoryCallStore(phones={12: "070-1111-2222", 99: "070-3333-4444"})
+    mine = finished_call(store, 12, "scheduled", "no_answer")
+    finished_call(store, 99, "scheduled", "no_answer")
+
+    found = store.recent_scheduled(12, 7)
+
+    assert [call.call_id for call in found] == [mine.call_id]
