@@ -15,7 +15,7 @@ from app.api.store import InMemoryCallStore
 from app.main import build_risk_sink
 
 
-def analysis_of(speech_ratio=0.5, delay_ms=1500, degraded=False):
+def analysis_of(speech_ratio=0.5, delay_ms=1500, degraded=False, duration_ms=60_000):
     return CallAnalysis(
         metrics=CallMetrics(
             speech_ratio=speech_ratio,
@@ -25,11 +25,12 @@ def analysis_of(speech_ratio=0.5, delay_ms=1500, degraded=False):
             avg_response_delay_ms=delay_ms,
         ),
         clipped_ms=0,
+        call_duration_ms=duration_ms,
         degraded=degraded,
     )
 
 
-def past_outcome(call_id, elder_id=12, speech_ratio=0.5, delay_ms=1500):
+def past_outcome(call_id, elder_id=12, speech_ratio=0.5, delay_ms=1500, degraded=False):
     return CallOutcome(
         call_id=call_id,
         elder_id=elder_id,
@@ -42,8 +43,10 @@ def past_outcome(call_id, elder_id=12, speech_ratio=0.5, delay_ms=1500):
         ),
         risk=RiskAssessment(risk_score=0, risk_level="normal", baseline_delta=None),
         no_answer_recent_7=0,
+        baseline_n=0,
         clipped_ms=0,
-        degraded=False,
+        call_duration_ms=60_000,
+        degraded=degraded,
         calculator_version="1.0.0",
     )
 
@@ -263,3 +266,48 @@ def test_a_degraded_call_does_not_log_a_failure(caplog):
         sink(call.call_id, analysis_of(degraded=True))
 
     assert [record.message for record in caplog.records] == []
+
+
+# --------------------------------- 판단 재료를 남긴다 (경계는 정하지 않는다)
+
+
+def test_the_outcome_records_how_many_calls_the_baseline_used():
+    """기준선을 몇 통으로 만들었는지가 결과에 남아야 한다.
+
+    "몇 통부터 믿을 만한가"는 지금 알 수 없다 — 3이든 7이든 14든 근거가
+    없기는 마찬가지다. 경계를 지어내는 대신 실제 표본 수를 남겨서, 실통
+    데이터가 쌓이면 분포를 보고 정할 수 있게 한다.
+    """
+    history = [past_outcome(call_id) for call_id in (101, 102, 103, 104)]
+    _, outcomes, sink, call = make(history)
+
+    sink(call.call_id, analysis_of())
+
+    assert recorded_for(outcomes, call.call_id).baseline_n == 4
+
+
+def test_degraded_history_does_not_count_toward_the_baseline_sample():
+    """기준선에 안 쓴 통화를 표본 수에 세면 그 숫자가 거짓말이 된다."""
+    history = [past_outcome(call_id, degraded=True) for call_id in (101, 102, 103)]
+    _, outcomes, sink, call = make(history)
+
+    sink(call.call_id, analysis_of())
+
+    recorded = recorded_for(outcomes, call.call_id)
+    assert recorded.baseline_n == 0
+    assert recorded.risk is not None
+    assert recorded.risk.baseline_delta is None
+
+
+def test_the_outcome_records_the_call_duration():
+    """짧은 통화는 모든 비율이 불안정하다.
+
+    8초 통화의 25%와 5분 통화의 25%는 다른 뜻인데, "몇 초 미만을 버릴
+    것인가"는 실제 통화 분포를 봐야 정할 수 있다. 문턱을 지금 만들지 않고
+    판단 재료인 길이를 남긴다.
+    """
+    _, outcomes, sink, call = make()
+
+    sink(call.call_id, analysis_of(duration_ms=8_000))
+
+    assert recorded_for(outcomes, call.call_id).call_duration_ms == 8_000

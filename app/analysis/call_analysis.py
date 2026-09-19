@@ -32,6 +32,11 @@ _INT16_FULL_SCALE = 32768.0
 class CallAnalysis:
     metrics: CallMetrics
     clipped_ms: int
+    # 어르신이 말할 수 있었던 시간이 아니라 통화 전체 길이다. 짧은 통화는
+    # 모든 비율이 불안정한데(8초 통화의 25%와 5분 통화의 25%는 다른 뜻이다),
+    # "몇 초 미만을 버릴 것인가"는 실제 통화 분포를 보고 정해야 한다.
+    # 그 경계를 지금 지어내지 않고 판단 재료만 남긴다.
+    call_duration_ms: int
     # 실패가 아니라 "정확도 낮음"이다. 이전 두 주제에서 가져온 관례.
     degraded: bool
 
@@ -75,6 +80,7 @@ def analyze_call(
             transcript=transcript,
         ),
         clipped_ms=clipped.clipped_ms,
+        call_duration_ms=stream_duration_ms,
         degraded=degraded,
     )
 

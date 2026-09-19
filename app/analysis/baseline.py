@@ -23,6 +23,16 @@ BASELINE_WINDOW = 14
 BASELINE_MIN_CALLS = 3
 
 
+def usable_for_baseline(recent: Sequence[CallOutcome]) -> list[CallOutcome]:
+    """기준선 재료로 쓸 수 있는 결과만 남긴다.
+
+    호출부가 "표본이 몇 개였나"를 알아야 하는데, 그 셈을 각자 하면 여기의
+    필터와 갈라진다 — 한쪽이 degraded를 버리고 다른 쪽이 안 버리면 결과에
+    적히는 표본 수가 실제로 쓴 표본과 달라진다. 규칙을 여기 하나만 둔다.
+    """
+    return [outcome for outcome in recent if not outcome.degraded]
+
+
 def compute_baseline(recent: Sequence[CallOutcome]) -> Baseline | None:
     """과거 결과들에서 평소 상태를 구한다. 근거가 모자라면 None.
 
@@ -34,7 +44,7 @@ def compute_baseline(recent: Sequence[CallOutcome]) -> Baseline | None:
     현재 통화는 여기 들어오면 안 된다. 섞이면 델타가 자기 자신 쪽으로
     희석돼 나쁜 통화가 정상으로 보인다 — 오류도 경고도 나지 않는다.
     """
-    usable = [outcome for outcome in recent if not outcome.degraded]
+    usable = usable_for_baseline(recent)
     if len(usable) < BASELINE_MIN_CALLS:
         return None
 

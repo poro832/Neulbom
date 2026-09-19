@@ -25,7 +25,15 @@ class CallOutcome:
     # 허용한다(metrics_score_and_level_together).
     risk: RiskAssessment | None
     no_answer_recent_7: int
+    # 이 판정의 기준선을 과거 몇 통으로 만들었나(degraded 제외). 0이면
+    # 기준선 없이 절대 기준으로 낸 점수다.
+    #
+    # "몇 통부터 믿을 만한 기준선인가"는 지금 알 수 없다. 3이든 7이든 14든
+    # 근거가 없기는 마찬가지라, 경계를 지어내는 대신 실제 표본 수를 남긴다 —
+    # 실통 데이터가 쌓이면 분포를 보고 정할 수 있다.
+    baseline_n: int
     clipped_ms: int
+    call_duration_ms: int
     degraded: bool
     # 어느 가중치로 낸 점수인지. 없으면 나중에 점수끼리 비교할 수 없다.
     calculator_version: str

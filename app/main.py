@@ -18,7 +18,11 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from app.analysis.baseline import BASELINE_WINDOW, compute_baseline
+from app.analysis.baseline import (
+    BASELINE_WINDOW,
+    compute_baseline,
+    usable_for_baseline,
+)
 from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
@@ -70,7 +74,11 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
 
         try:
             # 아직 기록하지 않았으므로 이 조회에 현재 통화는 들어 있지 않다.
-            baseline = compute_baseline(outcomes.recent(elder_id, BASELINE_WINDOW))
+            recent = outcomes.recent(elder_id, BASELINE_WINDOW)
+            baseline = compute_baseline(recent)
+            # 판정에 실제로 쓰인 표본 수. 경계를 지어내지 않고 이 값을 결과에
+            # 실어서, 나중에 분포를 보고 "몇 통부터 믿는가"를 정하게 한다.
+            baseline_n = len(usable_for_baseline(recent))
             history = store.recent_scheduled(
                 elder_id, NO_ANSWER_WINDOW, exclude_call_id=call_id
             )
@@ -93,14 +101,17 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                     metrics=analysis.metrics,
                     risk=risk,
                     no_answer_recent_7=no_answer,
+                    baseline_n=baseline_n,
                     clipped_ms=analysis.clipped_ms,
+                    call_duration_ms=analysis.call_duration_ms,
                     degraded=analysis.degraded,
                     calculator_version=CALCULATOR_VERSION,
                 )
             )
             logger.info(
                 "위험 판정 call_id=%s elder_id=%s score=%s level=%s 기준선=%s "
-                "no_answer=%d speech_ratio=%.3f delay_ms=%s degraded=%s",
+                "no_answer=%d baseline_n=%d duration_ms=%d "
+                "speech_ratio=%.3f delay_ms=%s degraded=%s",
                 call_id,
                 elder_id,
                 # 근거가 부족해 판정하지 않은 통화는 여기서도 숫자를 만들지
@@ -110,6 +121,8 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                 "없음" if risk is None else risk.risk_level,
                 "있음" if baseline is not None else "없음",
                 no_answer,
+                baseline_n,
+                analysis.call_duration_ms,
                 analysis.metrics.speech_ratio,
                 analysis.metrics.avg_response_delay_ms,
                 analysis.degraded,

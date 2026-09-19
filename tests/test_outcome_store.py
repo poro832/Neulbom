@@ -22,7 +22,9 @@ def outcome(call_id, elder_id=12, speech_ratio=0.5):
         ),
         risk=RiskAssessment(risk_score=0, risk_level="normal", baseline_delta=None),
         no_answer_recent_7=0,
+        baseline_n=0,
         clipped_ms=0,
+        call_duration_ms=60_000,
         degraded=False,
         calculator_version="1.0.0",
     )
