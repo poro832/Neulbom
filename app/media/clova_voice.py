@@ -32,6 +32,12 @@ TTS_URL = "https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts"
 # 한국어 기준 상한. 넘기면 요청이 통째로 실패한다.
 TTS_MAX_CHARS = 2_000
 
+# 전체 길이와 **별개로** 문장당 상한이 있다(오류 VS18). 총 길이가 상한 안이어도
+# 한 문장이 여기를 넘으면 요청 전체가 실패하고, 그 턴은 소리가 안 나서
+# 어르신은 침묵을 듣는다. LLM이 쉼표로 길게 이어 붙인 문장을 뱉으면 바로
+# 걸리는 자리다.
+TTS_MAX_SENTENCE_CHARS = 200
+
 # wav 형식에서만 고를 수 있는 값들. 여기 없는 값을 보내면 거절당하므로
 # 호출 전에 막는다 — 실패한 요청도 왕복 시간은 쓴다.
 SUPPORTED_SAMPLE_RATES = frozenset({8000, 16000, 24000, 48000})
@@ -43,6 +49,13 @@ DEFAULT_SPEAKER = "nara_call"
 # CLOVA는 괄호 안 텍스트를 읽지 않는다. 오류도 없이 그냥 사라진다.
 # 우리가 먼저 지워야 "보낸 것"과 "들린 것"이 같아진다.
 _BRACKETED = re.compile(r"[(\[{][^)\]}]*[)\]}]")
+
+# 문장 끝. 뒤의 공백까지 함께 먹어 조각에 앞 공백이 남지 않게 한다.
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+# 문장 하나가 그래도 길면 쉼표에서 한 번 더 끊는다. 말의 호흡과 맞는
+# 자리라 소리가 어색해지지 않는다.
+_CLAUSE_END = re.compile(r"(?<=[,、;:])\s*")
 
 
 class Transport(Protocol):
@@ -71,8 +84,44 @@ def strip_unspoken(text: str) -> str:
     return " ".join(_BRACKETED.sub(" ", text).split())
 
 
+def split_for_tts(text: str, limit: int = TTS_MAX_SENTENCE_CHARS) -> list[str]:
+    """문장당 상한에 맞게 쪼갠다. 잘라 버리지 않고 전부 말한다.
+
+    문장 → 절 → (그래도 길면) 글자 수 순으로 끊는다. 앞의 두 단계는 말의
+    호흡과 맞는 자리라 이어 붙여도 어색하지 않다. 마지막은 최후 수단이다 —
+    구두점이 하나도 없는 250자짜리 발화도 소리는 나야 한다.
+    """
+    pieces: list[str] = []
+    for sentence in _SENTENCE_END.split(text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if len(sentence) <= limit:
+            pieces.append(sentence)
+            continue
+        for clause in _CLAUSE_END.split(sentence):
+            clause = clause.strip()
+            if not clause:
+                continue
+            while len(clause) > limit:
+                pieces.append(clause[:limit])
+                clause = clause[limit:]
+            if clause:
+                pieces.append(clause)
+    return pieces
+
+
 def _http_post(url: str, *, headers: dict, data: dict, timeout: float) -> bytes:
     response = httpx.post(url, headers=headers, data=data, timeout=timeout)
+    if response.status_code >= 400:
+        # 본문에 VS01~VS99 코드와 메시지가 들어 있다. 이걸 버리면 로그에는
+        # 400만 남아서, speaker 이름이 틀린 건지(VS02) 문장이 긴 건지(VS18)
+        # 합성 자체가 실패한 건지(VS26) 구분할 수 없다.
+        logger.error(
+            "CLOVA Voice 요청 실패 status=%s body=%s",
+            response.status_code,
+            response.text[:500],
+        )
     response.raise_for_status()
     return response.content
 
@@ -128,6 +177,10 @@ class ClovaVoice:
             )
             spoken = spoken[:TTS_MAX_CHARS]
 
+        pieces = split_for_tts(spoken)
+        return b"".join(self._synthesize_one(p, sample_rate) for p in pieces)
+
+    def _synthesize_one(self, spoken: str, sample_rate: int) -> bytes:
         raw = self._transport(
             TTS_URL,
             headers={

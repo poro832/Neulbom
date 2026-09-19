@@ -12,6 +12,7 @@ import pytest
 
 from app.media.clova_voice import (
     TTS_MAX_CHARS,
+    TTS_MAX_SENTENCE_CHARS,
     ClovaVoice,
     strip_unspoken,
 )
@@ -179,6 +180,53 @@ def test_overlong_text_is_cut_and_reported(caplog):
     with caplog.at_level(logging.WARNING, logger="app.media.clova_voice"):
         voice.synthesize("가" * (TTS_MAX_CHARS + 50), 8000)
 
-    _, _, data = transport.calls[0]
-    assert len(data["text"]) == TTS_MAX_CHARS
+    # 문장당 상한 때문에 여러 요청으로 나뉜다. 확인할 것은 "전체가 상한까지만
+    # 갔는가"이지 "한 요청이 2,000자인가"가 아니다.
+    sent = "".join(data["text"] for _, _, data in transport.calls)
+    assert len(sent) == TTS_MAX_CHARS
     assert caplog.records
+
+
+# ------------------------------------------------- 문장당 200자 (VS18)
+
+
+def test_a_long_reply_is_split_into_sentences():
+    """전체 2,000자와 별개로 문장당 200자 상한이 있다(오류 VS18).
+
+    LLM이 쉼표로 길게 이어 붙인 한 문장을 뱉으면 — 어르신 말투를 흉내 내면
+    충분히 있을 법하다 — 총 길이가 상한 안이어도 요청이 통째로 실패한다.
+    그러면 그 턴은 소리가 안 나고 어르신은 침묵을 듣는다.
+    """
+    long_sentence = "가" * 250
+    voice, transport = make(reply=wav_bytes(PCM, 8000))
+
+    voice.synthesize(f"짧은 문장입니다. {long_sentence}", 8000)
+
+    sent = [data["text"] for _, _, data in transport.calls]
+    assert len(sent) > 1
+    assert all(len(chunk) <= TTS_MAX_SENTENCE_CHARS for chunk in sent)
+    # 잘라 버리지 않는다 — 다 말한다.
+    assert sum(len(c) for c in sent) >= 250
+
+
+def test_the_pieces_are_joined_back_into_one_audio_stream():
+    """여러 번 합성해도 어르신에게는 한 번의 발화로 들려야 한다.
+
+    조각 수를 손으로 세지 않는다 — 구두점이 없는 250자는 문장으로도 절로도
+    안 끊겨서 글자 수로 잘리고, 그 개수는 상한에 딸린 값이다. 확인할 것은
+    "요청한 만큼이 빠짐없이 이어 붙었는가"다.
+    """
+    voice, transport = make(reply=wav_bytes(PCM, 8000))
+
+    audio = voice.synthesize("가" * 250 + ". " + "나" * 250, 8000)
+
+    assert len(audio) == len(PCM) * len(transport.calls)
+
+
+def test_a_short_reply_is_still_one_request():
+    """쪼갤 이유가 없으면 왕복을 늘리지 않는다 — 왕복마다 어르신이 기다린다."""
+    voice, transport = make()
+
+    voice.synthesize("오늘 하루 어떠셨어요?", 8000)
+
+    assert len(transport.calls) == 1
