@@ -5,6 +5,8 @@
 서비스의 간판 주장이 전화 경로에서 증명되지 않는다.
 """
 
+import logging
+
 from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CallMetrics, RiskAssessment
 from app.analysis.outcome import CallOutcome
@@ -224,3 +226,40 @@ def test_degraded_history_never_seeds_the_next_baseline():
     sink(call.call_id, analysis_of())
 
     assert recorded_for(outcomes, call.call_id).risk.baseline_delta is None
+
+
+def test_a_degraded_call_gets_no_score_at_all():
+    """근거가 부족한 통화에는 숫자를 붙이지 않는다.
+
+    보호자는 숫자만 본다. "62점" 아래에 작게 "근거 부족"이라고 적어도 62가
+    머리에 남는다. 그건 "조용히 틀린 숫자가 서버가 죽는 것보다 나쁘다"는
+    이 프로젝트의 원칙과 정면으로 충돌한다 — 원칙을 지키려면 숫자를 내지
+    않아야 한다.
+
+    지표는 남긴다. 측정은 했고 판정만 하지 않은 것이라, 나중에 근거가
+    채워지면 다시 판정할 수 있어야 한다.
+    """
+    _, outcomes, sink, call = make()
+
+    sink(call.call_id, analysis_of(degraded=True))
+
+    recorded = recorded_for(outcomes, call.call_id)
+    assert recorded.risk is None
+    assert recorded.degraded is True
+    assert recorded.metrics.speech_ratio == 0.5
+
+
+def test_a_degraded_call_does_not_log_a_failure(caplog):
+    """점수를 내지 않는 것과 판정이 실패하는 것은 다르다.
+
+    로그 줄이 risk를 무조건 읽으면 degraded 통화마다 AttributeError가 나고,
+    그 예외는 아래 except가 삼켜서 "위험 판정 실패"로만 남는다. 결과는 이미
+    기록된 뒤라 정상으로 보이므로, 결과만 검사하는 테스트로는 절대 잡히지
+    않는다 — 로그를 봐야 한다.
+    """
+    _, _, sink, call = make()
+
+    with caplog.at_level(logging.ERROR, logger="app.main"):
+        sink(call.call_id, analysis_of(degraded=True))
+
+    assert [record.message for record in caplog.records] == []

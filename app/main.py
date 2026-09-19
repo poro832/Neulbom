@@ -76,8 +76,15 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
             )
             no_answer = sum(1 for call in history if call.status == "no_answer")
 
-            risk = assess_risk(
-                analysis.metrics, baseline=baseline, no_answer_recent_7=no_answer
+            # 근거가 부족하다고 우리가 직접 표시한 통화다. 점수를 내지
+            # 않는다 — 옆에 경고를 달아도 보호자 머리에는 숫자가 남는다.
+            # 지표는 아래에서 그대로 기록하므로 나중에 다시 판정할 수 있다.
+            risk = (
+                None
+                if analysis.degraded
+                else assess_risk(
+                    analysis.metrics, baseline=baseline, no_answer_recent_7=no_answer
+                )
             )
             outcomes.record(
                 CallOutcome(
@@ -92,12 +99,15 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                 )
             )
             logger.info(
-                "위험 판정 call_id=%s elder_id=%s score=%d level=%s 기준선=%s "
+                "위험 판정 call_id=%s elder_id=%s score=%s level=%s 기준선=%s "
                 "no_answer=%d speech_ratio=%.3f delay_ms=%s degraded=%s",
                 call_id,
                 elder_id,
-                risk.risk_score,
-                risk.risk_level,
+                # 근거가 부족해 판정하지 않은 통화는 여기서도 숫자를 만들지
+                # 않는다. %d로 두면 None에서 터지는데, 그 예외는 아래
+                # except가 삼켜서 degraded 통화마다 조용히 실패 로그만 남는다.
+                "없음" if risk is None else risk.risk_score,
+                "없음" if risk is None else risk.risk_level,
                 "있음" if baseline is not None else "없음",
                 no_answer,
                 analysis.metrics.speech_ratio,
