@@ -102,9 +102,17 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                     risk=risk,
                     no_answer_recent_7=no_answer,
                     baseline_n=baseline_n,
+                    baseline_speech_ratio=(
+                        None if baseline is None else baseline.speech_ratio
+                    ),
+                    baseline_avg_response_delay_ms=(
+                        None if baseline is None else baseline.avg_response_delay_ms
+                    ),
                     clipped_ms=analysis.clipped_ms,
+                    filled_gap_ms=analysis.filled_gap_ms,
                     call_duration_ms=analysis.call_duration_ms,
                     degraded=analysis.degraded,
+                    degraded_reasons=analysis.degraded_reasons,
                     calculator_version=CALCULATOR_VERSION,
                 )
             )

@@ -32,8 +32,17 @@ class CallOutcome:
     # 근거가 없기는 마찬가지라, 경계를 지어내는 대신 실제 표본 수를 남긴다 —
     # 실통 데이터가 쌓이면 분포를 보고 정할 수 있다.
     baseline_n: int
+    # 이 판정이 실제로 쓴 기준선. 기준선은 저장하지 않고 매번 과거에서 다시
+    # 계산하므로(설계 3.1), 당시 값을 남겨 두지 않으면 나중에 이 판정을
+    # 재현할 수 없다 — 이력이 한 줄만 늘어도 기준선이 달라진다.
+    baseline_speech_ratio: float | None
+    baseline_avg_response_delay_ms: int | None
     clipped_ms: int
+    filled_gap_ms: int
     call_duration_ms: int
     degraded: bool
+    # 왜 근거가 부족한가. 에코(우리 알고리즘) / 유실(통신) / 표식 불일치
+    # (사업자)는 고쳐야 할 곳이 전혀 다른데 bool 하나로는 구분이 안 된다.
+    degraded_reasons: tuple[str, ...]
     # 어느 가중치로 낸 점수인지. 없으면 나중에 점수끼리 비교할 수 없다.
     calculator_version: str

@@ -25,8 +25,9 @@ def analysis_of(speech_ratio=0.5, delay_ms=1500, degraded=False, duration_ms=60_
             avg_response_delay_ms=delay_ms,
         ),
         clipped_ms=0,
+        filled_gap_ms=0,
         call_duration_ms=duration_ms,
-        degraded=degraded,
+        degraded_reasons=("echo_clip",) if degraded else (),
     )
 
 
@@ -44,9 +45,13 @@ def past_outcome(call_id, elder_id=12, speech_ratio=0.5, delay_ms=1500, degraded
         risk=RiskAssessment(risk_score=0, risk_level="normal", baseline_delta=None),
         no_answer_recent_7=0,
         baseline_n=0,
+        baseline_speech_ratio=None,
+        baseline_avg_response_delay_ms=None,
         clipped_ms=0,
+        filled_gap_ms=0,
         call_duration_ms=60_000,
         degraded=degraded,
+        degraded_reasons=(),
         calculator_version="1.0.0",
     )
 
@@ -311,3 +316,28 @@ def test_the_outcome_records_the_call_duration():
     sink(call.call_id, analysis_of(duration_ms=8_000))
 
     assert recorded_for(outcomes, call.call_id).call_duration_ms == 8_000
+
+
+def test_the_outcome_records_why_the_call_was_degraded():
+    """사유를 남겨야 어디를 고쳐야 할지 알 수 있다 — bool 하나로는 못 한다."""
+    _, outcomes, sink, call = make()
+
+    sink(call.call_id, analysis_of(degraded=True))
+
+    assert recorded_for(outcomes, call.call_id).degraded_reasons == ("echo_clip",)
+
+
+def test_the_outcome_records_the_baseline_it_actually_used():
+    """기준선은 저장하지 않고 매번 과거에서 다시 계산한다(설계 3.1).
+
+    그래서 당시 쓴 값을 남기지 않으면 이 판정을 재현할 수 없다 — 이력이 한
+    줄만 늘어도 기준선이 달라지고, 녹음이 사라진 뒤에는 되돌릴 방법이 없다.
+    """
+    history = [past_outcome(call_id) for call_id in (101, 102, 103)]
+    _, outcomes, sink, call = make(history)
+
+    sink(call.call_id, analysis_of(speech_ratio=0.2))
+
+    recorded = recorded_for(outcomes, call.call_id)
+    assert recorded.baseline_speech_ratio == 0.5
+    assert recorded.baseline_avg_response_delay_ms == 1500

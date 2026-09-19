@@ -25,6 +25,14 @@ from app.analysis.vad_segmenter import segment_audio
 # 어르신 발화의 이만큼이 AI 재생 구간과 겹쳤다면 지표를 그대로 믿기 어렵다.
 DEGRADED_CLIP_RATIO = 0.3
 
+# degraded 사유. bool 하나로 뭉개면 성격이 전혀 다른 세 원인이 구분되지
+# 않는다 — 에코는 우리 알고리즘 문제, 유실은 통신 문제, 표식 불일치는
+# 사업자 쪽 문제다. 어디를 고쳐야 하는지가 달라지므로 따로 남긴다.
+# 보호자에게 "왜 계산하지 못했는지"를 말할 때도 이 값이 필요하다.
+DEGRADED_ECHO_CLIP = "echo_clip"
+DEGRADED_FABRICATED_SILENCE = "fabricated_silence"
+DEGRADED_UNMATCHED_MARKS = "unmatched_marks"
+
 _INT16_FULL_SCALE = 32768.0
 
 
@@ -32,13 +40,23 @@ _INT16_FULL_SCALE = 32768.0
 class CallAnalysis:
     metrics: CallMetrics
     clipped_ms: int
+    # 스트림 유실을 메우려고 우리가 지어낸 침묵. degraded 판정에만 쓰고
+    # 버리면, 통신 품질이 점수에 준 영향을 나중에 볼 수 없다.
+    filled_gap_ms: int
     # 어르신이 말할 수 있었던 시간이 아니라 통화 전체 길이다. 짧은 통화는
     # 모든 비율이 불안정한데(8초 통화의 25%와 5분 통화의 25%는 다른 뜻이다),
     # "몇 초 미만을 버릴 것인가"는 실제 통화 분포를 보고 정해야 한다.
     # 그 경계를 지금 지어내지 않고 판단 재료만 남긴다.
     call_duration_ms: int
     # 실패가 아니라 "정확도 낮음"이다. 이전 두 주제에서 가져온 관례.
-    degraded: bool
+    #
+    # 사유 목록이 원본이고 degraded는 거기서 파생된다. 둘을 따로 들고 있으면
+    # 한쪽만 갱신되어 "degraded인데 사유가 없다" 같은 상태가 생긴다.
+    degraded_reasons: tuple[str, ...] = ()
+
+    @property
+    def degraded(self) -> bool:
+        return bool(self.degraded_reasons)
 
 
 def analyze_call(
@@ -68,7 +86,7 @@ def analyze_call(
     # degraded 판정이 통째로 꺼진다 — 정확도가 낮은 통화가 조용히 '정상'이
     # 되어 보호자에게 그대로 나간다.
     detected_ms = sum(s.duration_ms for s in detected if s.has_duration)
-    degraded = (
+    clipped_too_much = (
         detected_ms > 0 and clipped.clipped_ms / detected_ms > DEGRADED_CLIP_RATIO
     )
 
@@ -80,8 +98,10 @@ def analyze_call(
             transcript=transcript,
         ),
         clipped_ms=clipped.clipped_ms,
+        # 이 함수는 세션을 모른다. 유실량은 post_call이 채운다.
+        filled_gap_ms=0,
         call_duration_ms=stream_duration_ms,
-        degraded=degraded,
+        degraded_reasons=(DEGRADED_ECHO_CLIP,) if clipped_too_much else (),
     )
 
 

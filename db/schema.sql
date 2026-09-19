@@ -119,6 +119,27 @@ CREATE TABLE call_metrics (
     avg_response_delay_ms   INT  CHECK (avg_response_delay_ms >= 0),
     no_answer_recent_7      INT  CHECK (no_answer_recent_7 BETWEEN 0 AND 7),
 
+    -- 판정에 쓰지 않는 원자료. 통화 녹음은 30일 뒤 삭제되므로(설계 3.6),
+    -- 여기 남기지 않은 값은 그 뒤로 어디에서도 복구할 수 없다 — wav가 없으면
+    -- 다시 계산할 방법이 없다. 비율만 남기면 분모를 바꾼 순간(2.0.0이 그랬다)
+    -- 과거 데이터를 재해석할 수조차 없다.
+    call_duration_ms        INT CHECK (call_duration_ms  >= 0),
+    elder_speech_ms         INT CHECK (elder_speech_ms   >= 0),
+    ai_speech_ms            INT CHECK (ai_speech_ms      >= 0),
+    silence_ms              INT CHECK (silence_ms        >= 0),
+    -- 스트림 유실을 메운 지어낸 침묵. 30% 문턱 아래여도 지표는 이미 그만큼
+    -- 끌려가므로, degraded가 아니어도 남긴다.
+    filled_gap_ms           INT CHECK (filled_gap_ms     >= 0),
+    -- 턴별 응답 지연 원본. 평균이 나은지 중앙값이 나은지는 분포를 봐야
+    -- 정할 수 있는데, 평균만 남기면 그 질문에 영영 답할 수 없다.
+    response_delays_ms      INT[],
+
+    -- 이 판정이 실제로 쓴 기준선. 기준선은 저장하지 않고 매번 과거에서 다시
+    -- 계산하므로(설계 3.1), 당시 값이 없으면 판정을 재현할 수 없다.
+    baseline_n              INT  CHECK (baseline_n >= 0),
+    baseline_speech_ratio   REAL CHECK (baseline_speech_ratio BETWEEN 0 AND 1),
+    baseline_avg_response_delay_ms INT CHECK (baseline_avg_response_delay_ms >= 0),
+
     -- VAD 실패 시 NULL. 임의 점수를 만들지 않는다(설계 8장).
     risk_score              INT  CHECK (risk_score BETWEEN 0 AND 100),
     risk_level              TEXT CHECK (risk_level IN ('normal', 'watch', 'alert')),
@@ -127,6 +148,10 @@ CREATE TABLE call_metrics (
     baseline_delay_delta_ms INT,
 
     degraded                BOOLEAN NOT NULL DEFAULT false,
+    -- 왜 근거가 부족한가: echo_clip(우리 알고리즘) / fabricated_silence(통신) /
+    -- unmatched_marks(사업자). 고쳐야 할 곳이 전혀 다른데 bool 하나로는
+    -- 구분이 안 되고, 보호자에게 "왜 계산하지 못했는지"도 말할 수 없다.
+    degraded_reasons        TEXT[] NOT NULL DEFAULT '{}',
     -- 가중치를 바꾸면 이전 점수와 비교할 수 없다. 어느 버전이 낸 점수인지 남긴다.
     calculator_version      TEXT NOT NULL,
     computed_at             TIMESTAMPTZ NOT NULL DEFAULT now(),

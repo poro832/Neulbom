@@ -112,3 +112,33 @@ def test_a_recording_mostly_made_of_fabricated_silence_is_degraded(tmp_path):
 
     assert measured.degraded is False
     assert fabricated.degraded is True
+
+
+def test_degraded_reasons_name_which_of_the_three_causes_fired(tmp_path):
+    """세 원인은 고쳐야 할 곳이 전혀 다르다.
+
+    에코는 우리 에코 제거 알고리즘, 지어낸 침묵은 통신 품질, 표식 불일치는
+    사업자 쪽 문제다. bool 하나로 뭉개면 로그를 봐도 어디를 봐야 할지 알
+    수 없고, 보호자에게 "왜 계산하지 못했는지"도 말할 수 없다.
+    """
+    path = write_wav(tmp_path / "c.wav", [("speech", 2000), ("silence", 2000)])
+
+    clean = analyze_session(FakeSession(), path)
+    marks = analyze_session(FakeSession(unmatched_marks=1), path)
+
+    assert clean.degraded_reasons == ()
+    assert marks.degraded_reasons == ("unmatched_marks",)
+
+
+def test_the_fabricated_silence_is_kept_even_when_it_does_not_degrade(tmp_path):
+    """판정에 안 걸린 유실량도 남긴다.
+
+    30% 문턱 아래여도 지표는 이미 그만큼 끌려간다. 녹음이 30일 뒤 사라지면
+    통신 품질이 이 통화에 얼마나 개입했는지 다시 볼 방법이 없다.
+    """
+    path = write_wav(tmp_path / "d.wav", [("speech", 2000), ("silence", 2000)])
+
+    analysis = analyze_session(FakeSession(filled_gap_ms=200), path)
+
+    assert analysis.degraded is False
+    assert analysis.filled_gap_ms == 200

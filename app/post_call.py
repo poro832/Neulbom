@@ -16,7 +16,12 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from app.analysis.call_analysis import CallAnalysis, analyze_call
+from app.analysis.call_analysis import (
+    DEGRADED_FABRICATED_SILENCE,
+    DEGRADED_UNMATCHED_MARKS,
+    CallAnalysis,
+    analyze_call,
+)
 from app.media.session import CallSession
 
 logger = logging.getLogger(__name__)
@@ -45,6 +50,9 @@ def analyze_session(
 
     fabricated = session.filled_gap_ms
     duration = session.stream_duration_ms
+    # 판정에 쓰든 안 쓰든 원본은 남긴다 — 녹음이 30일 뒤 사라지면 통신
+    # 품질이 이 통화의 지표에 얼마나 개입했는지 다시 볼 방법이 없다.
+    analysis = replace(analysis, filled_gap_ms=fabricated)
     if duration > 0 and fabricated / duration > DEGRADED_FABRICATED_RATIO:
         # 녹음의 상당 부분이 우리가 채운 침묵이다. 분모(stream_duration_ms)에는
         # 들어가는데 분자(발화)에는 안 들어가므로 발화 비율이 아래로 끌린다 —
@@ -56,7 +64,11 @@ def analyze_session(
             fabricated,
             duration,
         )
-        analysis = replace(analysis, degraded=True)
+        analysis = replace(
+            analysis,
+            degraded_reasons=analysis.degraded_reasons
+            + (DEGRADED_FABRICATED_SILENCE,),
+        )
 
     if session.unmatched_marks:
         # 짝이 안 맞은 표식은 AI 발화 구간 하나를 통째로 잃었다는 뜻이다.
@@ -68,6 +80,9 @@ def analyze_session(
             session.call_id,
             session.unmatched_marks,
         )
-        analysis = replace(analysis, degraded=True)
+        analysis = replace(
+            analysis,
+            degraded_reasons=analysis.degraded_reasons + (DEGRADED_UNMATCHED_MARKS,),
+        )
 
     return analysis
