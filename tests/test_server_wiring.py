@@ -292,3 +292,77 @@ def test_a_real_call_produces_a_risk_score(tmp_path):
     assert 0 <= results[0].risk.risk_score <= 100
     # STT가 없어 부정 표현은 항상 0이다 — 없는 부정어를 지어내지 않는다.
     assert results[0].metrics.negative_word_count == 0
+
+
+def run_conversation(client, token):
+    """AI가 한 번 말하고 어르신이 대답하는 통화를 끝까지 돌린다.
+
+    run_stream은 mark를 되돌려주지 않아서 AI 발화 구간이 하나도 안 생긴다.
+    그러면 응답 지연(100점 중 25점)도, 에코 제거도, 지표의 분모에서 AI
+    시간을 빼는 계산도 전 구간에서 한 번도 돌지 않는다 — 단위 테스트에만
+    있고 조립된 서버에서는 검증된 적이 없었다.
+    """
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event(token)))
+        index = 0
+        for _ in range(20):  # 어르신 발화
+            socket.send_text(json.dumps(media_event(speech_payload(), index * 20)))
+            index += 1
+        for _ in range(45):  # 발화 종료를 VAD가 확정할 만큼의 침묵
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+
+        marks = []
+        while len(marks) < 2:
+            message = json.loads(socket.receive_text())
+            if message["event"] == "mark":
+                marks.append(message["mark"]["name"])
+
+        # 플랫폼이 재생을 시작하고 끝냈다고 알려 온다. 그 사이 시각이
+        # AI 발화 구간이 된다 — 우리가 보낸 시각이 아니다.
+        #
+        # 타임스탬프를 건너뛰지 않고 프레임을 계속 보낸다. 실제 통화에서도
+        # AI 재생 중에 어르신 트랙은 쉬지 않고 들어온다. 건너뛰면 세션이
+        # 그 구간을 침묵으로 지어내고, 지어낸 양이 30%를 넘으면 통화가
+        # degraded가 되어 점수가 아예 안 나온다 — 하네스가 비현실적이면
+        # 검사하려던 경로에 닿지도 못한다.
+        socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+        socket.send_text(json.dumps({"event": "mark", "mark": {"name": marks[0]}}))
+        index += 1
+        for _ in range(30):  # AI가 말하는 동안
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        socket.send_text(json.dumps({"event": "mark", "mark": {"name": marks[1]}}))
+
+        for _ in range(15):  # AI가 말을 끝낸 뒤 어르신이 대답하기까지
+            socket.send_text(json.dumps(media_event(silence_payload(), index * 20)))
+            index += 1
+        for _ in range(20):
+            socket.send_text(json.dumps(media_event(speech_payload(), index * 20)))
+            index += 1
+        socket.send_text(json.dumps({"event": "stop"}))
+
+
+def test_a_conversation_produces_an_ai_turn_and_a_response_delay(tmp_path):
+    """mark 왕복이 조립된 서버에서 실제로 지표가 되는지 본다.
+
+    이 경로가 비어 있으면 응답 지연은 영원히 None이고, 분모에서 AI 시간을
+    빼는 계산도 ai_speech_ms=0 위에서만 돌아 아무것도 증명하지 못한다.
+    """
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes)
+    call_id, _, token = place_call(client, store)
+
+    run_conversation(client, token)
+
+    recorded = outcomes.recent(12, 14)[0]
+    assert recorded.call_id == call_id
+    # AI가 말한 시간이 실제로 측정됐다.
+    assert recorded.metrics.ai_speech_ms > 0
+    # 그리고 그만큼 분모에서 빠졌다.
+    assert recorded.metrics.ai_speech_ms < recorded.call_duration_ms
+    assert 0.0 <= recorded.metrics.speech_ratio <= 1.0
+    # 하네스가 프레임을 빠뜨리면 지어낸 침묵이 30%를 넘어 degraded가 되고,
+    # 그러면 점수가 안 나와 이 경로를 검사하지 못한다.
+    assert recorded.degraded is False, recorded.degraded_reasons
+    assert recorded.risk is not None

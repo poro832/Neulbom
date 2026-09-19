@@ -1096,3 +1096,38 @@ def test_endings_that_were_being_missed(transcript, expected, why):
     )
 
     assert metrics.negative_word_count == expected, why
+
+
+def test_speech_outside_the_call_window_is_not_counted():
+    """통화 창 밖의 소리는 그 통화의 발화가 아니다.
+
+    stream_duration_ms는 녹음 바이트 수를 정수 나눗셈해서 구하므로 내림된다.
+    반면 VAD는 wav 전체를 보므로 구간이 끝을 아주 살짝 넘길 수 있다. 짧은
+    통화에서는 그 몇 ms가 비율을 1 너머로 밀어내고, 그러면 스키마의
+    CHECK (speech_ratio BETWEEN 0 AND 1)에 걸려 결과가 통째로 버려진다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=1_000,
+        elder_speech=[seg(-200, 400), seg(800, 5_000)],
+        ai_turns=[],
+        transcript="",
+    )
+
+    # 창 안에 든 건 0~400과 800~1000, 합쳐서 600ms다.
+    assert metrics.elder_speech_ms == 600
+    assert metrics.speech_ratio == 0.6
+    assert 0.0 <= metrics.silence_ratio <= 1.0
+
+
+def test_ai_playback_outside_the_call_window_is_not_counted():
+    """AI 구간도 마찬가지다. 창을 넘기면 분모가 음수가 되어 지표가 접힌다."""
+    metrics = calculate_metrics(
+        call_duration_ms=1_000,
+        elder_speech=[seg(0, 200)],
+        ai_turns=[seg(500, 9_000)],
+        transcript="",
+    )
+
+    assert metrics.ai_speech_ms == 500
+    # 어르신의 차례는 500ms였고 그중 200ms를 말했다.
+    assert metrics.speech_ratio == 0.4

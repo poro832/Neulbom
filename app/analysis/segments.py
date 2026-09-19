@@ -55,3 +55,27 @@ def merge_overlapping(segments: Sequence[VadSegment]) -> list[VadSegment]:
         else:
             merged.append(segment)
     return merged
+
+
+def clip_to_window(
+    segments: Sequence[VadSegment], start_ms: int, end_ms: int
+) -> list[VadSegment]:
+    """구간을 [start_ms, end_ms] 안으로 자른다. 밖으로 나간 부분은 버린다.
+
+    통화 창 밖의 소리는 그 통화의 발화가 아니다. 감추려고 자르는 게 아니라,
+    세는 대상을 창 안으로 한정하는 것이다.
+
+    실제로 어긋나는 경로가 있다. stream_duration_ms는 녹음 바이트 수를 정수
+    나눗셈해서 구하므로 내림되는데, VAD는 wav 전체를 보므로 마지막 구간이
+    끝을 몇 ms 넘길 수 있다. 짧은 통화에서는 그게 비율을 1 너머로 밀어내고,
+    스키마의 CHECK (speech_ratio BETWEEN 0 AND 1)에 걸려 결과가 통째로
+    버려진다 — 점수가 틀리는 게 아니라 아예 남지 않는다.
+    """
+    clipped: list[VadSegment] = []
+    for segment in segments:
+        piece = VadSegment(
+            max(segment.start_ms, start_ms), min(segment.end_ms, end_ms)
+        )
+        if piece.has_duration:
+            clipped.append(piece)
+    return clipped

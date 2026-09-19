@@ -25,7 +25,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from app.analysis.segments import VadSegment, merge_overlapping
+from app.analysis.segments import (
+    VadSegment,
+    clip_to_window,
+    merge_overlapping,
+)
 
 # 어간으로 매칭한다. 한국어는 어미가 변해서 완전 일치로는 거의 못 잡는다.
 # "아프다 / 아파요 / 아픕니다"를 모두 잡으려면 어간 목록이 필요하다.
@@ -226,14 +230,16 @@ def calculate_metrics(
     # 겹친 구간은 합쳐서 한 번만 센다. 에코 제거는 이미 그렇게 쓰는데
     # 여기서만 단순 합산하면 같은 구간이 한쪽에서는 9초, 다른 쪽에서는
     # 12초가 된다 — 부풀려진 AI 시간이 아래 분모를 깎는다.
-    ai_turns = merge_overlapping(ai_turns)
+    ai_turns = clip_to_window(merge_overlapping(ai_turns), 0, call_duration_ms)
 
     # 어르신 발화도 같은 규칙으로 거른다. 뒤집힌 구간이 들어오면 _total_ms가
     # 음수가 되어 speech_ratio가 음수, silence_ratio가 1을 넘는다 — 비율로서
     # 불가능한 값이라 그 위에서 계산하는 위험 점수가 의미를 잃는다. 길이 0인
     # 구간은 발화 턴 수만 공짜로 올린다. 실제 경로에서는 segment_audio가
     # min_speech_ms로 먼저 걸러 주지만, 이 함수는 직접 호출도 받는다.
-    elder_speech = merge_overlapping(elder_speech)
+    elder_speech = clip_to_window(
+        merge_overlapping(elder_speech), 0, call_duration_ms
+    )
 
     elder_ms = _total_ms(elder_speech)
     ai_ms = _total_ms(ai_turns)
