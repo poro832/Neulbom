@@ -945,3 +945,44 @@ def test_a_call_that_was_all_ai_has_no_measurable_ratios():
 
     assert metrics.speech_ratio == 0.0
     assert metrics.silence_ratio == 0.0
+
+
+# ------------------- 판정에 안 쓰는 원본도 남긴다 (녹음은 30일 뒤 사라진다)
+
+
+def metrics_with_two_turns():
+    return calculate_metrics(
+        call_duration_ms=20_000,
+        elder_speech=[seg(3_000, 5_000), seg(12_000, 13_000)],
+        ai_turns=[seg(0, 2_000), seg(8_000, 9_000)],
+        transcript="",
+    )
+
+
+def test_raw_millisecond_measurements_survive_the_ratio():
+    """비율만 남기면 분모를 바꾼 순간 과거 데이터를 재해석할 수 없다.
+
+    2.0.0에서 실제로 분모를 바꿨다. 원본 ms가 없었다면 그 이전 결과는
+    무엇으로도 되돌릴 수 없었을 것이다 — 녹음은 30일 뒤 삭제되므로
+    다시 계산할 wav도 없다.
+    """
+    metrics = metrics_with_two_turns()
+
+    assert metrics.elder_speech_ms == 3_000
+    assert metrics.ai_speech_ms == 3_000
+    # 어르신의 차례는 20초 중 17초였고 그중 3초를 말했다.
+    assert metrics.silence_ms == 14_000
+    assert metrics.elder_speech_ms + metrics.silence_ms == 17_000
+
+
+def test_per_turn_delays_are_kept_not_just_their_average():
+    """평균이 나은지 중앙값이 나은지는 분포를 봐야 정할 수 있다.
+
+    평균만 남기면 그 질문에 30일 뒤에는 답할 수 없다. 지금 판정에 쓰지
+    않더라도 원본을 남겨 둬야 나중에 계산식을 고칠 근거가 생긴다.
+    """
+    metrics = metrics_with_two_turns()
+
+    assert metrics.response_delays_ms == (1_000, 3_000)
+    # 지금 판정이 쓰는 값은 이 원본에서 나온다 — 둘이 갈라지면 안 된다.
+    assert metrics.avg_response_delay_ms == 2_000

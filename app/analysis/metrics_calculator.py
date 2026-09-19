@@ -175,6 +175,19 @@ class CallMetrics:
     # 어르신이 한 번도 응답하지 않으면 None. 0으로 두면 평균이 왜곡된다.
     avg_response_delay_ms: int | None
 
+    # --- 아래는 판정에 쓰지 않는다. 나중에 판정을 고칠 때 쓸 원본이다. ---
+    #
+    # 통화 녹음은 30일 뒤 삭제된다(설계 3.6). 그래서 지금 여기 남기지 않은
+    # 값은 30일이 지나면 어디에서도 복구할 수 없다 — wav가 없으면 다시
+    # 계산할 방법이 없다. 비율만 남기면 분모를 바꾼 순간(2.0.0이 그랬다)
+    # 과거 데이터를 재해석할 수조차 없다.
+    elder_speech_ms: int = 0
+    ai_speech_ms: int = 0
+    silence_ms: int = 0
+    # 턴별 응답 지연 원본. 평균이 나은지 중앙값이 나은지는 실제 분포를 봐야
+    # 정할 수 있는데, 평균만 남기면 그 질문에 영원히 답할 수 없다.
+    response_delays_ms: tuple[int, ...] = ()
+
 
 def calculate_metrics(
     *,
@@ -221,8 +234,15 @@ def calculate_metrics(
         # 같은 분모를 쓴다 — 그래야 발화 + 침묵 = 1로 읽힌다.
         silence_ratio = max(0, available_ms - elder_ms) / available_ms
 
+    delays = _response_delays(elder_speech, ai_turns)
     return CallMetrics(
-        avg_response_delay_ms=_average_response_delay(elder_speech, ai_turns),
+        avg_response_delay_ms=(
+            round(sum(delays) / len(delays)) if delays else None
+        ),
+        elder_speech_ms=elder_ms,
+        ai_speech_ms=ai_ms,
+        silence_ms=max(0, available_ms - elder_ms) if available_ms > 0 else 0,
+        response_delays_ms=tuple(delays),
         speech_ratio=speech_ratio,
         silence_ratio=silence_ratio,
         turn_count=len(elder_speech),
@@ -283,9 +303,9 @@ def _is_negative_ending(next_char: str) -> bool:
     return next_char in _NEGATIVE_ENDING_STARTS
 
 
-def _average_response_delay(
+def _response_delays(
     elder_speech: Sequence[VadSegment], ai_turns: Sequence[VadSegment]
-) -> int | None:
+) -> list[int]:
     """AI 발화 종료 → 어르신 발화 시작까지의 평균.
 
     AI 발화 뒤에 어르신 응답이 없으면(작별 인사 등, 또는 그냥 못 들은
@@ -321,6 +341,13 @@ def _average_response_delay(
         )
         if reply is not None:
             delays.append(reply.start_ms - turn.end_ms)
+    return delays
+
+
+def _average_response_delay(
+    elder_speech: Sequence[VadSegment], ai_turns: Sequence[VadSegment]
+) -> int | None:
+    delays = _response_delays(elder_speech, ai_turns)
     if not delays:
         return None
     return round(sum(delays) / len(delays))
