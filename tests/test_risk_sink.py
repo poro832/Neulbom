@@ -141,10 +141,13 @@ def test_the_same_call_always_scores_the_same():
 
 
 def test_a_broken_score_does_not_escape_the_sink():
-    """점수를 못 내는 것보다 통화가 안 끝나는 쪽이 훨씬 나쁘다.
+    """모르는 통화의 결과를 지어내 남기지 않는다.
 
-    sink에서 예외가 나가면 통화 종료 처리 뒤에 그대로 올라간다. 어르신이
-    409로 영구 잠기는 경로라 여기서 막는다.
+    통화 종료(409 영구 잠금 방지)는 _end_of_call의 finally와 stream_server의
+    바깥 try/except가 이미 보장한다 — 이 테스트가 지키는 건 그게 아니다.
+    store.get(call_id)가 KeyError를 던지는 통화를 sink에 넘겼을 때 예외가
+    새지 않는 것과, 그 모르는 통화의 결과를 남의 기준선에 섞이게 지어내지
+    않는 것을 확인한다.
     """
     _, outcomes, sink, _ = make()
 
