@@ -153,3 +153,36 @@ def test_a_broken_score_does_not_escape_the_sink():
     # 예외가 안 나는 것만으로는 부족하다. 모르는 통화의 결과를 지어내서
     # 남기지도 않아야 한다 — 남기면 그게 남의 기준선에 섞인다.
     assert outcomes.recent(12, 50) == []
+
+
+class _ExplodingOutcomeStore:
+    """record()가 항상 터지는 가짜 저장소.
+
+    위의 test_a_broken_score_does_not_escape_the_sink는 store.get(call_id)가
+    KeyError를 던지는 경로(위쪽 try/except)만 지난다. build_risk_sink 안의
+    두 번째 try/except(assess_risk, outcomes.record를 감싸는 쪽)는 그
+    테스트로는 한 번도 실행되지 않는다 — record 자체가 예외를 내야
+    이 안전망이 실제로 동작하는지 알 수 있다.
+    """
+
+    def record(self, outcome):
+        raise RuntimeError("저장소 장애")
+
+    def recent(self, elder_id, limit):
+        return []
+
+
+def test_a_failing_outcome_store_does_not_escape_the_sink():
+    """outcomes.record가 터져도 sink 밖으로 예외가 나가면 안 된다.
+
+    통화 종료 자체는 _end_of_call의 finally와 stream_server의 바깥
+    try/except가 이미 보장한다. 이 테스트가 지키는 것은 그것과 다르다 —
+    sink 안의 except Exception이 실제로 이 경로(기준선 계산 이후,
+    outcomes.record 실패)를 잡아내는지, 로직으로만이 아니라 실행으로
+    확인하는 것이다.
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    call = store.create(elder_id=12, trigger_type="scheduled")
+    sink = build_risk_sink(store, _ExplodingOutcomeStore())
+
+    sink(call.call_id, analysis_of())  # 예외가 나면 안 된다

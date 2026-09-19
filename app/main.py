@@ -105,8 +105,13 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                 analysis.degraded,
             )
         except Exception:
-            # 점수를 못 내는 것보다 통화가 안 끝나는 쪽이 훨씬 나쁘다.
-            # 여기서 막지 않으면 예외가 스트림 종료 처리 뒤로 올라간다.
+            # 통화 종료 자체는 이 except가 없어도 지켜진다 — _end_of_call의
+            # finally가 lifecycle.stream_finished를 무조건 부르고,
+            # stream_server의 on_call_end 호출부도 통째로 try/except로
+            # 감싸여 있다(이중 안전망). 이 except가 막는 것은 그 두 층까지
+            # 예외가 올라가 중복 스택으로 찍히는 것과, 실패 지점이 "위험
+            # 판정"이라고 정확히 남기지 못하는 것이다 — 로그에서 원인을
+            # 셋 중 어디로 좁혀야 할지 알 수 없게 된다.
             logger.exception("위험 판정 실패 call_id=%s", call_id)
 
     return sink
