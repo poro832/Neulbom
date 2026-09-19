@@ -1028,3 +1028,71 @@ def test_overlapping_elder_segments_are_not_counted_twice():
     assert metrics.speech_ratio == 0.6
     # 겹쳐서 감지된 두 구간은 한 번의 발화다.
     assert metrics.turn_count == 1
+
+
+# ------------------------------------------------- 부정의 범위 (안/못 · -지 않)
+#
+# 사례별로 패치하면 수렴하지 않는다는 걸 이 파일이 이미 겪었다(부정어 활용
+# 매트릭스 주석 참고). 그래서 여기도 표로 둔다 — 고칠 때 표를 먼저 늘린다.
+
+NEGATION_MATRIX = [
+    # (전사, 기대값, 왜)
+    ("안 아파요", 0, "선행 부정 — 아프지 않다는 뜻이다"),
+    ("안 힘들어요", 0, "선행 부정"),
+    ("하나도 안 외로워요", 0, "부정어와 어간 사이에 다른 말이 없다"),
+    ("하나도 안 귀찮아", 0, "선행 부정"),
+    ("안 우울해요", 0, "선행 부정 — '하' 2단계 확인 경로도 막혀야 한다"),
+    ("안아파요", 0, "띄어쓰기가 없어도 부정이다"),
+    ("아프지 않아요", 0, "후행 부정 -지 않"),
+    ("힘들지 않습니다", 0, "후행 부정"),
+    ("외롭지는 않아요", 0, "-지는 않"),
+    ("아프지도 않아요", 0, "-지도 않 — '지'와 '않' 사이 보조사는 는 말고도 있다"),
+    ("외롭지도 않고", 0, "-지도 않"),
+    ("아프지 못해요", 0, "-지 못"),
+    ("우울하지 않아요", 0, "하다류 — '지'가 어간이 아니라 '하' 뒤에 온다"),
+    ("우울하지는 않아요", 0, "하다류 -지는 않"),
+    ("우울하지만 견뎌요", 1, "하다류 양보 — 실제로 우울하다"),
+    ("안 그래도 아파요", 1, "'안'이 뒤 용언을 부정하지 않는다"),
+    ("잠을 못 자서 힘들어요", 1, "부정이 앞 용언에 붙었다"),
+    # --- 부정이 아닌 것들: 여기서 과잉 차단이 나면 위음성이 된다 ---
+    ("아프지만 견딜 만해요", 1, "'지만'은 양보지 부정이 아니다 — 실제로 아프다"),
+    ("밥을 안 먹어서 힘들어요", 1, "부정어가 다른 용언에 붙었다"),
+    ("불안해서 아파요", 1, "'안'이 앞 낱말의 일부다"),
+    ("안경 쓰고 아파트 갔어", 0, "어간 자체가 없다"),
+    ("편안해요", 0, "어간 자체가 없다"),
+]
+
+
+@pytest.mark.parametrize("transcript,expected,why", NEGATION_MATRIX)
+def test_negation_scope(transcript, expected, why):
+    """'안 아파요'를 아프다고 세면 멀쩡한 어르신이 감점된다.
+
+    어간만 찾으면 부정의 범위를 모른다. 부정 표현은 100점 중 20점이라,
+    이 오차는 그대로 알림으로 나간다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=1, elder_speech=[], ai_turns=[], transcript=transcript
+    )
+
+    assert metrics.negative_word_count == expected, why
+
+
+MISSED_ENDING_MATRIX = [
+    ("허리가 아파서 병원에 갔어", 1, "연결형 -서"),
+    ("오늘은 좀 아픈데", 1, "연결형 -ㄴ데"),
+    ("다리가 아파도 걸어요", 1, "양보형 -도"),
+]
+
+
+@pytest.mark.parametrize("transcript,expected,why", MISSED_ENDING_MATRIX)
+def test_endings_that_were_being_missed(transcript, expected, why):
+    """오탐을 막으려고 만든 어미 화이트리스트가 미탐을 만들고 있었다.
+
+    이 프로젝트에서 미탐이 오탐보다 위험하다 — 오탐은 보호자가 통화를
+    들어보면 풀리지만, 미탐은 서비스가 존재하는 이유를 무력화한다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=1, elder_speech=[], ai_turns=[], transcript=transcript
+    )
+
+    assert metrics.negative_word_count == expected, why

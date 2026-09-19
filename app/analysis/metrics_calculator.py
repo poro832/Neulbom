@@ -126,6 +126,10 @@ DEFAULT_NEGATIVE_STEMS = frozenset(
 # 4) 다음 글자가 한글 음절인데 화이트리스트/어간별 목록에 없는 새로운 활용형이나
 #    새 충돌 명사. 이 목록들은 지금 가진 어간들의 실제 활용형을 조사해서
 #    채운 것이라 완전하지 않다.
+# 6) 이중 부정 — "아프지 않은 건 아니에요"는 실제로 아프다는 뜻인데, 앞의
+#    "-지 않"만 보고 부정으로 읽어 놓친다. 제대로 잡으려면 문장 구조를
+#    봐야 해서 어간 매칭으로는 닿지 않는다. 드문 형태이고 오차 방향도
+#    위음성 쪽이라 알고 남겨 둔다.
 # 5) 어미가 아니라 명사 접미사가 붙어도 진짜 부정 신호인 경우 — 대표적으로
 #    "우울증"의 "증". 순수 어미 규칙만 쓰면 이것도 걸러지는데, 진단명은 놓치면
 #    안 되는 신호라서 _NOUN_SUFFIX_EXCEPTIONS로 어간별 예외를 따로 둔다. 이
@@ -135,6 +139,11 @@ _NEGATIVE_ENDING_STARTS = frozenset(
     {
         "다", "요", "네", "어", "아", "고", "니", "지", "워", "웠", "습",
         "면", "겠", "잖", "구", "던", "은", "운", "았", "었",
+        # 아래 셋은 미탐으로 드러나 추가했다 — "아파서"(연결), "아픈데"
+        # (연결), "아파도"(양보). 오탐을 막으려던 화이트리스트가 진짜 통증
+        # 발화를 놓치고 있었다. 조사한 범위에서 이 어간들과 "서/데/도"가
+        # 우연히 만드는 일반 명사는 없다.
+        "서", "데", "도",
     }
 )
 
@@ -292,6 +301,8 @@ def _count_stems(transcript: str, stems: frozenset[str]) -> int:
             # 세지 않는다) — 기존 동작(및 그걸 검증하는 회귀 테스트)과 맞추기
             # 위함이다.
             start = idx + len(stem)
+            if _is_negated(transcript, idx, start, transparent):
+                continue
             next_char = transcript[start : start + 1]
             if _is_negative_ending(next_char):
                 total += 1
@@ -305,6 +316,65 @@ def _count_stems(transcript: str, stems: frozenset[str]) -> int:
                 if _is_negative_ending(transcript[start + 1 : start + 2]):
                     total += 1
     return total
+
+
+# 어간 앞에 오면 그 용언을 부정하는 낱말. "안 아파요"를 아프다고 세면
+# 멀쩡한 어르신이 감점된다 — 부정 표현은 100점 중 20점이라 그대로 알림이 된다.
+_NEGATION_WORDS = ("안", "못")
+
+# 어간 뒤에 와서 부정을 만드는 꼬리. "-지 않"/"-지 못"이다. "-지만"은
+# 양보라서 부정이 아니다("아프지만 견딜 만해요"는 실제로 아프다) — 그래서
+# "지" 다음에 않/못이 실제로 오는지까지 확인한다.
+_NEGATION_TAILS = ("않", "못")
+
+# "지"와 "않" 사이에 끼는 보조사. "아프지도 않아요", "외롭지는 않아요"처럼
+# 하나가 끼는 게 흔하다. 이걸 건너뛰지 않으면 부정문을 통증 발화로 센다.
+_NEGATION_PARTICLES = ("는", "도", "야")
+
+
+def _has_negation_tail(transcript: str, pos: int) -> bool:
+    """이 위치에서 "지" + (선택 "는") + "않"/"못"이 시작하는가."""
+    tail = transcript[pos:]
+    if not tail.startswith("지"):
+        return False
+    rest = tail[1:].lstrip()
+    if rest[:1] in _NEGATION_PARTICLES:
+        rest = rest[1:].lstrip()
+    return rest[:1] in _NEGATION_TAILS
+
+
+def _is_negated(
+    transcript: str, idx: int, after: int, transparent: frozenset[str]
+) -> bool:
+    """이 어간이 부정되고 있는가.
+
+    어간만 찾으면 부정의 범위를 모른다. 앞뒤 두 방향을 본다.
+
+    앞 — "안"/"못"이 어간 바로 앞에 붙거나 공백 하나를 두고 온 경우. 그
+    낱말이 독립된 낱말인지도 확인한다. 안 그러면 "불안해서 아파요"의
+    "불안"이나 "편안"의 "안"이 부정으로 읽혀서, 진짜 통증 발화를 놓친다.
+
+    뒤 — 어간 + "지" + (선택적으로 "는") + "않"/"못". "외롭지는 않아요"까지
+    잡되 "아프지만"은 건드리지 않는다.
+    """
+    before = transcript[:idx].rstrip()
+    for word in _NEGATION_WORDS:
+        if before.endswith(word):
+            head = before[: -len(word)]
+            # 앞이 비었거나 한글이 아니면 독립된 낱말이다.
+            if not head or not _is_hangul_syllable(head[-1]):
+                return True
+
+    if _has_negation_tail(transcript, after):
+        return True
+
+    # "우울하지 않아요"처럼 하다류 형용사는 부정 꼬리가 어간 바로 뒤가 아니라
+    # "하" 뒤에 붙는다. 어간만 보고 끝내면 이 형태가 통째로 새어 나간다.
+    if transcript[after : after + 1] in transparent and _has_negation_tail(
+        transcript, after + 1
+    ):
+        return True
+    return False
 
 
 def _is_negative_ending(next_char: str) -> bool:
