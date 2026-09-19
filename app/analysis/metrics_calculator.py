@@ -319,13 +319,27 @@ _NO_ANSWER_SATURATION = 3
 _WATCH_THRESHOLD = 30
 _ALERT_THRESHOLD = 60
 
+# 이 숫자들 중 하나라도 바꾸면 이전 점수와 비교할 수 없다 — 어제 42점과
+# 오늘 42점이 다른 뜻이 된다. 결과에 함께 남겨서 나중에 구분할 수 있게 한다
+# (db/schema.sql의 call_metrics.calculator_version).
+CALCULATOR_VERSION = "1.0.0"
+
 
 @dataclass(frozen=True)
 class Baseline:
-    """이 어르신의 평소 상태. 최근 통화들의 이동 평균으로 갱신된다."""
+    """이 어르신의 평소 상태. 최근 통화들의 이동 평균으로 갱신된다.
+
+    avg_response_delay_ms가 None인 것은 "평소 지연을 모른다"는 뜻이다. 기준선을
+    만들 통화는 모였는데 그 전부에서 어르신이 한 번도 응답하지 않으면 그렇게
+    된다 — 실제로 일어나고, 그 자체가 위험 신호다.
+
+    0으로 채우면 안 된다. _delay_penalty는 `> 0` 가드에 걸려 절대 기준으로
+    넘어가므로 무사하지만, _delta가 `delay - 0`을 계산해서 "평소보다 1.2초
+    느려졌다"는 거짓을 보호자에게 낸다. 평소가 얼마인지 모르는데도.
+    """
 
     speech_ratio: float
-    avg_response_delay_ms: int
+    avg_response_delay_ms: int | None
 
 
 @dataclass(frozen=True)
@@ -382,8 +396,9 @@ def _delay_penalty(metrics: CallMetrics, baseline: Baseline | None) -> float:
     delay = metrics.avg_response_delay_ms
     if delay is None:
         return 0.0
-    if baseline is not None and baseline.avg_response_delay_ms > 0:
-        rise = (delay - baseline.avg_response_delay_ms) / baseline.avg_response_delay_ms
+    baseline_delay = None if baseline is None else baseline.avg_response_delay_ms
+    if baseline_delay is not None and baseline_delay > 0:
+        rise = (delay - baseline_delay) / baseline_delay
     else:
         rise = (delay - _ABSOLUTE_DELAY_FLOOR_MS) / _ABSOLUTE_DELAY_SPAN_MS
     return _clamp01(rise) * _DELAY_WEIGHT
@@ -393,11 +408,15 @@ def _delta(metrics: CallMetrics, baseline: Baseline | None) -> BaselineDelta | N
     if baseline is None:
         return None
     delay = metrics.avg_response_delay_ms
+    baseline_delay = baseline.avg_response_delay_ms
     return BaselineDelta(
         # 부동소수점 잔여물이 그래프와 비교에 섞이지 않게 자른다.
         speech_ratio=round(metrics.speech_ratio - baseline.speech_ratio, 4),
+        # 어느 한쪽이라도 모르면 델타는 없다. 0으로 적으면 거짓이 된다.
         avg_response_delay_ms=(
-            None if delay is None else delay - baseline.avg_response_delay_ms
+            None
+            if delay is None or baseline_delay is None
+            else delay - baseline_delay
         ),
     )
 

@@ -515,6 +515,42 @@ def metrics_of(
 
 TYPICAL = Baseline(speech_ratio=0.5, avg_response_delay_ms=1500)
 
+NO_DELAY_BASELINE = Baseline(speech_ratio=0.5, avg_response_delay_ms=None)
+
+
+def test_unknown_baseline_delay_falls_back_to_the_absolute_standard():
+    """3통 내내 어르신이 응답하지 않았으면 평소 지연을 모른다.
+
+    0으로 채우면 벌점 계산은 `> 0` 가드에 걸려 무사하지만, 그 0이 델타로
+    새어 나가 거짓말이 된다. 그래서 None을 받을 수 있어야 한다.
+    """
+    result = assess_risk(metrics_of(delay_ms=3000), baseline=NO_DELAY_BASELINE)
+
+    # 절대 기준: (3000 - 2000) / 4000 = 0.25 → 0.25 × 25 = 6.25 → 6
+    assert result.risk_score == 6
+
+
+def test_delay_delta_is_none_when_the_baseline_delay_is_unknown():
+    """모르는 것을 0으로 적지 않는다 — 보호자에게 나가는 문장이다."""
+    result = assess_risk(metrics_of(delay_ms=3000), baseline=NO_DELAY_BASELINE)
+
+    assert result.baseline_delta is not None
+    assert result.baseline_delta.avg_response_delay_ms is None
+    # 발화 쪽 델타는 정상적으로 나온다 — 한쪽을 모른다고 둘 다 버리지 않는다.
+    assert result.baseline_delta.speech_ratio == 0.0
+
+
+def test_calculator_version_is_recorded_so_scores_stay_comparable():
+    """가중치를 바꾸면 어제 42점과 오늘 42점이 다른 뜻이 된다.
+
+    이 상수가 결과에 실제로 실리는지는 Task 5가 검사한다. 여기서는 존재와
+    모양만 본다 — 빈 문자열이면 '어느 계산기가 냈는지'를 못 적는다.
+    """
+    from app.analysis.metrics_calculator import CALCULATOR_VERSION
+
+    assert isinstance(CALCULATOR_VERSION, str)
+    assert CALCULATOR_VERSION.strip()
+
 
 def test_call_matching_the_baseline_scores_zero():
     result = assess_risk(metrics_of(), baseline=TYPICAL)
