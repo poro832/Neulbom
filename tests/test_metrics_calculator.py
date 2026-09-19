@@ -986,3 +986,45 @@ def test_per_turn_delays_are_kept_not_just_their_average():
     assert metrics.response_delays_ms == (1_000, 3_000)
     # 지금 판정이 쓰는 값은 이 원본에서 나온다 — 둘이 갈라지면 안 된다.
     assert metrics.avg_response_delay_ms == 2_000
+
+
+# ------------------------------ 겹친 구간을 두 번 세지 않는다 (segments 규칙)
+
+
+def test_overlapping_ai_turns_are_not_counted_twice():
+    """겹친 AI 구간을 그냥 더하면 AI가 말한 시간이 부풀려진다.
+
+    그러면 분모(어르신이 말할 수 있었던 시간)가 실제보다 작아지고, 심하면
+    0 이하로 접혀 발화 비율이 0.0이 된다. 0.0은 "측정 불가"가 아니라 "말을
+    안 했다"로 읽히므로 발화 벌점 35점이 그대로 붙는다 — 멀쩡한 통화에
+    최대 감점이 나오는 경로다.
+
+    echo.clip_ai_playback은 이미 병합해서 쓴다. 규칙이 두 군데서 갈라져
+    있었던 것이고, segments가 존재하는 이유가 바로 그 갈라짐을 막는 것이다.
+    """
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(9_000, 10_000)],
+        ai_turns=[seg(0, 6_000), seg(3_000, 9_000)],
+        transcript="",
+    )
+
+    # AI가 실제로 말한 구간은 0~9초로 9초다. 단순 합산이면 12초가 되어
+    # 분모가 -2초가 되고, 그 순간 지표 전체가 0으로 접힌다.
+    assert metrics.ai_speech_ms == 9_000
+    assert metrics.speech_ratio == 1.0
+
+
+def test_overlapping_elder_segments_are_not_counted_twice():
+    """어르신 발화도 마찬가지다. 겹치면 발화 시간과 턴 수가 함께 부풀려진다."""
+    metrics = calculate_metrics(
+        call_duration_ms=10_000,
+        elder_speech=[seg(0, 4_000), seg(2_000, 6_000)],
+        ai_turns=[],
+        transcript="",
+    )
+
+    assert metrics.elder_speech_ms == 6_000
+    assert metrics.speech_ratio == 0.6
+    # 겹쳐서 감지된 두 구간은 한 번의 발화다.
+    assert metrics.turn_count == 1

@@ -6,6 +6,7 @@ VadSegmenter가 만들고 FillerDetector가 소비하므로 한쪽이 다른 쪽
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 
@@ -30,3 +31,27 @@ class VadSegment:
         한 군데 있어야 두 쪽이 갈라지지 않는다.
         """
         return self.end_ms > self.start_ms
+
+
+def merge_overlapping(segments: Sequence[VadSegment]) -> list[VadSegment]:
+    """겹친 구간을 합쳐 시작 시각 순으로 돌려준다. 길이 없는 구간은 버린다.
+
+    has_duration과 같은 이유로 여기 있다. 에코 제거는 겹친 AI 구간을 합쳐서
+    썼는데(안 합치면 겹친 만큼 clipped_ms가 두 번 세어진다) 지표 계산은
+    그냥 더했다. 그래서 같은 구간이 한쪽에서는 9초, 다른 쪽에서는 12초였다.
+
+    지표 쪽에서 이게 특히 위험했다. 부풀려진 AI 시간이 분모(어르신이 말할
+    수 있었던 시간)를 깎고, 심하면 0 이하로 만들어 발화 비율을 0.0으로
+    접는다. 0.0은 "측정 불가"가 아니라 "말을 안 했다"로 읽히므로 멀쩡한
+    통화에 발화 벌점 35점이 그대로 붙는다 — 아무 오류도 없이.
+    """
+    merged: list[VadSegment] = []
+    for segment in sorted(segments, key=lambda s: s.start_ms):
+        if not segment.has_duration:
+            continue
+        if merged and segment.start_ms <= merged[-1].end_ms:
+            last = merged[-1]
+            merged[-1] = VadSegment(last.start_ms, max(last.end_ms, segment.end_ms))
+        else:
+            merged.append(segment)
+    return merged

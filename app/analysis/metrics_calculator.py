@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from app.analysis.segments import VadSegment
+from app.analysis.segments import VadSegment, merge_overlapping
 
 # 어간으로 매칭한다. 한국어는 어미가 변해서 완전 일치로는 거의 못 잡는다.
 # "아프다 / 아파요 / 아픕니다"를 모두 잡으려면 어간 목록이 필요하다.
@@ -197,19 +197,34 @@ def calculate_metrics(
     transcript: str,
     negative_stems: frozenset[str] = DEFAULT_NEGATIVE_STEMS,
 ) -> CallMetrics:
+    """통화 하나의 지표를 낸다.
+
+    **전제: elder_speech는 ai_turns와 겹치지 않아야 한다.** 실제 경로에서는
+    analyze_call이 clip_ai_playback으로 AI 재생 구간을 먼저 잘라내므로 이
+    전제가 지켜진다. 겹친 채로 넘기면 speech_ratio가 1을 넘는데, 그건
+    "어르신이 통화보다 오래 말했다"는 뜻이라 지표로서 불가능한 값이다
+    (db/schema.sql도 CHECK (speech_ratio BETWEEN 0 AND 1)로 막는다).
+
+    여기서 조용히 깎지 않는 이유: 깎으면 호출부의 실수가 그럴듯한 숫자로
+    바뀌어 사라진다. 잘라내는 일은 에코 제거의 책임이고, 그 책임을 여기서
+    한 번 더 흉내 내면 규칙이 또 두 군데로 갈라진다.
+    """
     # 길이 없는 구간은 재생 시간이 없으므로 AI 발화가 아니다. echo._merge가
     # 이미 같은 규칙으로 버리는데 여기서만 세면 같은 구간이 한쪽에서는 없는
     # 것이 되고 다른 쪽에서는 있는 것이 된다. 특히 응답 지연에서 이게
     # 위험한데, 길이 0인 턴의 end_ms는 재생이 '시작'된 시각이라 거기서부터
     # 재면 AI가 말한 시간까지 통째로 어르신의 지연으로 들어간다.
-    ai_turns = [turn for turn in ai_turns if turn.has_duration]
+    # 겹친 구간은 합쳐서 한 번만 센다. 에코 제거는 이미 그렇게 쓰는데
+    # 여기서만 단순 합산하면 같은 구간이 한쪽에서는 9초, 다른 쪽에서는
+    # 12초가 된다 — 부풀려진 AI 시간이 아래 분모를 깎는다.
+    ai_turns = merge_overlapping(ai_turns)
 
     # 어르신 발화도 같은 규칙으로 거른다. 뒤집힌 구간이 들어오면 _total_ms가
     # 음수가 되어 speech_ratio가 음수, silence_ratio가 1을 넘는다 — 비율로서
     # 불가능한 값이라 그 위에서 계산하는 위험 점수가 의미를 잃는다. 길이 0인
     # 구간은 발화 턴 수만 공짜로 올린다. 실제 경로에서는 segment_audio가
     # min_speech_ms로 먼저 걸러 주지만, 이 함수는 직접 호출도 받는다.
-    elder_speech = [segment for segment in elder_speech if segment.has_duration]
+    elder_speech = merge_overlapping(elder_speech)
 
     elder_ms = _total_ms(elder_speech)
     ai_ms = _total_ms(ai_turns)
