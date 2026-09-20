@@ -40,6 +40,7 @@ from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
 from app.media.clova_chat import DEFAULT_MODEL, ClovaChat
+from app.media.clova_long_speech import ClovaLongSpeech
 from app.media.clova_speech import ClovaSpeech
 from app.media.clova_voice import DEFAULT_SPEAKER, ClovaVoice
 from app.media.polly_voice import DEFAULT_VOICE_ID as POLLY_DEFAULT_VOICE_ID
@@ -56,6 +57,7 @@ from app.media.stream_server import (
 )
 from app.post_call import analyze_session
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
+from app.transcription import TranscriptionWorker
 
 logger = logging.getLogger(__name__)
 
@@ -284,12 +286,12 @@ def build_server(
     recordings_dir: Path = RECORDINGS_DIR,
     outcomes: OutcomeStore | None = None,
     sink: AnalysisSink | None = None,
+    transcriber: ClovaLongSpeech | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
     # 이긴다 — 분석 훅만 보고 싶은 기존 테스트들이 그렇게 쓴다.
     outcomes = outcomes if outcomes is not None else InMemoryOutcomeStore()
-    sink = sink if sink is not None else build_risk_sink(store, outcomes)
 
     registry = registry if registry is not None else InMemoryCallRegistry()
     lifecycle = CallLifecycle(store, registry)
@@ -302,12 +304,27 @@ def build_server(
         stream_base_url=stream_base_url,
         lifecycle=lifecycle,
     )
+
+    # 워커 조립은 app이 만들어진 뒤여야 한다 — add_event_handler는 app이
+    # 있어야 부를 수 있다.
+    transcriber = transcriber if transcriber is not None else transcriber_from_env()
+    sink = sink if sink is not None else build_risk_sink(
+        store, outcomes, transcription_enabled=transcriber is not None
+    )
+
+    worker: TranscriptionWorker | None = None
+    if transcriber is not None:
+        worker = TranscriptionWorker(transcribe=transcriber.transcribe, sink=sink)
+        worker.start()
+        # FastAPI 0.141부터 app.add_event_handler가 사라졌다 — router로 부른다.
+        app.router.add_event_handler("shutdown", lambda: worker.stop())
+
     add_stream_route(
         app,
         registry=registry,
         responder_factory=responder_factory,
         recordings_dir=recordings_dir,
-        on_call_end=_end_of_call(lifecycle, sink),
+        on_call_end=_end_of_call(lifecycle, sink, worker),
         on_call_start=_start_of_call(lifecycle),
     )
     return app
@@ -331,7 +348,11 @@ def _start_of_call(lifecycle: CallLifecycle):
     return handle
 
 
-def _end_of_call(lifecycle: CallLifecycle, sink: AnalysisSink):
+def _end_of_call(
+    lifecycle: CallLifecycle,
+    sink: AnalysisSink,
+    worker: TranscriptionWorker | None = None,
+):
     """통화가 끝나는 순간 — 여기가 분석이 실제로 도는 유일한 지점이다.
 
     이 훅이 없던 동안 세션의 ai_turns와 stream_duration_ms는 소켓이 닫히는
@@ -347,7 +368,18 @@ def _end_of_call(lifecycle: CallLifecycle, sink: AnalysisSink):
             elif call_id is None:
                 logger.error("분석 결과를 붙일 통화를 알 수 없다 call_id=%s", session.call_id)
             else:
-                sink(call_id, analyze_session(session, wav_path))
+                analysis = analyze_session(session, wav_path)
+                if worker is None:
+                    # 전사가 꺼져 있다. 지금까지와 똑같이 여기서 바로 기록한다.
+                    sink(call_id, analysis)
+                else:
+                    # 줄에 세우고 바로 돌아온다. 여기서 기다리면 아래
+                    # stream_finished가 늦어져 그 어르신이 409로 잠긴다.
+                    #
+                    # 이 두 줄의 순서가 규약이다. 409 잠금이 다음 통화의
+                    # 생성을 막아 주는 동안 이 통화가 줄에 서야, 같은
+                    # 어르신의 통화 순서가 지켜진다(설계 6장).
+                    worker.submit(call_id, analysis, wav_path)
         finally:
             # 분석이 실패해도 통화는 끝나야 한다. 상태를 못 옮기면 그
             # 어르신은 다시는 전화를 요청할 수 없다(409 영구 잠금).
@@ -385,6 +417,29 @@ def _telephony_from_env() -> Telephony:
         " (CLAWOPS_ACCOUNT_SID/API_KEY/FROM_NUMBER)"
     )
     return FakeTelephony()
+
+
+def transcriber_from_env() -> ClovaLongSpeech | None:
+    """배치 전사를 켠다. 기본은 꺼짐이고 명시적으로 켜야 한다.
+
+    "키가 있으면 자동으로 켠다"로 하면, 단문 인식과 같은 키를 쓰므로 이미
+    키가 있는 지금 조용히 켜지고 실질 만점이 60에서 80으로 바뀐다. 그런
+    변화가 소리 없이 일어나면 안 된다(설계 7장).
+    """
+    if os.getenv("BATCH_TRANSCRIPTION", "").strip().lower() not in ("1", "true", "on"):
+        return None
+
+    invoke_url = os.getenv("CLOVA_SPEECH_INVOKE_URL")
+    secret = os.getenv("CLOVA_SPEECH_SECRET")
+    if not (invoke_url and secret):
+        logger.warning(
+            "BATCH_TRANSCRIPTION을 켰지만 CLOVA_SPEECH_INVOKE_URL/SECRET이 없다"
+            " — 전사 없이 돈다(부정 표현 20점은 계속 비어 있다)"
+        )
+        return None
+
+    logger.info("배치 전사를 켠다 — 이 시점부터 실질 만점이 60에서 80으로 바뀐다")
+    return ClovaLongSpeech(invoke_url=invoke_url, secret_key=secret)
 
 
 def _phones_from_env() -> dict[int, str]:

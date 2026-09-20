@@ -3,11 +3,11 @@
 CallSession(매체)과 analyze_call(분석)은 서로를 모른다 — 그래야 분석이
 소켓 없이 재현된다. 둘을 잇는 배선만 여기에 둔다.
 
-transcript는 빈 문자열이다. STT가 아직 없어서 통화 중 발화를 글로 만드는
-곳이 이 프로젝트에 존재하지 않는다. 지어낸 문장을 넣으면 negative_word_count가
-거짓이 되고, 그 숫자는 위험 점수에 20점으로 들어간다 — 측정하지 않은 것은
-0으로 둔다(없는 것과 세지 않은 것은 다르지만, 여기서는 둘 다 "부정어를
-발견하지 못했다"이고 점수를 올리지 않는 쪽이라 안전하다).
+**전사는 여기로 들어오지 않는다.** 통화가 끝난 뒤 워커가 받아 와서
+call_analysis.with_transcript로 붙인다(설계 3장). 이쪽에도 입구를 남겨 두면
+누군가 그 길로 전사를 넣어 새 경로를 우회하고, 그러면 부정어를 세는 규칙이
+두 군데로 갈라진다 — segments.py가 같은 이유로 "규칙이 한 군데 있어야
+두 쪽이 갈라지지 않는다"라고 쓰여 있다.
 """
 
 from __future__ import annotations
@@ -31,9 +31,7 @@ logger = logging.getLogger(__name__)
 DEGRADED_FABRICATED_RATIO = 0.3
 
 
-def analyze_session(
-    session: CallSession, wav_path: Path, transcript: str = ""
-) -> CallAnalysis:
+def analyze_session(session: CallSession, wav_path: Path) -> CallAnalysis:
     """끝난 세션의 녹음을 분석한다.
 
     스트리밍 중 나온 VAD 판정은 쓰지 않는다. 프레임 도착 타이밍에 따라
@@ -45,7 +43,6 @@ def analyze_session(
         wav_path=wav_path,
         ai_turns=session.ai_turns,
         stream_duration_ms=session.stream_duration_ms,
-        transcript=transcript,
     )
 
     fabricated = session.filled_gap_ms

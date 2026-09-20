@@ -11,16 +11,21 @@
 
 import base64
 import json
+import logging
 import re
+import threading
+import time
 
 import numpy as np
 from fastapi.testclient import TestClient
 
-from app.main import build_server
+from app.analysis.call_analysis import DEGRADED_NO_TRANSCRIPT
+from app.main import _end_of_call, build_server
 from app.api.outcome_store import InMemoryOutcomeStore
 from app.api.store import InMemoryCallStore
 from app.media import ulaw
 from app.telephony.client import FakeTelephony
+from app.transcription import TranscriptionFailed
 
 FRAME_SAMPLES = 160
 
@@ -64,7 +69,7 @@ class _Beep:
         return b"\x01\x02" * 400
 
 
-def make_server(tmp_path, sink=None, outcomes=None):
+def make_server(tmp_path, sink=None, outcomes=None, transcriber=None):
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
     app = build_server(
@@ -76,6 +81,7 @@ def make_server(tmp_path, sink=None, outcomes=None):
         recordings_dir=tmp_path,
         outcomes=outcomes,
         sink=sink,
+        transcriber=transcriber,
     )
     return TestClient(app), store, telephony
 
@@ -366,3 +372,165 @@ def test_a_conversation_produces_an_ai_turn_and_a_response_delay(tmp_path):
     # 그러면 점수가 안 나와 이 경로를 검사하지 못한다.
     assert recorded.degraded is False, recorded.degraded_reasons
     assert recorded.risk is not None
+
+
+def wait_for_outcome(outcomes, elder_id=12, timeout=5.0):
+    """워커가 다른 스레드에서 기록하므로 결과가 즉시 있지는 않다."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        results = outcomes.recent(elder_id, 14)
+        if results:
+            return results[0]
+        time.sleep(0.01)
+    raise AssertionError("전사 결과가 오지 않았다")
+
+
+class SlowTranscriber:
+    """전사가 끝나는 시점을 테스트가 정한다."""
+
+    def __init__(self):
+        self.release = threading.Event()
+        self.called = threading.Event()
+
+    def transcribe(self, wav_path):
+        self.called.set()
+        assert self.release.wait(5.0), "테스트가 전사를 놓아주지 않았다"
+        return "무릎이 아파요"
+
+
+def test_the_elder_is_freed_before_the_transcript_arrives(tmp_path):
+    """통화 종료가 전사를 기다리면, 그 1~2분 동안 어르신은 통화가 '진행 중'
+    으로 남아 다시 전화를 요청할 수 없다(409).
+
+    이 설계 전체가 이것 하나를 막으려고 있다.
+    """
+    transcriber = SlowTranscriber()
+    outcomes = InMemoryOutcomeStore()
+    client, store, telephony = make_server(
+        tmp_path, outcomes=outcomes, transcriber=transcriber
+    )
+    call_id, _, token = place_call(client, store)
+
+    run_stream(client, token)
+
+    # 전사는 아직 끝나지 않았는데
+    assert transcriber.called.wait(5.0), "전사가 시작되지 않았다"
+    # 통화는 이미 끝났고 다음 전화가 나간다.
+    assert store.get(call_id).status == "completed"
+    assert client.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202
+    assert len(telephony.placed) == 2
+    # 점수는 아직 없다 — 전사를 기다리고 있다.
+    assert outcomes.recent(12, 14) == []
+
+    transcriber.release.set()
+
+    result = wait_for_outcome(outcomes)
+    assert result.call_id == call_id
+    assert result.transcription_enabled is True
+    # 전사가 실제로 점수에 들어갔다.
+    assert result.metrics.negative_word_count > 0
+
+
+def test_a_failing_transcription_records_the_call_without_a_score(tmp_path):
+    """점수를 안 낸다고 통화를 버리면 멀쩡히 측정된 지표 셋이 함께 사라진다
+    (설계 5장).
+    """
+
+    class Broken:
+        def transcribe(self, wav_path):
+            raise TranscriptionFailed("사업자가 실패라고 답했다")
+
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes, transcriber=Broken())
+    call_id, _, token = place_call(client, store)
+
+    run_stream(client, token)
+
+    result = wait_for_outcome(outcomes)
+    assert result.risk is None
+    assert DEGRADED_NO_TRANSCRIPT in result.degraded_reasons
+    assert result.call_duration_ms > 0  # 지표는 남았다
+
+
+def test_without_transcription_the_score_still_comes_out(tmp_path):
+    """BATCH_TRANSCRIPTION이 꺼져 있으면 지금까지와 똑같이 동작해야 한다.
+
+    개발 내내 점수가 아예 안 나오면 나머지 배선이 도는지 확인할 수 없다
+    (설계 7장).
+    """
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes)
+    call_id, _, token = place_call(client, store)
+
+    run_stream(client, token)
+
+    result = outcomes.recent(12, 14)[0]
+    assert result.risk is not None
+    assert result.transcription_enabled is False
+    assert result.metrics.negative_word_count == 0
+
+
+def test_the_job_is_queued_before_the_elder_is_freed(tmp_path):
+    """순서가 뒤집히면 같은 어르신의 통화 순서 보장이 조용히 사라진다.
+
+    409 잠금이 다음 통화의 생성을 막아 주는 동안 이 통화가 줄에 서야 한다.
+    '통화부터 빨리 풀어 주자'는 선의로 두 줄을 바꾸면 아무 오류도 나지 않고
+    보장만 없어진다(설계 6장).
+    """
+    order = []
+
+    class SpyWorker:
+        def submit(self, call_id, analysis, wav_path):
+            order.append("submit")
+
+    class SpyLifecycle:
+        def stream_finished(self, call_id, audio_key):
+            order.append("stream_finished")
+
+    class StubSession:
+        """analyze_session이 세션에서 읽는 것만 갖춘 대역.
+
+        진짜 CallSession은 소켓과 Responder를 요구한다. 여기서 보려는 것은
+        두 호출의 순서 하나뿐이라, 녹음은 진짜를 쓰고 세션만 대역으로 둔다.
+        """
+
+        ai_turns = ()
+        stream_duration_ms = 1_000
+        filled_gap_ms = 0
+        unmatched_marks = 0
+
+        def __init__(self, call_id):
+            self.call_id = str(call_id)
+
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes)
+    call_id, _, token = place_call(client, store)
+    run_stream(client, token)
+    wav_path = tmp_path / store.get(call_id).audio_key
+
+    _end_of_call(SpyLifecycle(), sink=lambda *a: None, worker=SpyWorker())(
+        StubSession(call_id), wav_path
+    )
+
+    assert order == ["submit", "stream_finished"]
+
+
+def test_a_transcribed_call_logs_no_errors(tmp_path, caplog):
+    """except Exception이 조용히 삼킨 실패를 예전에 이렇게 잡았다 —
+    degraded 통화마다 AttributeError가 나는데 테스트는 전부 통과했다.
+    """
+
+    class Quick:
+        def transcribe(self, wav_path):
+            return "오늘은 괜찮아요"
+
+    outcomes = InMemoryOutcomeStore()
+    client, store, _ = make_server(tmp_path, outcomes=outcomes, transcriber=Quick())
+    _, _, token = place_call(client, store)
+
+    with caplog.at_level(logging.ERROR):
+        run_stream(client, token)
+        wait_for_outcome(outcomes)
+
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == []

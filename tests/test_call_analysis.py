@@ -50,7 +50,6 @@ def test_speech_ratio_comes_from_the_recording(tmp_path):
         wav_path=path,
         ai_turns=[],
         stream_duration_ms=4000,
-        transcript="",
     )
     # 4초 중 2초가 발화다. VAD 경계가 프레임 단위라 정확히 0.5는 아니다.
     assert 0.4 < result.metrics.speech_ratio < 0.6
@@ -61,13 +60,12 @@ def test_ai_playback_is_removed_from_elder_speech(tmp_path):
     path = write_wav(tmp_path / "b.wav", [("speech", 2000), ("silence", 2000)])
 
     without_ai = analyze_call(
-        wav_path=path, ai_turns=[], stream_duration_ms=4000, transcript=""
+        wav_path=path, ai_turns=[], stream_duration_ms=4000
     )
     with_ai = analyze_call(
         wav_path=path,
         ai_turns=[VadSegment(0, 1000)],  # 앞 1초는 AI가 말하던 중이었다
         stream_duration_ms=4000,
-        transcript="",
     )
 
     assert with_ai.metrics.speech_ratio < without_ai.metrics.speech_ratio
@@ -84,7 +82,6 @@ def test_heavy_clipping_marks_the_call_degraded(tmp_path):
         wav_path=path,
         ai_turns=[VadSegment(0, 1900)],
         stream_duration_ms=4000,
-        transcript="",
     )
     assert result.degraded is True
 
@@ -92,21 +89,10 @@ def test_heavy_clipping_marks_the_call_degraded(tmp_path):
 def test_a_clean_call_is_not_degraded(tmp_path):
     path = write_wav(tmp_path / "d.wav", [("speech", 2000), ("silence", 2000)])
     result = analyze_call(
-        wav_path=path, ai_turns=[], stream_duration_ms=4000, transcript=""
+        wav_path=path, ai_turns=[], stream_duration_ms=4000
     )
     assert result.degraded is False
     assert result.clipped_ms == 0
-
-
-def test_negative_words_come_from_the_transcript(tmp_path):
-    path = write_wav(tmp_path / "e.wav", [("speech", 1000), ("silence", 1000)])
-    result = analyze_call(
-        wav_path=path,
-        ai_turns=[],
-        stream_duration_ms=2000,
-        transcript="무릎이 아파요 그리고 요즘 많이 힘들어요",
-    )
-    assert result.metrics.negative_word_count == 2
 
 
 def test_analysis_is_identical_across_repeated_runs(tmp_path):
@@ -126,7 +112,6 @@ def test_analysis_is_identical_across_repeated_runs(tmp_path):
             wav_path=path,
             ai_turns=ai_turns,
             stream_duration_ms=4000,
-            transcript="무릎이 아파요",
         )
         for _ in range(100)
     }
@@ -151,7 +136,6 @@ def test_zero_length_segments_are_dropped_before_metrics(tmp_path, monkeypatch):
         wav_path=path,
         ai_turns=[],
         stream_duration_ms=200,
-        transcript="",
     )
     assert result.metrics.turn_count == 0
 
@@ -181,7 +165,6 @@ def test_a_non_positive_segment_cannot_switch_off_the_degraded_flag(
         wav_path=path,
         ai_turns=[VadSegment(0, 1900)],
         stream_duration_ms=4000,
-        transcript="",
     )
 
     assert result.clipped_ms > 0

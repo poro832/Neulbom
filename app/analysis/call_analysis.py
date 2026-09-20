@@ -71,7 +71,6 @@ def analyze_call(
     wav_path: Path,
     ai_turns: Sequence[VadSegment],
     stream_duration_ms: int,
-    transcript: str,
 ) -> CallAnalysis:
     samples, sample_rate = _read_wav(wav_path)
     detected = segment_audio(samples, sample_rate).speech
@@ -102,7 +101,7 @@ def analyze_call(
             call_duration_ms=stream_duration_ms,
             elder_speech=segments,
             ai_turns=list(ai_turns),
-            transcript=transcript,
+            transcript="",
         ),
         clipped_ms=clipped.clipped_ms,
         # 이 함수는 세션을 모른다. 유실량은 post_call이 채운다.
