@@ -205,8 +205,13 @@ def build_risk_sink(
             # 판정에 실제로 쓰인 표본 수. 경계를 지어내지 않고 이 값을 결과에
             # 실어서, 나중에 분포를 보고 "몇 통부터 믿는가"를 정하게 한다.
             baseline_n = len(usable_for_baseline(recent))
+            # outcomes.recent와 같은 규칙 — 과거만 본다. 전사가 늦게 끝나
+            # sink가 몇십 분 뒤에 돌면, 그사이 같은 어르신의 다음 예약 통화가
+            # 먼저 no_answer로 끝나 있을 수 있다. exclude_call_id(자기 자신만
+            # 뺀다)로는 그 미래 통화를 막지 못한다 — before_call_id는 자기
+            # 자신과 미래를 함께 막는다(설계 6·8장).
             history = store.recent_scheduled(
-                elder_id, NO_ANSWER_WINDOW, exclude_call_id=call_id
+                elder_id, NO_ANSWER_WINDOW, before_call_id=call_id
             )
             no_answer = sum(1 for call in history if call.status == "no_answer")
 
@@ -246,7 +251,8 @@ def build_risk_sink(
             logger.info(
                 "위험 판정 call_id=%s elder_id=%s score=%s level=%s 기준선=%s "
                 "no_answer=%d baseline_n=%d duration_ms=%d "
-                "speech_ratio=%.3f delay_ms=%s degraded=%s",
+                "speech_ratio=%.3f delay_ms=%s negative_word_count=%d "
+                "transcription_enabled=%s degraded=%s",
                 call_id,
                 elder_id,
                 # 근거가 부족해 판정하지 않은 통화는 여기서도 숫자를 만들지
@@ -260,6 +266,12 @@ def build_risk_sink(
                 analysis.call_duration_ms,
                 analysis.metrics.speech_ratio,
                 analysis.metrics.avg_response_delay_ms,
+                # DB가 없는 지금 이 로그가 점수의 유일한 durable 흔적이다.
+                # transcription_enabled는 CallOutcome에 정확히 남지만 그
+                # 객체는 재시작하면 증발한다 — 로그에도 남겨야 만점 60짜리와
+                # 80짜리를 나중에 로그만 보고 구분할 수 있다.
+                analysis.metrics.negative_word_count,
+                transcription_enabled,
                 analysis.degraded,
             )
         except Exception:

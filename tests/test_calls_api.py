@@ -451,9 +451,26 @@ def test_the_current_call_can_be_excluded():
     older = finished_call(store, 12, "scheduled", "completed")
     current = finished_call(store, 12, "scheduled", "completed")
 
-    found = store.recent_scheduled(12, 7, exclude_call_id=current.call_id)
+    found = store.recent_scheduled(12, 7, before_call_id=current.call_id)
 
     assert [call.call_id for call in found] == [older.call_id]
+
+
+def test_before_call_id_also_excludes_calls_that_happened_later():
+    """전사가 늦게 끝나 sink가 몇십 분 뒤에 돌면, 그사이 같은 어르신의
+    다음 예약 통화가 먼저 no_answer로 끝나 있을 수 있다. 그 통화를 과거
+    통화의 미응답 집계에 넣으면 아무 오류 없이 점수만 최대 20점 부풀려진다
+    (설계 6·8장). exclude_call_id(자기 자신만 뺀다)로는 이걸 막지 못했다 —
+    before_call_id는 자기 자신과 미래를 함께 막는다.
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    current = finished_call(store, 12, "scheduled", "completed")
+    later = finished_call(store, 12, "scheduled", "no_answer")
+
+    found = store.recent_scheduled(12, 7, before_call_id=current.call_id)
+
+    assert later.call_id not in [call.call_id for call in found]
+    assert found == []
 
 
 def test_recent_scheduled_is_newest_first_and_capped():

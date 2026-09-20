@@ -98,12 +98,19 @@ class CallStore(Protocol):
         ...
 
     def recent_scheduled(
-        self, elder_id: int, limit: int, exclude_call_id: int | None = None
+        self, elder_id: int, limit: int, before_call_id: int | None = None
     ) -> list[CallRecord]:
         """끝난 예약 통화를 최신순(call_id 내림차순)으로 limit개까지.
 
         위험 점수의 미응답 항목(20점)이 이 목록에서 나온다. 최신순은 규약이다
         — 순서가 틀리면 엉뚱한 구간을 세고도 아무 오류가 나지 않는다.
+
+        before_call_id를 주면 그 call_id 이상은(자기 자신과 미래 통화 모두)
+        빼고 돌려준다. call_id가 단조 증가하므로 이것으로 "과거 통화만"이
+        정의된다 — outcomes.recent()의 같은 이름 인자와 규칙이 같다. 전사가
+        늦게 끝나 sink가 몇십 분 뒤에 도는 경우, 그사이 같은 어르신의 다음
+        예약 통화가 먼저 no_answer로 끝날 수 있는데 그 통화를 과거 통화의
+        집계에 넣으면 안 된다(설계 6·8장).
         """
         ...
 
@@ -278,7 +285,7 @@ class InMemoryCallStore:
         self._finish(call_id, "no_answer")
 
     def recent_scheduled(
-        self, elder_id: int, limit: int, exclude_call_id: int | None = None
+        self, elder_id: int, limit: int, before_call_id: int | None = None
     ) -> list[CallRecord]:
         """끝난 예약 통화를 최신순으로 (설계 3.3).
 
@@ -288,6 +295,11 @@ class InMemoryCallStore:
 
         날짜가 아니라 건수로 세는 이유는 created_at이 time.monotonic()이라
         날짜가 없기 때문이다. 벽시계를 들이면 시간 되감기에 순서가 뒤집힌다.
+
+        before_call_id는 자기 자신과 미래 통화를 함께 막는다(call_id는
+        단조 증가). exclude_call_id처럼 "정확히 이 값만" 빼는 게 아니라
+        "이 값 이상은 전부" 빼는 쪽이 엄격하게 더 강하다 — sink가 늦게 돌아
+        처리 순서와 통화가 실제로 일어난 순서가 어긋나도 결과가 같아진다.
         """
         with self._lock:
             found = [
@@ -296,7 +308,7 @@ class InMemoryCallStore:
                 if call.elder_id == elder_id
                 and call.trigger_type == "scheduled"
                 and call.status in FINISHED_STATUSES
-                and call.call_id != exclude_call_id
+                and (before_call_id is None or call.call_id < before_call_id)
             ]
         found.sort(key=lambda call: call.call_id, reverse=True)
         return found[:limit]
