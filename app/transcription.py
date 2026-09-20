@@ -6,23 +6,6 @@
 
 from __future__ import annotations
 
-
-class TranscriptionUnavailable(Exception):
-    """전사를 부르지 못했다 — 연결 실패, 인증 실패처럼 요청이 닿지 않은 경우.
-
-    빠르게 돌아오고, 잠깐 끊긴 네트워크가 원인일 수 있으므로 다시 해볼
-    값어치가 있다(설계 5장 ①).
-    """
-
-
-class TranscriptionFailed(Exception):
-    """전사가 실패로 끝났다 — 시간이 다 됐거나 사업자가 실패라고 답했다.
-
-    다시 보내도 같은 답이 오리라고 볼 근거가 있으므로 재시도하지 않는다
-    (설계 5장 ②③). 줄이 직렬이라 붙들고 있으면 뒤에 선 통화가 전부 밀린다.
-    """
-
-
 import logging
 import queue
 import threading
@@ -40,6 +23,22 @@ logger = logging.getLogger(__name__)
 
 # 연결 실패만 다시 해본다. 세 번째도 실패하면 포기한다(설계 5장).
 MAX_RETRIES = 2
+
+
+class TranscriptionUnavailable(Exception):
+    """전사를 부르지 못했다 — 연결 실패, 인증 실패처럼 요청이 닿지 않은 경우.
+
+    빠르게 돌아오고, 잠깐 끊긴 네트워크가 원인일 수 있으므로 다시 해볼
+    값어치가 있다(설계 5장 ①).
+    """
+
+
+class TranscriptionFailed(Exception):
+    """전사가 실패로 끝났다 — 시간이 다 됐거나 사업자가 실패라고 답했다.
+
+    다시 보내도 같은 답이 오리라고 볼 근거가 있으므로 재시도하지 않는다
+    (설계 5장 ②③). 줄이 직렬이라 붙들고 있으면 뒤에 선 통화가 전부 밀린다.
+    """
 
 
 @dataclass(frozen=True)
@@ -110,9 +109,26 @@ class TranscriptionWorker:
             self._drain_pending()
         self._queue.put(None)
         self._thread.join(timeout)
+        if self._thread.is_alive():
+            # 전사가 아직 안 끝났다. 여기서 참조를 지우면 다음 start()가 같은
+            # 큐에 두 번째 워커를 붙이고, 그 순간 "워커는 하나"라는 보장이
+            # 사라진다 — 같은 어르신의 통화 순서가 뒤집혀도 아무 오류가 안 난다.
+            # 워커가 둘인 것보다 없는 편이 낫다. 참조를 남겨 다음 start()를 막는다.
+            #
+            # 남은 스레드는 진행 중인 전사를 마친 뒤 센티넬을 만나 스스로 끝난다.
+            # daemon이므로 인터프리터 종료를 붙들지도 않는다.
+            logger.error(
+                "전사 워커가 %.0f초 안에 끝나지 않았다 — 진행 중인 전사가 있다."
+                " 이 프로세스에서는 워커를 다시 시작하지 않는다",
+                timeout,
+            )
+            return
         self._thread = None
 
     def _drain_pending(self) -> None:
+        # 이 루프와 워커의 get()이 마지막 항목을 두고 경쟁하지만,
+        # queue.Queue의 내부 락 덕분에 항목이 중복 처리되거나 유실되지는 않는다.
+        # 다만 경계에 걸친 항목이 버려질지 처리될지는 타이밍에 달렸다.
         while True:
             try:
                 job = self._queue.get_nowait()

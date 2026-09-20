@@ -263,7 +263,7 @@ def test_draining_is_opt_in():
         worker.submit(2, _analysis(), Path("2.wav"))
         worker.stop(drain=True)
     finally:
-        pass
+        worker.stop()
 
     assert [call_id for call_id, _ in sink.results] == [1, 2]
     assert worker.dropped == []
@@ -286,3 +286,37 @@ def test_the_same_call_is_only_submitted_once_on_the_normal_path():
 
     # 지금은 두 번 다 통과한다. 이 사실을 적어 둔다.
     assert [call_id for call_id, _ in sink.results] == [1, 1]
+
+
+def test_a_stop_that_times_out_does_not_let_a_second_worker_start():
+    """전사는 최대 10분까지 걸릴 수 있는데 종료 대기는 30초다. 그래서 전사가
+    도는 중에 서버를 내리면 join은 거의 매번 시간 초과한다.
+
+    그때 스레드 참조를 지우면 다음 start()가 같은 큐에 두 번째 워커를 붙이고,
+    "워커는 하나, 처리는 직렬"이라는 이 클래스의 존재 이유가 사라진다. 같은
+    어르신의 통화 순서가 뒤집혀도 아무 오류가 나지 않는다.
+    """
+    busy = threading.Event()
+    release = threading.Event()
+
+    def slow(wav_path):
+        busy.set()
+        assert release.wait(5.0), "테스트가 전사를 놓아주지 않았다"
+        return "괜찮아요"
+
+    worker = TranscriptionWorker(transcribe=slow, sink=lambda *a: None)
+    worker.start()
+    first = worker._thread
+    try:
+        worker.submit(1, _analysis(), Path("1.wav"))
+        assert busy.wait(5.0), "워커가 일을 시작하지 않았다"
+
+        # 전사가 아직 안 끝났으므로 join이 시간 초과한다.
+        worker.stop(timeout=0.1)
+
+        # 여기서 새 워커가 생기면 큐 하나에 스레드 둘이 붙는다.
+        worker.start()
+        assert worker._thread is first, "두 번째 워커가 생겼다"
+    finally:
+        release.set()
+        worker.stop(timeout=5.0)
