@@ -70,9 +70,11 @@ class ConversationResponder:
         max_retries: int = MAX_RETRIES,
         retry_prompt: str = RETRY_PROMPT,
     ) -> None:
-        self._stt = stt
-        self._chat = chat
-        self._voice = voice
+        # 주입한 협력자는 공개한다 — 조립부가 무엇을 끼웠는지 확인할 수
+        # 있어야 "개발엔 Polly, 시연엔 CLOVA"를 테스트로 고정할 수 있다.
+        self.stt = stt
+        self.chat = chat
+        self.voice = voice
         self._max_retries = max_retries
         self._retry_prompt = retry_prompt
         self.history: list[Turn] = []
@@ -80,7 +82,7 @@ class ConversationResponder:
 
     def respond(self, audio: np.ndarray, sample_rate: int) -> bytes:
         try:
-            said = self._stt.transcribe(audio, sample_rate).strip()
+            said = self.stt.transcribe(audio, sample_rate).strip()
         except Exception:
             logger.exception("전사 실패 — 이 턴은 넘어간다")
             return b""
@@ -93,7 +95,7 @@ class ConversationResponder:
         self.history.append(Turn("elder", said))
 
         try:
-            reply = self._chat.reply(self.history).strip()
+            reply = self.chat.reply(self.history).strip()
         except Exception:
             logger.exception("응답 생성 실패 — 이 턴은 침묵한다")
             return b""
@@ -123,7 +125,7 @@ class ConversationResponder:
 
     def _speak(self, text: str, sample_rate: int) -> bytes:
         try:
-            return self._voice.synthesize(text, sample_rate)
+            return self.voice.synthesize(text, sample_rate)
         except Exception:
             # 통화를 끊지 않는다. 한 턴 침묵하는 것과 전화가 죽는 것은 다르다.
             logger.exception("음성 합성 실패 — 이 턴은 침묵한다 text=%r", text[:60])

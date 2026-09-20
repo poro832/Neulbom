@@ -14,6 +14,10 @@ dependencies = [
     # import한다. dev 그룹에만 있으면 `pip install .` 뒤 uvicorn이 뜨자마자
     # ImportError로 죽는다 — 배포 당일에 발견하기 딱 좋은 자리였다.
     "httpx>=0.27",
+    # app/media/polly_voice.py가 쓴다. 지금은 개발용 TTS 때문이지만 녹음을
+    # S3에 올릴 때도 필요하다. httpx처럼 dev 그룹에만 두면 배포 당일에
+    # ImportError로 발견하게 된다.
+    "boto3>=1.34",
 ]
 
 [dependency-groups]

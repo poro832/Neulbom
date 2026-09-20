@@ -22,8 +22,15 @@ FULL = {
 }
 
 
+# 테스트끼리 환경이 새지 않게 관련 변수를 전부 지우고 시작한다.
+_ALL = CLOVA_ENV_KEYS + (
+    "TTS_VENDOR", "CLOVA_VOICE_SPEAKER", "CLOVA_VOICE_SPEED",
+    "CLOVA_STUDIO_MODEL", "POLLY_VOICE_ID",
+)
+
+
 def set_env(monkeypatch, values):
-    for name in CLOVA_ENV_KEYS:
+    for name in _ALL:
         monkeypatch.delenv(name, raising=False)
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -89,3 +96,57 @@ def test_a_bad_speed_value_does_not_stop_the_server(monkeypatch, caplog):
 
     with caplog.at_level(logging.WARNING, logger="app.main"):
         assert isinstance(responder_from_env(), ConversationResponder)
+
+
+# ------------------------------------------- TTS 벤더 선택 (개발 Polly / 시연 CLOVA)
+
+POLLY_ENV = {
+    "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
+    "CLOVA_SPEECH_SECRET": "s-secret",
+    "CLOVA_STUDIO_BASE_URL": "https://studio.test",
+    "CLOVA_STUDIO_API_KEY": "studio-key",
+    "TTS_VENDOR": "polly",
+}
+
+
+def test_polly_needs_no_clova_voice_keys(monkeypatch):
+    """개발 기간에는 CLOVA Voice를 켜지 않는다 — 월 정액이 시작된다.
+
+    그 두 키가 없다고 대화를 막으면 개발 내내 비프만 듣게 된다.
+    """
+    from app.media.polly_voice import PollyVoice
+
+    set_env(monkeypatch, POLLY_ENV)
+
+    responder = responder_from_env()
+
+    assert isinstance(responder, ConversationResponder)
+    assert isinstance(responder.voice, PollyVoice)
+
+
+def test_the_default_vendor_is_clova(monkeypatch):
+    from app.media.clova_voice import ClovaVoice
+
+    set_env(monkeypatch, FULL)
+
+    assert isinstance(responder_from_env().voice, ClovaVoice)
+
+
+def test_an_unknown_vendor_falls_back_instead_of_guessing(monkeypatch, caplog):
+    """오타 하나로 엉뚱한 벤더에 요금이 나가면 안 된다."""
+    set_env(monkeypatch, {**POLLY_ENV, "TTS_VENDOR": "pollly"})
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        assert isinstance(responder_from_env(), CannedResponder)
+
+    assert any("pollly" in record.getMessage() for record in caplog.records)
+
+
+def test_the_chosen_tts_vendor_is_logged(monkeypatch, caplog):
+    """어느 목소리가 어느 통화를 만들었는지 없으면 점수를 비교할 수 없다."""
+    set_env(monkeypatch, POLLY_ENV)
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        responder_from_env()
+
+    assert any("polly" in record.getMessage().lower() for record in caplog.records)

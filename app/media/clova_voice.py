@@ -25,6 +25,8 @@ from typing import Protocol
 
 import httpx
 
+from app.media.spoken_text import strip_unspoken
+
 logger = logging.getLogger(__name__)
 
 TTS_URL = "https://naveropenapi.apigw.ntruss.com/tts-premium/v1/tts"
@@ -45,10 +47,6 @@ SUPPORTED_SAMPLE_RATES = frozenset({8000, 16000, 24000, 48000})
 # 전화 상담용으로 튜닝된 목소리. 우리는 전화 서비스라 이걸 기본으로 둔다.
 # 앱 이름과 같은 "napple"(늘봄)도 있다 — 실제 통화를 들어 보고 고른다.
 DEFAULT_SPEAKER = "nara_call"
-
-# CLOVA는 괄호 안 텍스트를 읽지 않는다. 오류도 없이 그냥 사라진다.
-# 우리가 먼저 지워야 "보낸 것"과 "들린 것"이 같아진다.
-_BRACKETED = re.compile(r"[(\[{][^)\]}]*[)\]}]")
 
 # 문장 끝. 뒤의 공백까지 함께 먹어 조각에 앞 공백이 남지 않게 한다.
 _SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
@@ -72,16 +70,6 @@ class VoiceSynthesizer(Protocol):
         같은 뜻이다.
         """
         ...
-
-
-def strip_unspoken(text: str) -> str:
-    """읽히지 않을 부분을 미리 없앤다.
-
-    괄호 안 내용만 지운다. 문장부호는 억양에 쓰이므로 남긴다. 다른 기호도
-    CLOVA가 읽지 않지만 소리에 영향을 주지 않아 굳이 손대지 않는다 —
-    과하게 지우면 진짜 할 말이 사라진다.
-    """
-    return " ".join(_BRACKETED.sub(" ", text).split())
 
 
 def split_for_tts(text: str, limit: int = TTS_MAX_SENTENCE_CHARS) -> list[str]:

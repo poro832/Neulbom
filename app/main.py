@@ -42,6 +42,8 @@ from app.api.store import CallStore, InMemoryCallStore
 from app.media.clova_chat import DEFAULT_MODEL, ClovaChat
 from app.media.clova_speech import ClovaSpeech
 from app.media.clova_voice import DEFAULT_SPEAKER, ClovaVoice
+from app.media.polly_voice import DEFAULT_VOICE_ID as POLLY_DEFAULT_VOICE_ID
+from app.media.polly_voice import PollyVoice
 from app.media.conversation import ConversationResponder
 from app.media.responder import Responder
 from app.media.session import CallSession
@@ -61,16 +63,22 @@ logger = logging.getLogger(__name__)
 # 구현이 DB와 함께 들어온다. 규약을 먼저 뚫어 두면 그때 이 파일만 바뀐다.
 AnalysisSink = Callable[[int, CallAnalysis], None]
 
-# 자율 대화에 필요한 자격 증명. 셋 중 하나라도 빠지면 대화를 시작하지
-# 않는다 — 아래 responder_from_env 설명 참고.
-CLOVA_ENV_KEYS = (
+# STT와 LLM은 벤더가 정해져 있다(CLOVA Speech / Studio — 둘 다 종량제).
+BASE_ENV_KEYS = (
     "CLOVA_SPEECH_INVOKE_URL",
     "CLOVA_SPEECH_SECRET",
     "CLOVA_STUDIO_BASE_URL",
     "CLOVA_STUDIO_API_KEY",
-    "CLOVA_VOICE_CLIENT_ID",
-    "CLOVA_VOICE_CLIENT_SECRET",
 )
+
+# TTS만 벤더를 고른다. CLOVA Voice는 월 정액이라 개발 기간에는 켜지 않고,
+# 목소리 품질이 실제로 중요해지는 시연 달에만 바꾼다. Polly는 자격 증명을
+# 환경/인스턴스 프로파일에서 찾으므로 여기 키가 없다.
+CLOVA_VOICE_ENV_KEYS = ("CLOVA_VOICE_CLIENT_ID", "CLOVA_VOICE_CLIENT_SECRET")
+
+CLOVA_ENV_KEYS = BASE_ENV_KEYS + CLOVA_VOICE_ENV_KEYS
+
+TTS_VENDORS = ("clova", "polly")
 
 
 def responder_from_env() -> Responder:
@@ -84,7 +92,21 @@ def responder_from_env() -> Responder:
     키가 없어도 서버는 떠야 한다. 계정 신청이 끝나기 전에도 전화 경로
     자체는 고정 응답으로 끝까지 검증된다(_telephony_from_env와 같은 규칙).
     """
-    missing = [name for name in CLOVA_ENV_KEYS if not os.getenv(name)]
+    vendor = os.getenv("TTS_VENDOR", "clova").strip().lower()
+    if vendor not in TTS_VENDORS:
+        # 오타 하나로 엉뚱한 벤더에 요금이 나가면 안 된다. 짐작하지 않는다.
+        logger.warning(
+            "모르는 TTS 벤더라 고정 응답으로 간다 — %r. 가능한 값: %s",
+            vendor,
+            ", ".join(TTS_VENDORS),
+        )
+        return default_responder()
+
+    required = BASE_ENV_KEYS
+    if vendor == "clova":
+        required += CLOVA_VOICE_ENV_KEYS
+
+    missing = [name for name in required if not os.getenv(name)]
     if missing:
         logger.warning(
             "CLOVA 자격 증명이 모자라 고정 응답으로 간다 — AI는 말하지 않는다."
@@ -100,9 +122,22 @@ def responder_from_env() -> Responder:
     # 이 셋은 AI 발화 길이를 바꾸고, 그것이 지표의 분모(통화 전체 − AI 발화)를
     # 바꾼다. 어느 설정이 어느 통화를 만들었는지 남기지 않으면 나중에 점수를
     # 비교할 때 무엇이 달라졌는지 알 수 없다(CALCULATOR_VERSION과 같은 성질).
-    logger.info(
-        "자율 대화로 조립한다 — 목소리 %s (speed %d), 모델 %s", speaker, speed, model
-    )
+    if vendor == "clova":
+        voice = ClovaVoice(
+            os.environ["CLOVA_VOICE_CLIENT_ID"],
+            os.environ["CLOVA_VOICE_CLIENT_SECRET"],
+            speaker=speaker,
+            speed=speed,
+        )
+        voice_label = f"CLOVA {speaker} (speed {speed})"
+    else:
+        voice = PollyVoice(
+            voice_id=os.getenv("POLLY_VOICE_ID", POLLY_DEFAULT_VOICE_ID),
+            region_name=os.getenv("AWS_REGION"),
+        )
+        voice_label = f"Polly {voice.voice_id}"
+
+    logger.info("자율 대화로 조립한다 — TTS %s, 모델 %s", voice_label, model)
 
     return ConversationResponder(
         stt=ClovaSpeech(
@@ -114,12 +149,7 @@ def responder_from_env() -> Responder:
             os.environ["CLOVA_STUDIO_BASE_URL"],
             model=model,
         ),
-        voice=ClovaVoice(
-            os.environ["CLOVA_VOICE_CLIENT_ID"],
-            os.environ["CLOVA_VOICE_CLIENT_SECRET"],
-            speaker=speaker,
-            speed=speed,
-        ),
+        voice=voice,
     )
 
 
