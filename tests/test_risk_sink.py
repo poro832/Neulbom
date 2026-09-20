@@ -359,3 +359,31 @@ def test_the_outcome_records_the_baseline_it_actually_used():
     recorded = recorded_for(outcomes, call.call_id)
     assert recorded.baseline_speech_ratio == 0.5
     assert recorded.baseline_avg_response_delay_ms == 1500
+
+
+def test_the_transcription_mode_is_recorded():
+    """전사를 켜면 실질 만점이 60에서 80으로 바뀐다(설계 7장).
+
+    어느 모드로 낸 점수인지 남기지 않으면, 나중에 '왜 9월 점수가 전부
+    낮지?'라는 질문에 데이터로 답할 방법이 없다.
+    """
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    outcomes = InMemoryOutcomeStore()
+    call = store.create(elder_id=12, trigger_type="scheduled")
+
+    build_risk_sink(store, outcomes, transcription_enabled=True)(
+        call.call_id, analysis_of()
+    )
+
+    assert recorded_for(outcomes, call.call_id).transcription_enabled is True
+
+
+def test_the_transcription_mode_defaults_to_off():
+    """기본값이 켜짐이면, 단문 인식 키가 이미 있는 지금 조용히 켜지고
+    만점이 바뀐다. 그런 변화가 소리 없이 일어나면 안 된다(설계 7장).
+    """
+    _, outcomes, sink, call = make()
+
+    sink(call.call_id, analysis_of())
+
+    assert recorded_for(outcomes, call.call_id).transcription_enabled is False

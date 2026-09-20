@@ -46,3 +46,7 @@ class CallOutcome:
     degraded_reasons: tuple[str, ...]
     # 어느 가중치로 낸 점수인지. 없으면 나중에 점수끼리 비교할 수 없다.
     calculator_version: str
+    # 이 점수를 낸 전사 모드. 꺼져 있으면 부정 표현 20점을 재지 않았으므로
+    # 실질 만점이 60이고, 켜져 있으면 80이다. 두 모드의 점수를 같은 줄에
+    # 놓고 추이로 보면 안 된다 — 그 구분이 이 값 하나에 달려 있다(설계 7장).
+    transcription_enabled: bool = False

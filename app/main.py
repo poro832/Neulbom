@@ -171,7 +171,12 @@ def _int_from_env(name: str, fallback: int) -> int:
 NO_ANSWER_WINDOW = 7
 
 
-def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
+def build_risk_sink(
+    store: CallStore,
+    outcomes: OutcomeStore,
+    *,
+    transcription_enabled: bool = False,
+) -> AnalysisSink:
     """지표를 위험 점수로 환산해 남긴다 (설계 4.5).
 
     이 배선이 없던 동안 assess_risk는 테스트에서만 불렸다. 지표까지 만들어
@@ -233,6 +238,7 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
                     degraded=analysis.degraded,
                     degraded_reasons=analysis.degraded_reasons,
                     calculator_version=CALCULATOR_VERSION,
+                    transcription_enabled=transcription_enabled,
                 )
             )
             logger.info(

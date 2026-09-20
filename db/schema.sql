@@ -154,6 +154,9 @@ CREATE TABLE call_metrics (
     degraded_reasons        TEXT[] NOT NULL DEFAULT '{}',
     -- 가중치를 바꾸면 이전 점수와 비교할 수 없다. 어느 버전이 낸 점수인지 남긴다.
     calculator_version      TEXT NOT NULL,
+    -- 이 점수를 낸 전사 모드. 꺼져 있으면 부정 표현 축을 재지 않았으므로
+    -- 실질 만점이 다르다. 두 모드의 점수를 같은 추이로 읽으면 안 된다.
+    transcription_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
     computed_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT metrics_score_and_level_together
