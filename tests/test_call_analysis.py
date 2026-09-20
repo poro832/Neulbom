@@ -19,7 +19,7 @@ from app.analysis.call_analysis import (
     with_transcript,
 )
 from app.analysis.echo import ClipResult
-from app.analysis.metrics_calculator import CallMetrics
+from app.analysis.metrics_calculator import CallMetrics, calculate_metrics
 from app.analysis.segments import VadSegment
 
 SAMPLE_RATE = 8000
@@ -233,11 +233,29 @@ def test_only_the_negative_word_count_changes():
 def test_the_counting_rule_is_the_same_one_calculate_metrics_uses():
     """규칙이 두 군데 있으면 갈라진다(segments.py가 같은 이유로 그렇게 쓰여 있다).
 
-    '아파트'의 '아파'를 세지 않는 것 같은 규칙은 한 함수에만 있어야 한다.
+    두 경로가 같은 함수를 부르는지는 결과 하나만 봐서는 알 수 없다 — 한쪽이
+    손으로 짠 별도 구현이어도 쉬운 입력에서는 같은 답을 낸다. 까다로운
+    입력들을 양쪽에 똑같이 넣어 답이 갈라지지 않는지 본다.
     """
-    analysis = with_transcript(_analysis(), "아파트 앞에서 봤어요")
-
-    assert analysis.metrics.negative_word_count == 0
+    hard_cases = (
+        "아파트 앞에서 봤어요",      # 명사 안에 숨은 어간
+        "무릎이 아파요",             # 평범한 부정 표현
+        "우울하지 않아요",           # 부정의 부정
+        "아프지만 견딜 만해요",      # 양보
+        "안 아파요",                 # 앞에 붙는 부정
+    )
+    for transcript in hard_cases:
+        through_analysis = with_transcript(_analysis(), transcript)
+        through_metrics = calculate_metrics(
+            call_duration_ms=120_000,
+            elder_speech=[],
+            ai_turns=[],
+            transcript=transcript,
+        )
+        assert (
+            through_analysis.metrics.negative_word_count
+            == through_metrics.negative_word_count
+        ), transcript
 
 
 def test_an_existing_degraded_reason_survives():
