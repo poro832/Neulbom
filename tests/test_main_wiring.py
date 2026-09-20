@@ -8,7 +8,8 @@ import logging
 
 import pytest
 
-from app.main import CLOVA_ENV_KEYS, responder_from_env
+from app.main import CLOVA_ENV_KEYS, responder_from_env, transcriber_from_env
+from app.media.clova_long_speech import ClovaLongSpeech
 from app.media.conversation import ConversationResponder
 from app.media.responder import CannedResponder
 
@@ -150,3 +151,74 @@ def test_the_chosen_tts_vendor_is_logged(monkeypatch, caplog):
         responder_from_env()
 
     assert any("polly" in record.getMessage().lower() for record in caplog.records)
+
+
+# --------------------------------------------- 배치 전사 켜고 끄기 (transcriber_from_env)
+#
+# 점수의 만점을 60에서 80으로 바꾸는 유일한 함수다. 조용히 꺼진 채로 돌면
+# 부정 표현 축은 계속 죽어 있고, 그달 모든 점수가 만점 60으로 나오는데
+# 데이터는 정확해 보여서 아무도 몇 주 동안 눈치채지 못한다(설계 11장).
+
+LONG_SPEECH_KEYS = {
+    "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
+    "CLOVA_SPEECH_SECRET": "s-secret",
+}
+
+
+@pytest.mark.parametrize("value", ["1", "true", "on", "TRUE", "On", " on ", " 1 "])
+def test_batch_transcription_turns_on_with_common_truthy_spellings(monkeypatch, value):
+    """대소문자·앞뒤 공백 표기가 다르다고 조용히 꺼진 채로 남으면 안 된다."""
+    monkeypatch.setenv("BATCH_TRANSCRIPTION", value)
+    for name, val in LONG_SPEECH_KEYS.items():
+        monkeypatch.setenv(name, val)
+
+    assert isinstance(transcriber_from_env(), ClovaLongSpeech)
+
+
+@pytest.mark.parametrize("value", [None, "", "off", "yes", "0", "false", "enabled"])
+def test_batch_transcription_stays_off_unless_explicitly_turned_on(monkeypatch, value):
+    """누군가 systemd 유닛에 오타(yes, enabled)를 쓰면 조용히 꺼진 채로 돌아야
+    한다 — "키가 있으면 켠다"처럼 추측하면 만점이 소리 없이 바뀐다(설계 7장).
+    """
+    if value is None:
+        monkeypatch.delenv("BATCH_TRANSCRIPTION", raising=False)
+    else:
+        monkeypatch.setenv("BATCH_TRANSCRIPTION", value)
+    for name, val in LONG_SPEECH_KEYS.items():
+        monkeypatch.setenv(name, val)
+
+    assert transcriber_from_env() is None
+
+
+def test_batch_transcription_on_without_keys_returns_none_and_warns(monkeypatch, caplog):
+    """켰는데 키가 없으면 조용히 꺼진 채로 돈다 — 부정 표현 축은 계속
+    죽어 있고, 유일한 신호가 이 경고 로그다.
+    """
+    monkeypatch.setenv("BATCH_TRANSCRIPTION", "on")
+    monkeypatch.delenv("CLOVA_SPEECH_INVOKE_URL", raising=False)
+    monkeypatch.delenv("CLOVA_SPEECH_SECRET", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        result = transcriber_from_env()
+
+    assert result is None
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "BATCH_TRANSCRIPTION" in message
+
+
+def test_batch_transcription_on_with_keys_returns_the_adapter_and_logs_the_score_change(
+    monkeypatch, caplog
+):
+    """만점이 60에서 80으로 바뀌는 유일한 순간이다. 로그가 없으면 나중에
+    "왜 이달 점수가 전부 낮지?"를 풀 방법이 없다(설계 7장).
+    """
+    monkeypatch.setenv("BATCH_TRANSCRIPTION", "on")
+    for name, val in LONG_SPEECH_KEYS.items():
+        monkeypatch.setenv(name, val)
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        result = transcriber_from_env()
+
+    assert isinstance(result, ClovaLongSpeech)
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "60" in message and "80" in message
