@@ -117,13 +117,17 @@ class ClovaLongSpeech:
             raise TranscriptionFailed(f"전사 응답이 객체가 아니다 — {raw[:200]!r}")
 
         text = body.get("text")
-        if not text:
+        if not isinstance(text, str) or not text:
             # HTTP는 200인데 본문이 실패인 경우가 있다. 빈 문자열을 돌려주면
             # "부정어가 없었다"와 "전사가 실패했다"가 같은 값이 되어, 점수
-            # 20점이 조용히 0으로 들어간다.
+            # 20점이 조용히 0으로 들어간다. text가 문자열이 아닌 경우(사업자가
+            # 숫자나 리스트를 줄 수 있다)도 같은 실패다 — 아래 len()이나
+            # count_negative_words가 그 값을 문자열처럼 다루다 TypeError나
+            # AttributeError를 내는데, 그건 우리가 선언한 예외가 아니라서
+            # 워커의 except Exception이 삼키고 sink가 아예 안 불린다.
             raise TranscriptionFailed(
-                f"전사 결과가 없다 — result={body.get('result')!r} "
-                f"message={body.get('message')!r}"
+                f"전사 결과가 문자열이 아니거나 비어 있다 — {type(text).__name__} "
+                f"result={body.get('result')!r} message={body.get('message')!r}"
             )
 
         logger.info("전사 완료 — %d자 wav=%s", len(text), Path(wav_path).name)

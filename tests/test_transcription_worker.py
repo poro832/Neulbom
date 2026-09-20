@@ -224,8 +224,11 @@ def test_shutdown_drops_the_queue_and_names_what_it_dropped(caplog):
     """큐에 10건이 남았는데 전부 처리하려 들면 종료가 10분 넘게 걸리고,
     배포할 때마다 그만큼 기다리게 된다(설계 6장).
 
-    버린 목록이 없으면 무엇을 잃었는지조차 모른다. 녹음은 30일 남으므로
-    call_id만 있으면 나중에 손으로 다시 돌릴 수 있다.
+    버린 목록이 없으면 무엇을 잃었는지조차 모른다. call_id만으로는 부족하다
+    — 녹음 파일 이름은 call_id만이 아니라 UTC 시각과 난수까지 들어가고
+    (app/media/session.py), 프로세스가 재시작하면 call_id가 1로 돌아가
+    같은 번호가 여러 날의 녹음을 가리킬 수 있다. wav 파일 이름까지 있어야
+    나중에 손으로 다시 돌릴 수 있다.
     """
     busy = threading.Event()
     release = threading.Event()
@@ -248,9 +251,9 @@ def test_shutdown_drops_the_queue_and_names_what_it_dropped(caplog):
         release.set()
         worker.stop()
 
-    assert worker.dropped == [2, 3]
+    assert worker.dropped == [(2, "2.wav"), (3, "3.wav")]
     message = " ".join(record.getMessage() for record in caplog.records)
-    assert "2" in message and "3" in message
+    assert "2.wav" in message and "3.wav" in message
 
 
 def test_draining_is_opt_in():
@@ -286,6 +289,60 @@ def test_the_same_call_is_only_submitted_once_on_the_normal_path():
 
     # 지금은 두 번 다 통과한다. 이 사실을 적어 둔다.
     assert [call_id for call_id, _ in sink.results] == [1, 1]
+
+
+def test_an_undeclared_exception_still_records_the_call():
+    """전사 호출이 우리가 선언한 두 예외(TranscriptionUnavailable,
+    TranscriptionFailed) 중 어느 쪽도 아닌 예외를 던지면, 예전에는
+    _run의 except Exception이 그것을 삼켜 sink가 아예 안 불렸다 — 그 통화는
+    CallOutcome을 하나도 못 받았다. 설계 5장의 "기록은 반드시 한다"는
+    예외 종류와 무관한 약속이다.
+    """
+
+    def buggy(wav_path):
+        raise ValueError("예상 못 한 배선 결함")
+
+    worker, sink = run_worker(buggy)
+    try:
+        worker.submit(1, _analysis(), Path("call.wav"))
+        sink.wait()
+    finally:
+        worker.stop()
+
+    call_id, analysis = sink.results[0]
+    assert call_id == 1
+    assert DEGRADED_NO_TRANSCRIPT in analysis.degraded_reasons
+    assert analysis.metrics.speech_ratio == 0.4  # 지표는 그대로 남았다
+
+
+def test_a_stop_that_times_out_names_the_call_it_is_still_holding(caplog):
+    """예전에는 이 로그에 call_id가 없었다. 서버가 종료되고 데몬 스레드가
+    요청 도중 죽으면, 그 통화는 dropped 목록에도 메모리 저장소에도 없는
+    유일한 통화가 된다 — 이 로그가 그 통화를 아는 마지막 기회다.
+    """
+    busy = threading.Event()
+    release = threading.Event()
+
+    def slow(wav_path):
+        busy.set()
+        assert release.wait(5.0), "테스트가 전사를 놓아주지 않았다"
+        return "괜찮아요"
+
+    worker = TranscriptionWorker(transcribe=slow, sink=lambda *a: None)
+    worker.start()
+    try:
+        worker.submit(7, _analysis(), Path("7.wav"))
+        assert busy.wait(5.0), "워커가 일을 시작하지 않았다"
+
+        with caplog.at_level(logging.ERROR, logger="app.transcription"):
+            worker.stop(timeout=0.1)
+
+        message = " ".join(record.getMessage() for record in caplog.records)
+        assert "call_id=7" in message
+        assert "7.wav" in message
+    finally:
+        release.set()
+        worker.stop(timeout=5.0)
 
 
 def test_a_stop_that_times_out_does_not_let_a_second_worker_start():

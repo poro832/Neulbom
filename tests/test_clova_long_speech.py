@@ -189,6 +189,18 @@ def test_a_reply_without_text_is_a_failure(tmp_path):
         stt.transcribe(make_wav(tmp_path))
 
 
+def test_a_non_string_text_is_a_failure_not_a_crash(tmp_path):
+    """HTTP 200에 text가 숫자로 오면(사업자 쪽 이례적 응답), 검사 없이
+    넘기면 바로 다음 줄의 len(text) 로깅에서 TypeError가 난다. 그건 우리가
+    선언한 두 예외 중 어느 쪽도 아니라서 워커의 except Exception이 삼키고
+    sink가 아예 안 불린다 — 그 통화는 CallOutcome을 하나도 못 받는다.
+    """
+    stt, _ = make(reply=json.dumps({"result": "COMPLETED", "text": 12345}).encode())
+
+    with pytest.raises(TranscriptionFailed):
+        stt.transcribe(make_wav(tmp_path))
+
+
 def test_a_broken_reply_is_a_failure_not_a_crash(tmp_path):
     stt, _ = make(reply=b"<html>oops</html>")
 

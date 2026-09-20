@@ -74,8 +74,15 @@ class TranscriptionWorker:
         self._max_retries = max_retries
         self._queue: queue.Queue[PendingTranscription | None] = queue.Queue()
         self._thread: threading.Thread | None = None
-        # 종료할 때 버린 통화들. 녹음은 30일 남으므로 이 목록이 곧 복구 단서다.
-        self.dropped: list[int] = []
+        # 종료할 때 버린 통화들 — (call_id, wav 파일 이름) 쌍이다. 녹음 파일
+        # 이름은 call_id만이 아니다(app/media/session.py의 _recording_name) —
+        # 프로세스가 재시작하면 call_id가 1로 돌아가 같은 번호가 여러 날의
+        # 녹음을 가리킬 수 있다. call_id만 남기면 재시작을 몇 번 거친 뒤에는
+        # 이 목록으로 엉뚱한 날의 녹음을 다시 돌리게 된다.
+        self.dropped: list[tuple[int, str]] = []
+        # 워커 스레드가 지금 붙들고 있는 작업. stop()이 시간 초과 로그에 쓰려고
+        # 호출자 스레드에서 읽는다 — 아래 stop()의 주석에 안전성 근거가 있다.
+        self._current: PendingTranscription | None = None
 
     def start(self) -> None:
         if self._thread is not None:
@@ -117,10 +124,23 @@ class TranscriptionWorker:
             #
             # 남은 스레드는 진행 중인 전사를 마친 뒤 센티넬을 만나 스스로 끝난다.
             # daemon이므로 인터프리터 종료를 붙들지도 않는다.
+            #
+            # self._current는 워커 스레드가 쓰고 여기(호출자 스레드)가 읽는다.
+            # 락을 걸지 않는다 — CPython에서 객체 참조 하나를 대입하거나
+            # 읽는 것은 GIL 덕분에 원자적이라 찢긴 값을 볼 수 없다. 최악의
+            # 경우도 "방금 끝난 직전 작업"이나 "막 시작한 다음 작업"을 보는
+            # 정도이지 절대 깨진 객체를 보지 않는다. 이 로그는 정확한 트랜잭션
+            # 기록이 아니라 복구 단서이므로 그 정도 근사로 충분하다.
+            current = self._current
+            if current is None:
+                detail = "call_id=알수없음"
+            else:
+                detail = f"call_id={current.call_id} wav={current.wav_path.name}"
             logger.error(
-                "전사 워커가 %.0f초 안에 끝나지 않았다 — 진행 중인 전사가 있다."
-                " 이 프로세스에서는 워커를 다시 시작하지 않는다",
+                "전사 워커가 %.0f초 안에 끝나지 않았다 — 진행 중인 전사가 있다"
+                " %s. 이 프로세스에서는 워커를 다시 시작하지 않는다",
                 timeout,
+                detail,
             )
             return
         self._thread = None
@@ -136,11 +156,11 @@ class TranscriptionWorker:
                 break
             if job is None:
                 continue
-            self.dropped.append(job.call_id)
+            self.dropped.append((job.call_id, job.wav_path.name))
         if self.dropped:
             logger.warning(
                 "종료하면서 전사 대기 %d건을 버린다 — 녹음은 30일 남으므로 "
-                "다시 돌릴 수 있다 call_id=%s",
+                "다시 돌릴 수 있다 call_id/wav=%s",
                 len(self.dropped),
                 self.dropped,
             )
@@ -150,23 +170,53 @@ class TranscriptionWorker:
             job = self._queue.get()
             if job is None:
                 return
+            self._current = job
             try:
                 self._handle(job)
             except Exception:
                 # 여기서 새어 나가면 워커 스레드가 죽고, 그 뒤 모든 통화가
                 # 조용히 점수를 잃는다. 아침에 30통이 들어오는데 아무도 모른다.
+                # _handle이 아래에서 sink 호출까지 자신의 try로 감싸므로,
+                # 여기까지 올라오는 예외는 사실상 sink 자신이 터진 경우뿐이다
+                # — 그래서 다시 sink를 부르지 않고 로그만 남긴다.
                 logger.exception("전사 처리가 실패했다 call_id=%s", job.call_id)
+            finally:
+                self._current = None
 
     def _handle(self, job: PendingTranscription) -> None:
-        transcript = self._transcribe_with_retries(job)
-        if transcript is None:
+        """전사를 얻어 analysis에 반영하고 sink에 넘긴다.
+
+        **sink는 어떤 경로로 끝나든 정확히 한 번 불린다** — sink 자신이
+        터지는 경우만 빼고(그건 _run의 바깥 try가 잡아 워커를 살려 둔다).
+
+        아래 except Exception은 TranscriptionUnavailable/TranscriptionFailed
+        처럼 우리가 선언한 예외만이 아니라 **어떤** 예외든 잡는다. 설계 5장의
+        "기록은 반드시 한다"는 예외 종류와 무관한 약속이기 때문이다 —
+        사업자 응답이 예상 못 한 모양으로 오면(예: text가 문자열이 아니다)
+        어댑터가 미처 분류하지 못한 예외가 새어 나올 수 있는데, 그런 경우에도
+        통화가 흔적 없이 사라지면 안 된다.
+        """
+        try:
+            transcript = self._transcribe_with_retries(job)
+            if transcript is None:
+                analysis = replace(
+                    job.analysis,
+                    degraded_reasons=job.analysis.degraded_reasons
+                    + (DEGRADED_NO_TRANSCRIPT,),
+                )
+            else:
+                analysis = with_transcript(job.analysis, transcript)
+        except Exception:
+            logger.exception(
+                "전사 처리 중 예상 못 한 예외 — 점수 없이 지표만 남긴다"
+                " call_id=%s",
+                job.call_id,
+            )
             analysis = replace(
                 job.analysis,
                 degraded_reasons=job.analysis.degraded_reasons
                 + (DEGRADED_NO_TRANSCRIPT,),
             )
-        else:
-            analysis = with_transcript(job.analysis, transcript)
         self._sink(job.call_id, analysis)
 
     def _transcribe_with_retries(self, job: PendingTranscription) -> str | None:
