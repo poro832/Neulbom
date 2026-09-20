@@ -6,7 +6,16 @@
 양쪽에 건네는 곳이 여기다 — 여기가 없으면 두 절반은 테스트 안에서만
 맞물린다.
 
-실행: uvicorn app.main:app --host 0.0.0.0 --port 8000
+실행:
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+자격 증명은 환경변수로 넣는다. .env 파일을 쓰려면(저장소에 안 들어간다 —
+.gitignore에 있다) uvicorn이 직접 읽어 준다:
+
+    uvicorn app.main:app --env-file .env --host 0.0.0.0 --port 8000
+
+필요한 값은 아래 CLOVA_ENV_KEYS와 _telephony_from_env/_phones_from_env를
+보면 된다. 하나도 없어도 서버는 뜨고, 무엇이 빠졌는지 경고로 남는다.
 """
 
 from __future__ import annotations
@@ -30,6 +39,10 @@ from app.api import calls
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
+from app.media.clova_chat import DEFAULT_MODEL, ClovaChat
+from app.media.clova_speech import ClovaSpeech
+from app.media.clova_voice import DEFAULT_SPEAKER, ClovaVoice
+from app.media.conversation import ConversationResponder
 from app.media.responder import Responder
 from app.media.session import CallSession
 from app.media.stream_server import (
@@ -47,6 +60,81 @@ logger = logging.getLogger(__name__)
 # 분석 결과를 받는 곳. 지금은 메모리에 쌓는다 — call_metrics 테이블에 쓰는
 # 구현이 DB와 함께 들어온다. 규약을 먼저 뚫어 두면 그때 이 파일만 바뀐다.
 AnalysisSink = Callable[[int, CallAnalysis], None]
+
+# 자율 대화에 필요한 자격 증명. 셋 중 하나라도 빠지면 대화를 시작하지
+# 않는다 — 아래 responder_from_env 설명 참고.
+CLOVA_ENV_KEYS = (
+    "CLOVA_SPEECH_INVOKE_URL",
+    "CLOVA_SPEECH_SECRET",
+    "CLOVA_STUDIO_BASE_URL",
+    "CLOVA_STUDIO_API_KEY",
+    "CLOVA_VOICE_CLIENT_ID",
+    "CLOVA_VOICE_CLIENT_SECRET",
+)
+
+
+def responder_from_env() -> Responder:
+    """환경에서 자율 대화 응답기를 만든다. 자격 증명이 없으면 고정 응답.
+
+    **셋이 다 있거나 하나도 안 쓰거나 둘 중 하나다.** 반쯤 설정된 상태가
+    가장 나쁘다 — 예를 들어 STT만 있고 TTS가 없으면, 어르신이 말을 걸고
+    우리는 알아듣고 답까지 만들어 놓고 아무 소리도 내지 않는다. 어르신은
+    전화가 끊긴 줄 안다. 고정 응답은 적어도 소리는 난다.
+
+    키가 없어도 서버는 떠야 한다. 계정 신청이 끝나기 전에도 전화 경로
+    자체는 고정 응답으로 끝까지 검증된다(_telephony_from_env와 같은 규칙).
+    """
+    missing = [name for name in CLOVA_ENV_KEYS if not os.getenv(name)]
+    if missing:
+        logger.warning(
+            "CLOVA 자격 증명이 모자라 고정 응답으로 간다 — AI는 말하지 않는다."
+            " 빠진 값: %s",
+            ", ".join(missing),
+        )
+        return default_responder()
+
+    speaker = os.getenv("CLOVA_VOICE_SPEAKER", DEFAULT_SPEAKER)
+    model = os.getenv("CLOVA_STUDIO_MODEL", DEFAULT_MODEL)
+    speed = _int_from_env("CLOVA_VOICE_SPEED", 0)
+
+    # 이 셋은 AI 발화 길이를 바꾸고, 그것이 지표의 분모(통화 전체 − AI 발화)를
+    # 바꾼다. 어느 설정이 어느 통화를 만들었는지 남기지 않으면 나중에 점수를
+    # 비교할 때 무엇이 달라졌는지 알 수 없다(CALCULATOR_VERSION과 같은 성질).
+    logger.info(
+        "자율 대화로 조립한다 — 목소리 %s (speed %d), 모델 %s", speaker, speed, model
+    )
+
+    return ConversationResponder(
+        stt=ClovaSpeech(
+            os.environ["CLOVA_SPEECH_INVOKE_URL"],
+            os.environ["CLOVA_SPEECH_SECRET"],
+        ),
+        chat=ClovaChat(
+            os.environ["CLOVA_STUDIO_API_KEY"],
+            os.environ["CLOVA_STUDIO_BASE_URL"],
+            model=model,
+        ),
+        voice=ClovaVoice(
+            os.environ["CLOVA_VOICE_CLIENT_ID"],
+            os.environ["CLOVA_VOICE_CLIENT_SECRET"],
+            speaker=speaker,
+            speed=speed,
+        ),
+    )
+
+
+def _int_from_env(name: str, fallback: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return fallback
+    try:
+        return int(raw)
+    except ValueError:
+        # 오타 하나로 서버가 안 뜨면 원인을 찾기 어렵다. 기본값으로 가되
+        # 조용히 넘어가지는 않는다.
+        logger.warning("%s를 숫자로 읽을 수 없다 — 기본값 %d을 쓴다 값=%r", name, fallback, raw)
+        return fallback
+
 
 # 미응답 이력을 몇 건까지 보는가. db/schema.sql의 no_answer_recent_7이
 # 0~7을 강제하므로 그 이름과 맞춘다.
@@ -282,4 +370,5 @@ app = build_server(
     telephony=_telephony_from_env(),
     public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000"),
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
+    responder_factory=responder_from_env,
 )
