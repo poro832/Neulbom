@@ -62,6 +62,16 @@ def make(history=()):
     outcomes = InMemoryOutcomeStore()
     for outcome in history:
         outcomes.record(outcome)
+
+    # history의 모든 call_id보다 높은 ID를 가진 호출을 생성한다.
+    # before_call_id 필터링이 과거 통화만 포함하도록 하려면,
+    # 현재 통화의 call_id가 history의 모든 call_id보다 커야 한다.
+    if history:
+        max_history_id = max(o.call_id for o in history)
+        # 더미 통화를 생성해 ID 카운터를 진행시킨다
+        for _ in range(max_history_id):
+            store.create(elder_id=12, trigger_type="scheduled")
+
     call = store.create(elder_id=12, trigger_type="scheduled")
     return store, outcomes, build_risk_sink(store, outcomes), call
 

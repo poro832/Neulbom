@@ -21,12 +21,19 @@ class OutcomeStore(Protocol):
         """
         ...
 
-    def recent(self, elder_id: int, limit: int) -> list[CallOutcome]:
+    def recent(
+        self, elder_id: int, limit: int, before_call_id: int | None = None
+    ) -> list[CallOutcome]:
         """그 어르신의 결과를 최신순(call_id 내림차순)으로 limit개까지.
 
         최신순은 구현 편의가 아니라 규약이다. 기준선의 창이 이 순서 위에 서
         있어서, 순서가 틀리면 엉뚱한 통화들의 평균이 기준선이 된다 — 아무
         오류 없이 점수만 틀린다(설계 4.6).
+
+        before_call_id를 주면 그 call_id 이상은 빼고 돌려준다. 전사가 통화보다
+        늦게 끝나므로 기록 순서가 통화 순서와 어긋날 수 있는데(설계 6장),
+        과거만 본다는 조건을 순서가 아니라 질의로 보장한다. 현재 통화가 자기
+        기준선에 들어가지 않는 것도 여기서 함께 보장된다.
         """
         ...
 
@@ -42,12 +49,15 @@ class InMemoryOutcomeStore:
         with self._lock:
             self._by_call[outcome.call_id] = outcome
 
-    def recent(self, elder_id: int, limit: int) -> list[CallOutcome]:
+    def recent(
+        self, elder_id: int, limit: int, before_call_id: int | None = None
+    ) -> list[CallOutcome]:
         with self._lock:
             mine = [
                 outcome
                 for outcome in self._by_call.values()
                 if outcome.elder_id == elder_id
+                and (before_call_id is None or outcome.call_id < before_call_id)
             ]
         # call_id는 단조 증가하므로 시계 없이 시간 순서가 정해진다(설계 4.6).
         mine.sort(key=lambda outcome: outcome.call_id, reverse=True)

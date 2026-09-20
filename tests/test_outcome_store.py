@@ -73,3 +73,52 @@ def test_recording_the_same_call_twice_overwrites():
     results = store.recent(12, 14)
     assert len(results) == 1
     assert results[0].metrics.speech_ratio == 0.7
+
+
+def test_before_call_id_excludes_the_call_itself():
+    """현재 통화가 자기 기준선에 들어가면 델타가 희석되어 나쁜 통화가
+    정상으로 보인다. 아무 오류도 나지 않는다.
+
+    지금까지 이것은 '기록보다 조회가 먼저'라는 순서로만 보장됐다. 누가 그
+    순서를 바꾸면 조용히 깨진다 — 조건으로 못 박는다.
+    """
+    store = InMemoryOutcomeStore()
+    for call_id in (10, 20, 30):
+        store.record(outcome(call_id))
+
+    assert [o.call_id for o in store.recent(12, 10, before_call_id=30)] == [20, 10]
+
+
+def test_before_call_id_excludes_future_calls():
+    """전사가 늦게 끝나면 통화 30이 통화 20보다 먼저 기록될 수 있다
+    (설계 6장 — CallStore._expire_stale이 잠금 순서를 깨뜨리는 경로).
+
+    그때 통화 20의 기준선에 통화 30이 들어가면 '미래의 자기'와 비교하게 된다.
+    """
+    store = InMemoryOutcomeStore()
+    store.record(outcome(30))
+    store.record(outcome(10))
+
+    assert [o.call_id for o in store.recent(12, 10, before_call_id=20)] == [10]
+
+
+def test_the_window_is_applied_after_the_cut():
+    """잘라내기가 먼저고 창이 나중이다. 반대로 하면 최근 14통을 고른 뒤
+    거기서 미래 통화를 빼게 되어 표본이 14보다 적어진다.
+    """
+    store = InMemoryOutcomeStore()
+    for call_id in range(1, 21):
+        store.record(outcome(call_id))
+
+    got = store.recent(12, 3, before_call_id=15)
+
+    assert [o.call_id for o in got] == [14, 13, 12]
+
+
+def test_omitting_before_call_id_changes_nothing():
+    """기존 호출부(테스트 포함)가 그대로 돌아야 한다."""
+    store = InMemoryOutcomeStore()
+    for call_id in (10, 20):
+        store.record(outcome(call_id))
+
+    assert [o.call_id for o in store.recent(12, 10)] == [20, 10]

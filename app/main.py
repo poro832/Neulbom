@@ -191,8 +191,9 @@ def build_risk_sink(store: CallStore, outcomes: OutcomeStore) -> AnalysisSink:
             return
 
         try:
-            # 아직 기록하지 않았으므로 이 조회에 현재 통화는 들어 있지 않다.
-            recent = outcomes.recent(elder_id, BASELINE_WINDOW)
+            # 과거만 본다. 현재 통화도, 전사가 먼저 끝나 이미 기록된 나중
+            # 통화도 들어오지 않는다(설계 6장).
+            recent = outcomes.recent(elder_id, BASELINE_WINDOW, before_call_id=call_id)
             baseline = compute_baseline(recent)
             # 판정에 실제로 쓰인 표본 수. 경계를 지어내지 않고 이 값을 결과에
             # 실어서, 나중에 분포를 보고 "몇 통부터 믿는가"를 정하게 한다.
