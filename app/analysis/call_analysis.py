@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import wave
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 
 from app.analysis.echo import clip_ai_playback
-from app.analysis.metrics_calculator import CallMetrics, calculate_metrics
+from app.analysis.metrics_calculator import (
+    CallMetrics,
+    calculate_metrics,
+    count_negative_words,
+)
 from app.analysis.segments import VadSegment
 from app.analysis.vad_segmenter import segment_audio
 
@@ -32,6 +36,9 @@ DEGRADED_CLIP_RATIO = 0.3
 DEGRADED_ECHO_CLIP = "echo_clip"
 DEGRADED_FABRICATED_SILENCE = "fabricated_silence"
 DEGRADED_UNMATCHED_MARKS = "unmatched_marks"
+# 전사를 켰는데 끝내 받지 못했다. 부정 표현 20점을 잴 수 없으므로 이 통화의
+# 점수는 만점이 다르다 — 다른 통화와 같은 줄에 놓을 수 없다(설계 5장).
+DEGRADED_NO_TRANSCRIPT = "no_transcript"
 
 _INT16_FULL_SCALE = 32768.0
 
@@ -111,3 +118,19 @@ def _read_wav(path: Path) -> tuple[np.ndarray, int]:
         sample_rate = wav.getframerate()
     samples = np.frombuffer(frames, dtype="<i2").astype(np.float32)
     return samples / _INT16_FULL_SCALE, sample_rate
+
+
+def with_transcript(analysis: CallAnalysis, transcript: str) -> CallAnalysis:
+    """전사를 반영한 분석 결과를 돌려준다.
+
+    통화가 끝나는 순간 지표는 이미 다 나와 있다. 전사가 바꾸는 것은
+    negative_word_count 하나뿐이므로(설계 4장) wav를 다시 읽거나 VAD를 다시
+    돌릴 필요가 없다. 그 덕에 큐에 실리는 것이 작은 불변 데이터로 끝난다.
+    """
+    return replace(
+        analysis,
+        metrics=replace(
+            analysis.metrics,
+            negative_word_count=count_negative_words(transcript),
+        ),
+    )

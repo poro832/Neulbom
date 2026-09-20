@@ -6,12 +6,20 @@ wav 전체에 배치 VAD를 다시 돌려 낸다(설계 3.2). 그래야 같은 �
 """
 
 import wave
+from dataclasses import replace
 
 import numpy as np
 
 from app.analysis import call_analysis
-from app.analysis.call_analysis import DEGRADED_CLIP_RATIO, analyze_call
+from app.analysis.call_analysis import (
+    DEGRADED_CLIP_RATIO,
+    analyze_call,
+    DEGRADED_NO_TRANSCRIPT,
+    CallAnalysis,
+    with_transcript,
+)
 from app.analysis.echo import ClipResult
+from app.analysis.metrics_calculator import CallMetrics
 from app.analysis.segments import VadSegment
 
 SAMPLE_RATE = 8000
@@ -180,3 +188,83 @@ def test_a_non_positive_segment_cannot_switch_off_the_degraded_flag(
     assert result.degraded is True
     # 뒤집힌 구간은 지표에도 들어가면 안 된다 — 음수 길이는 발화가 아니다.
     assert result.metrics.speech_ratio >= 0
+
+
+def _analysis(**over) -> CallAnalysis:
+    metrics = CallMetrics(
+        speech_ratio=0.4,
+        silence_ratio=0.6,
+        turn_count=7,
+        negative_word_count=0,
+        avg_response_delay_ms=1200,
+        elder_speech_ms=40_000,
+        ai_speech_ms=20_000,
+        silence_ms=60_000,
+        response_delays_ms=(900, 1500),
+    )
+    base = CallAnalysis(
+        metrics=metrics,
+        clipped_ms=0,
+        filled_gap_ms=0,
+        call_duration_ms=120_000,
+    )
+    return replace(base, **over)
+
+
+def test_only_the_negative_word_count_changes():
+    """전사는 부정어 개수 하나에만 닿는다(설계 4장).
+
+    나머지 지표는 통화가 끝나는 순간 이미 확정됐다. 여기서 같이 바뀌면
+    전사가 늦게 왔다는 이유만으로 발화 비율이 달라진다는 뜻이 된다.
+    """
+    before = _analysis()
+
+    after = with_transcript(before, "무릎이 아파요. 외롭고 힘들어요.")
+
+    assert after.metrics.negative_word_count > 0
+    assert replace(after.metrics, negative_word_count=0) == before.metrics
+    assert (after.clipped_ms, after.filled_gap_ms, after.call_duration_ms) == (
+        before.clipped_ms,
+        before.filled_gap_ms,
+        before.call_duration_ms,
+    )
+
+
+def test_the_counting_rule_is_the_same_one_calculate_metrics_uses():
+    """규칙이 두 군데 있으면 갈라진다(segments.py가 같은 이유로 그렇게 쓰여 있다).
+
+    '아파트'의 '아파'를 세지 않는 것 같은 규칙은 한 함수에만 있어야 한다.
+    """
+    analysis = with_transcript(_analysis(), "아파트 앞에서 봤어요")
+
+    assert analysis.metrics.negative_word_count == 0
+
+
+def test_an_existing_degraded_reason_survives():
+    """전사가 성공해도 에코나 유실 때문에 붙은 사유는 그대로 남아야 한다.
+
+    여기서 덮어쓰면 근거가 부족한 통화가 조용히 정상 통화가 되어 점수가 나간다.
+    """
+    from app.analysis.call_analysis import DEGRADED_ECHO_CLIP
+
+    analysis = with_transcript(
+        _analysis(degraded_reasons=(DEGRADED_ECHO_CLIP,)), "괜찮아요"
+    )
+
+    assert analysis.degraded_reasons == (DEGRADED_ECHO_CLIP,)
+
+
+def test_marking_a_missing_transcript_kills_the_score_but_keeps_the_metrics():
+    """전사가 끝내 실패한 통화는 점수를 내지 않는다(설계 5장).
+
+    부정 표현을 0점으로 치고 점수를 내면 만점 80짜리와 60짜리가 같은 추이에
+    섞인다 — 보호자는 '좋아졌다'로 읽지만 실제로는 재지 못한 것이다.
+    """
+    analysis = _analysis()
+
+    marked = replace(
+        analysis, degraded_reasons=analysis.degraded_reasons + (DEGRADED_NO_TRANSCRIPT,)
+    )
+
+    assert marked.degraded is True
+    assert marked.metrics == analysis.metrics

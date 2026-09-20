@@ -169,7 +169,7 @@ _NOUN_SUFFIX_EXCEPTIONS: dict[str, frozenset[str]] = {
 # (존댓말, 세면 안 됨)가 전부 "하"로 시작해서 한 글자로는 구분이 안 된다.
 # "하" 다음 글자가 (없거나 한글이 아니거나) 어미 화이트리스트에 있으면
 # 평서형으로 보고 세고, "시/세/셨"처럼 화이트리스트에 없는 한글이면
-# 존댓말로 보고 세지 않는다.
+# 존댓말로 보고 세지 않는다. 자세한 동작은 count_negative_words 안에 있다.
 _TRANSPARENT_NEXT_CHARS: dict[str, frozenset[str]] = {
     "우울": frozenset({"하"}),
 }
@@ -276,7 +276,7 @@ def calculate_metrics(
         speech_ratio=speech_ratio,
         silence_ratio=silence_ratio,
         turn_count=len(elder_speech),
-        negative_word_count=_count_stems(transcript, negative_stems),
+        negative_word_count=count_negative_words(transcript, negative_stems),
     )
 
 
@@ -284,15 +284,19 @@ def _total_ms(segments: Sequence[VadSegment]) -> int:
     return sum(segment.duration_ms for segment in segments)
 
 
-def _count_stems(transcript: str, stems: frozenset[str]) -> int:
+def count_negative_words(transcript: str, stems: frozenset[str] = DEFAULT_NEGATIVE_STEMS) -> int:
     """어간이 실제 용언 활용(또는 알려진 명사 예외)으로 이어질 때만 센다.
+
+    (기존 docstring 유지)
 
     str.count는 부분 문자열이면 문맥과 상관없이 다 잡는다. "아파트"의 "아파"가
     그렇게 잡혀서 부정어로 세어지면, 아파트 얘기만 몇 번 해도 오탐 알림이
     만들어진다. 어간 뒤 글자 하나를 봐서 그게 정말 어미(또는 알려진 명사
-    예외)로 이어지는지, 혹은 거기서 문장이 끝나는지를 확인한다. 무엇을
-    놓치는지, 그리고 왜 그 방향의 오차를 택했는지는 DEFAULT_NEGATIVE_STEMS
-    옆 주석에 적어 뒀다.
+    예외)로 이어지는지, 혹은 거기서 문장이 끝나는지를 확인한다.
+
+    전사는 통화가 끝난 뒤에야 도착하므로(설계 2장) 이 규칙을 부르는 곳이
+    둘이 된다 — calculate_metrics와 call_analysis.with_transcript다. 규칙은
+    여기 하나만 둔다.
     """
     total = 0
     for stem in stems:
