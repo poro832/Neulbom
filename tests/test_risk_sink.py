@@ -188,10 +188,14 @@ class _ExplodingOutcomeStore:
     이 안전망이 실제로 동작하는지 알 수 있다.
     """
 
+    def __init__(self):
+        self.record_call_count = 0
+
     def record(self, outcome):
+        self.record_call_count += 1
         raise RuntimeError("저장소 장애")
 
-    def recent(self, elder_id, limit):
+    def recent(self, elder_id, limit, before_call_id=None):
         return []
 
 
@@ -206,9 +210,13 @@ def test_a_failing_outcome_store_does_not_escape_the_sink():
     """
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     call = store.create(elder_id=12, trigger_type="scheduled")
-    sink = build_risk_sink(store, _ExplodingOutcomeStore())
+    exploding_outcomes = _ExplodingOutcomeStore()
+    sink = build_risk_sink(store, exploding_outcomes)
 
     sink(call.call_id, analysis_of())  # 예외가 나면 안 된다
+
+    # record() 경로가 실제로 실행되었는지 확인한다
+    assert exploding_outcomes.record_call_count == 1
 
 
 def test_a_degraded_call_is_recorded_as_degraded():
