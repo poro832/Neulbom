@@ -4,9 +4,7 @@
 같은 자리다.
 """
 
-import io
 import json
-import logging
 import wave
 
 import pytest
@@ -118,16 +116,27 @@ def test_speaker_separation_is_turned_off_explicitly(tmp_path):
 def test_every_recognition_option_is_sent_explicitly(tmp_path):
     """사업자가 기본값을 바꾸면 우리 점수가 아무 신호 없이 바뀐다.
 
-    "같은 입력이면 같은 숫자"를 내세우는 이상, 입력의 생성 조건을 사업자
-    기본값에 맡겨 둘 수 없다(설계 10장).
+    fullText·wordAlignment·noiseFiltering·diarization은 모두 사업자 기본값이
+    True다. 안 보내면 켜진 채로 돈다. "같은 입력이면 같은 숫자"를 내세우는
+    이상, 입력의 생성 조건을 사업자 기본값에 맡겨 둘 수 없다(설계 10장).
+
+    키가 있는지가 아니라 값이 무엇인지를 본다 — 값을 안 보면 noiseFiltering이
+    False로 뒤집혀도 통과한다. 통째로 비교하므로 나중에 누가 옵션을 하나 더
+    얹어도 여기서 걸린다. 인식 옵션이 바뀌면 전사가 바뀌고 따라서 점수가
+    바뀌므로, 그 변경은 의도적이어야 한다.
     """
     stt, transport = make()
 
     stt.transcribe(make_wav(tmp_path))
 
-    params = params_of(transport)
-    for key in ("language", "completion", "fullText", "wordAlignment", "noiseFiltering", "diarization"):
-        assert key in params, f"{key}를 명시적으로 보내지 않는다"
+    assert params_of(transport) == {
+        "language": "ko-KR",
+        "completion": "sync",
+        "fullText": True,
+        "wordAlignment": False,
+        "noiseFiltering": True,
+        "diarization": {"enable": False},
+    }
 
 
 def test_the_wav_is_sent_as_the_media_part(tmp_path):
@@ -211,3 +220,45 @@ def test_a_missing_recording_does_not_reach_the_network(tmp_path):
         stt.transcribe(tmp_path / "없는파일.wav")
 
     assert transport.calls == []
+
+
+def test_a_missing_dependency_is_not_reported_as_retryable(tmp_path):
+    """httpx가 없는 것 같은 환경 문제는 다시 보낸다고 낫지 않는다.
+
+    재시도 가능으로 분류하면 워커가 세 번 시도하고 통화를 접는데, 로그에는
+    "연결 실패"만 남아 진짜 원인(설치가 안 됐다)이 묻힌다.
+    """
+
+    def missing_dependency(url, *, headers, files, timeout):
+        raise ImportError("No module named 'httpx'")
+
+    stt = ClovaLongSpeech(
+        invoke_url=INVOKE_URL, secret_key="SECRET", transport=missing_dependency
+    )
+
+    with pytest.raises(TranscriptionFailed):
+        stt.transcribe(make_wav(tmp_path))
+
+
+def test_a_miswired_transport_is_not_reported_as_retryable(tmp_path):
+    """우리 쪽 배선 실수는 네트워크 문제가 아니다. 재시도해도 영원히 같다."""
+
+    def wrong_signature(url, **kwargs):
+        raise TypeError("unexpected keyword argument 'files'")
+
+    stt = ClovaLongSpeech(
+        invoke_url=INVOKE_URL, secret_key="SECRET", transport=wrong_signature
+    )
+
+    with pytest.raises(TranscriptionFailed):
+        stt.transcribe(make_wav(tmp_path))
+
+
+def test_a_reply_that_is_json_but_not_an_object_is_a_failure(tmp_path):
+    """`null`도 `[]`도 유효한 JSON이다. 그대로 .get을 부르면 AttributeError가
+    나는데, 그건 우리가 약속한 두 예외 중 어느 것도 아니라 워커를 뚫고 나간다.
+    """
+    stt, _ = make(reply=b"null")
+
+    with pytest.raises(TranscriptionFailed):
+        stt.transcribe(make_wav(tmp_path))

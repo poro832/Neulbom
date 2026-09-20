@@ -93,6 +93,16 @@ class ClovaLongSpeech:
                 files=files,
                 timeout=self._timeout,
             )
+        except (TranscriptionFailed, TranscriptionUnavailable):
+            # 전송 계층이 이미 분류해 올린 것은 그대로 통과시킨다. 다시 감싸면
+            # 영구 실패가 재시도 가능으로 뒤집힌다.
+            raise
+        except (ImportError, TypeError, AttributeError) as exc:
+            # 우리 쪽 배선 결함이거나 환경 문제다. 다시 보내도 영원히 같은
+            # 결과가 나오므로 재시도 대상이 아니다 — 재시도로 분류하면 워커가
+            # 세 번 시도하고 통화를 접는데, 로그에는 "연결 실패"만 남아 진짜
+            # 원인이 묻힌다.
+            raise TranscriptionFailed(f"전사를 부를 수 없는 상태다 — {exc!r}") from exc
         except Exception as exc:
             # 요청이 닿지 않았다. 빠르게 돌아오고 잠깐 끊긴 네트워크가 원인일
             # 수 있으므로 워커가 다시 해볼 수 있게 구분해서 올린다.
@@ -102,6 +112,9 @@ class ClovaLongSpeech:
             body = json.loads(raw)
         except (ValueError, TypeError) as exc:
             raise TranscriptionFailed(f"전사 응답을 읽을 수 없다 — {raw[:200]!r}") from exc
+
+        if not isinstance(body, dict):
+            raise TranscriptionFailed(f"전사 응답이 객체가 아니다 — {raw[:200]!r}")
 
         text = body.get("text")
         if not text:
