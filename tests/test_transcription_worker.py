@@ -377,3 +377,25 @@ def test_a_stop_that_times_out_does_not_let_a_second_worker_start():
     finally:
         release.set()
         worker.stop(timeout=5.0)
+
+
+def test_a_call_with_nothing_recognised_still_gets_a_score():
+    """인식은 성공했는데 알아들은 말이 없는 통화(빈 전사)는 실패가 아니다.
+
+    이 경로가 막히면 어르신이 거의 말을 안 한 통화가 degraded로 빠져 점수가
+    아예 안 나온다. 그런데 그 통화가 바로 가장 위험한 통화다 — 발화 비율
+    35점과 침묵 25점이 동시에 치솟는 상황이라, 보호자가 가장 알아야 할 때
+    아무 숫자도 못 보게 된다.
+
+    부정어가 0인 것은 맞다. 말을 안 했으니 부정적인 말도 없었다.
+    """
+    worker, sink = run_worker(lambda wav_path: "")
+    try:
+        worker.submit(1, _analysis(), Path("1.wav"))
+        sink.wait()
+    finally:
+        worker.stop()
+
+    _, analysis = sink.results[0]
+    assert analysis.degraded is False, analysis.degraded_reasons
+    assert analysis.metrics.negative_word_count == 0

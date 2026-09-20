@@ -183,7 +183,36 @@ def test_a_business_failure_is_not_treated_as_silence(tmp_path):
 
 
 def test_a_reply_without_text_is_a_failure(tmp_path):
+    """text 필드가 아예 없으면 인식이 어디까지 갔는지 알 수 없다 —
+    빈 문자열(말을 안 했다)과 달리 이건 우리가 기대한 모양이 아니다.
+    """
     stt, _ = make(reply=json.dumps({"result": "COMPLETED"}).encode())
+
+    with pytest.raises(TranscriptionFailed):
+        stt.transcribe(make_wav(tmp_path))
+
+
+def test_a_successful_recognition_with_no_speech_is_not_a_failure(tmp_path):
+    """어르신이 통화 내내 거의 말을 안 하면 인식은 성공하고 text는 빈다.
+    실호출로 확인한 실제 응답이 그렇다 — result="COMPLETED", text="".
+
+    이걸 실패로 처리하면 그 통화는 degraded가 되어 점수가 아예 안 나오고
+    기준선 표본에서도 빠진다. 그런데 그 통화가 바로 가장 위험한 통화다 —
+    발화 비율 35점과 침묵 25점이 동시에 치솟는 상황이라, 보호자가 가장
+    알아야 할 때 아무 숫자도 못 보게 된다.
+
+    말을 안 한 것과 못 알아들은 것은 다르다. 앞은 데이터고 뒤는 사고다.
+    """
+    stt, _ = make(reply=reply_of(text=""))
+
+    assert stt.transcribe(make_wav(tmp_path)) == ""
+
+
+def test_a_failed_result_is_a_failure_even_when_text_came_along(tmp_path):
+    """판단 기준은 result다. 글자가 딸려 왔다고 성공으로 보면, 사업자가
+    실패라고 말한 결과를 점수에 넣게 된다.
+    """
+    stt, _ = make(reply=reply_of(text="무릎이 아파요", result="FAILED"))
 
     with pytest.raises(TranscriptionFailed):
         stt.transcribe(make_wav(tmp_path))

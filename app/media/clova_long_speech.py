@@ -39,6 +39,14 @@ DEFAULT_TIMEOUT_SECONDS = 600.0
 # 같은 제품인데 다르다 — 단문 어댑터를 보고 짐작하면 틀린다.
 LANGUAGE = "ko-KR"
 
+# 성공을 뜻하는 result 값. 실호출에서 sync 응답이 "COMPLETED"를 주는 것을
+# 확인했고, 문서의 async 제출 응답 예시는 "SUCCEEDED"를 쓴다. 둘 다 받는다.
+#
+# 모르는 값은 실패로 본다. 사업자가 새 성공 값을 추가하면 우리는 점수를 안
+# 내는 쪽으로 틀리는데, 그 방향이 맞다 — 근거 없이 점수를 내는 것보다 낫고
+# 로그에 result 값이 그대로 남아 금방 드러난다.
+SUCCESS_RESULTS = frozenset({"COMPLETED", "SUCCEEDED"})
+
 
 def _http_transport(url: str, *, headers: dict, files: dict, timeout: float) -> bytes:
     import httpx
@@ -116,19 +124,40 @@ class ClovaLongSpeech:
         if not isinstance(body, dict):
             raise TranscriptionFailed(f"전사 응답이 객체가 아니다 — {raw[:200]!r}")
 
-        text = body.get("text")
-        if not isinstance(text, str) or not text:
-            # HTTP는 200인데 본문이 실패인 경우가 있다. 빈 문자열을 돌려주면
-            # "부정어가 없었다"와 "전사가 실패했다"가 같은 값이 되어, 점수
-            # 20점이 조용히 0으로 들어간다. text가 문자열이 아닌 경우(사업자가
-            # 숫자나 리스트를 줄 수 있다)도 같은 실패다 — 아래 len()이나
-            # count_negative_words가 그 값을 문자열처럼 다루다 TypeError나
-            # AttributeError를 내는데, 그건 우리가 선언한 예외가 아니라서
-            # 워커의 except Exception이 삼키고 sink가 아예 안 불린다.
+        # 성공 여부는 result가 말한다. 글자가 있느냐로 판단하면 양쪽으로 틀린다
+        # — 말을 안 한 통화를 실패로 접고, 사업자가 실패라고 답한 결과에 글자가
+        # 딸려 오면 그걸 점수에 넣는다.
+        result = body.get("result")
+        if result not in SUCCESS_RESULTS:
             raise TranscriptionFailed(
-                f"전사 결과가 문자열이 아니거나 비어 있다 — {type(text).__name__} "
-                f"result={body.get('result')!r} message={body.get('message')!r}"
+                f"전사가 실패로 끝났다 — result={result!r} "
+                f"message={body.get('message')!r}"
             )
+
+        text = body.get("text")
+        if not isinstance(text, str):
+            # 사업자가 숫자나 리스트를 줄 수 있다. 검사 없이 넘기면 아래 len()이나
+            # count_negative_words가 그 값을 문자열처럼 다루다 TypeError나
+            # AttributeError를 내는데, 그건 우리가 선언한 예외가 아니라서 워커의
+            # except Exception이 삼키고 sink가 아예 안 불린다 — 그 통화는
+            # CallOutcome을 하나도 못 받는다.
+            raise TranscriptionFailed(
+                f"전사 결과가 문자열이 아니다 — {type(text).__name__} "
+                f"result={result!r} message={body.get('message')!r}"
+            )
+
+        if not text:
+            # 인식은 성공했는데 알아들을 말이 없었다. 실호출로 확인한 실제
+            # 응답이 이 모양이다(result="COMPLETED", text="", segments=[]).
+            #
+            # 이걸 실패로 접으면 안 된다. 어르신이 통화 내내 거의 말을 안 한
+            # 통화가 바로 가장 위험한 통화인데(발화 비율 35점과 침묵 25점이
+            # 동시에 치솟는다), degraded로 빠지면 점수가 아예 안 나오고 기준선
+            # 표본에서도 빠진다 — 보호자가 가장 알아야 할 때 아무 숫자도 못 본다.
+            #
+            # 말을 안 한 것과 못 알아들은 것은 다르다. 앞은 데이터고 뒤는 사고다.
+            logger.info("전사 완료 — 알아들은 말이 없다 wav=%s", Path(wav_path).name)
+            return ""
 
         logger.info("전사 완료 — %d자 wav=%s", len(text), Path(wav_path).name)
         return text
