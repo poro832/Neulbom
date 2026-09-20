@@ -534,3 +534,43 @@ def test_a_transcribed_call_logs_no_errors(tmp_path, caplog):
 
     errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
     assert errors == []
+
+
+def test_shutting_the_server_down_stops_the_worker(tmp_path):
+    """워커를 멈추는 일은 종료 훅에 달려 있는데, 이 파일의 다른 테스트들은
+    그 훅이 실제로 도는지 확인하지 못한다 — TestClient를 with 없이 쓰면
+    lifespan이 아예 실행되지 않기 때문이다.
+
+    훅이 안 돌면 종료 때 버린 call_id가 로그에 남지 않는다. 녹음은 30일 뒤
+    지워지므로 그 목록이 유일한 복구 단서다 — 없으면 무엇을 잃었는지조차
+    모른다.
+    """
+
+    class Quick:
+        def transcribe(self, wav_path):
+            return "오늘은 괜찮아요"
+
+    before = {t for t in threading.enumerate() if t.name == "transcription-worker"}
+
+    app = build_server(
+        store=InMemoryCallStore(phones={12: "070-1111-2222"}),
+        telephony=FakeTelephony(),
+        public_base_url="https://api.example.com",
+        stream_base_url="wss://api.example.com",
+        responder_factory=_Beep,
+        recordings_dir=tmp_path,
+        outcomes=InMemoryOutcomeStore(),
+        transcriber=Quick(),
+    )
+
+    started = {
+        t for t in threading.enumerate() if t.name == "transcription-worker"
+    } - before
+    assert len(started) == 1, f"워커 스레드가 하나 생겨야 한다 — {started}"
+    worker_thread = started.pop()
+
+    with TestClient(app):
+        pass
+
+    worker_thread.join(5.0)
+    assert not worker_thread.is_alive(), "종료 훅이 워커를 멈추지 않았다"
