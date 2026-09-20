@@ -291,6 +291,24 @@ def test_a_degraded_call_does_not_log_a_failure(caplog):
     assert [record.message for record in caplog.records] == []
 
 
+def test_the_log_line_names_the_new_axis_and_whether_it_was_measured(caplog):
+    """DB가 없는 지금 이 로그가 점수의 유일한 durable 흔적이다.
+
+    transcription_enabled는 CallOutcome에 정확히 기록되지만 그 객체는
+    재시작하면 증발한다. 로그에도 없으면 만점 60짜리와 80짜리가 아무 구분
+    없이 같은 로그 스트림에 쌓여, 나중에 "왜 이 시기 점수가 전부 낮지?"를
+    로그만 보고는 풀 수 없다.
+    """
+    _, _, sink, call = make()
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        sink(call.call_id, analysis_of())
+
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "negative_word_count=0" in message
+    assert "transcription_enabled=False" in message
+
+
 # --------------------------------- 판단 재료를 남긴다 (경계는 정하지 않는다)
 
 
