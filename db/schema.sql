@@ -34,11 +34,9 @@ CREATE TABLE elders (
     -- 동의 (설계 3.6). NULL이면 발신 대상에서 제외한다.
     consent_at   TIMESTAMPTZ,
 
-    -- 개인 기준선 (설계 3.2). 위험 판정은 절대값이 아니라 이 값 대비 변화로 한다.
-    -- 최근 통화들의 이동 평균으로 갱신된다.
-    baseline_speech_ratio          REAL CHECK (baseline_speech_ratio BETWEEN 0 AND 1),
-    baseline_avg_response_delay_ms INT  CHECK (baseline_avg_response_delay_ms >= 0),
-    baseline_updated_at            TIMESTAMPTZ,
+    -- 기준선 열은 여기 두지 않는다. 판정마다 최근 14통에서 다시 계산하기
+    -- 때문이다(위험 점수 설계 3.1) — 저장해 두면 그 판정을 나중에 재현할 수
+    -- 없다. 판정 당시 기준선은 call_metrics에 스냅샷으로 남는다.
 
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -83,6 +81,13 @@ CREATE TABLE calls (
 );
 
 CREATE INDEX calls_elder_idx ON calls (elder_id, started_at DESC);
+
+-- 한 어르신에게 동시에 두 통이 진행될 수 없다. 지금은 Python 락이 이걸
+-- 지키는데(find_active_or_create), 락은 한 프로세스 안에서만 유효하다.
+-- 여기 두면 누가 어디서 넣든 막힌다 — 이 스키마가 speech_ratio BETWEEN 0
+-- AND 1을 두는 것과 같은 이유다.
+CREATE UNIQUE INDEX calls_one_active_per_elder ON calls (elder_id)
+    WHERE status IN ('scheduled', 'ringing', 'answered');
 -- 워커 재시작 시 미완료 통화 회수용
 CREATE INDEX calls_pending_idx ON calls (created_at)
     WHERE status IN ('scheduled', 'ringing', 'answered');
@@ -91,15 +96,23 @@ CREATE INDEX calls_pending_idx ON calls (created_at)
 -- 4. 전사
 -- ============================================================
 
+-- 통화당 한 행이다. 장문 인식은 턴이 아니라 통짜 글 하나를 돌려주므로
+-- 턴 단위로 쪼갤 근거가 없다 — 지어내면 그 순간부터 거짓이다.
+--
+-- 왜 저장하는가: 부정어 사전이 틀렸다는 게 드러났을 때 그달 데이터를 다시
+-- 셀 수 있어야 한다. 저장된 글로 다시 세는 것은 공짜에 즉시지만, 재전사는
+-- 통화당 약 180원에 2분이다.
+--
+-- 보관 기간은 녹음과 같은 30일이다. 개인정보 보관 기간을 늘리지 않으면서
+-- 재계산 가능한 창을 녹음과 정확히 같게 맞춘다. 다만 글은 음성보다 위험하다
+-- — 녹음 유출은 통화 하나지만 텍스트 유출은 검색 가능한 덩어리다.
+--
+-- !! 아직 아무도 지우지 않는다. S3는 라이프사이클이 지우지만 DB 행은 지우는
+--    주체가 없다. 주기 작업이 생기는 스케줄러 작업에서 붙인다.
 CREATE TABLE call_transcripts (
-    call_id    BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
-    turn_index INT  NOT NULL CHECK (turn_index >= 0),
-    speaker    TEXT NOT NULL CHECK (speaker IN ('ai', 'elder')),
+    call_id    BIGINT PRIMARY KEY REFERENCES calls(call_id) ON DELETE CASCADE,
     text       TEXT NOT NULL,
-    start_ms   INT  NOT NULL CHECK (start_ms >= 0),
-    end_ms     INT  NOT NULL,
-    PRIMARY KEY (call_id, turn_index),
-    CONSTRAINT transcript_span_is_forward CHECK (end_ms >= start_ms)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ============================================================
