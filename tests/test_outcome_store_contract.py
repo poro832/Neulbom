@@ -11,11 +11,24 @@ import os
 
 import pytest
 
-from app.analysis.metrics_calculator import CallMetrics, RiskAssessment
+from app.analysis.metrics_calculator import (
+    BaselineDelta,
+    CallMetrics,
+    RiskAssessment,
+)
 from app.analysis.outcome import CallOutcome
 from app.api.outcome_store import InMemoryOutcomeStore
 
 ELDER = 12
+
+# 다른 어르신의 통화. 번호가 겹치지 않는 대역을 쓰는 이유는, Postgres에서는
+# 결과가 어느 어르신의 것인지를 call_id가 정하기 때문이다 — elder_id는
+# call_metrics에 없고 calls에서 조인해 온다. 통화 하나가 두 어르신의 것일 수
+# 없으므로 한 군데만 두는 쪽이 맞고, 메모리 구현처럼 결과에 따로 들고 있으면
+# 둘이 어긋날 수 있다.
+OTHER_ELDER = 99
+OTHER_CALL = 1010
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
@@ -82,7 +95,13 @@ def scored(call_id, elder_id=ELDER, **over):
     return outcome(
         call_id,
         elder_id,
-        risk=RiskAssessment(risk_score=45, risk_level="watch", baseline_delta=0.1),
+        risk=RiskAssessment(
+            risk_score=45,
+            risk_level="watch",
+            baseline_delta=BaselineDelta(
+                speech_ratio=-0.1, avg_response_delay_ms=300
+            ),
+        ),
         **over,
     )
 
@@ -172,9 +191,10 @@ def test_limit_keeps_the_newest(store):
 
 
 def test_another_elders_results_are_not_mixed_in(store):
-    store.record(scored(10, elder_id=99))
+    store.record(scored(OTHER_CALL, elder_id=OTHER_ELDER))
 
     assert store.recent(ELDER, 14) == []
+    assert [o.call_id for o in store.recent(OTHER_ELDER, 14)] == [OTHER_CALL]
 
 
 def test_before_call_id_excludes_itself_and_later_calls(store):

@@ -100,7 +100,20 @@ def test_get_raises_for_an_unknown_call(store):
 
 
 def test_call_ids_do_not_repeat(store):
-    ids = {store.create(ELDER, "requested").call_id for _ in range(3)}
+    """통화마다 다른 번호를 받아야 한다. 겹치면 녹음 파일이 서로를 덮어쓰고,
+    전사 워커가 버린 목록에 남긴 call_id가 어느 통화인지 알 수 없어진다.
+
+    매번 끝내고 다시 만드는 이유: 한 어르신에게 활성 통화는 하나뿐이다.
+    Postgres는 그걸 부분 유니크 인덱스로 막고, 메모리 구현은 막지 않는다 —
+    create()를 직접 부르는 것은 테스트뿐이고 운영 경로는 둘 다
+    find_active_or_create를 지나므로 실제 동작은 같다. 이 테스트가 그
+    차이를 넘어가려고 매번 끝낸다.
+    """
+    ids = set()
+    for _ in range(3):
+        call = store.create(ELDER, "requested")
+        ids.add(call.call_id)
+        store.mark_no_answer(call.call_id)
 
     assert len(ids) == 3
 

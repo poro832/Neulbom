@@ -143,6 +143,10 @@ CREATE TABLE call_metrics (
     -- 스트림 유실을 메운 지어낸 침묵. 30% 문턱 아래여도 지표는 이미 그만큼
     -- 끌려가므로, degraded가 아니어도 남긴다.
     filled_gap_ms           INT CHECK (filled_gap_ms     >= 0),
+    -- 에코 제거로 어르신 발화에서 깎아낸 양. 이것도 원자료다 — 스피커폰이
+    -- 얼마나 심했는지를 나중에 보려면 남아 있어야 하고, degraded 판정의
+    -- 근거이기도 하다(clipped/detected 비율이 임계를 넘으면 접는다).
+    clipped_ms              INT CHECK (clipped_ms        >= 0),
     -- 턴별 응답 지연 원본. 평균이 나은지 중앙값이 나은지는 분포를 봐야
     -- 정할 수 있는데, 평균만 남기면 그 질문에 영영 답할 수 없다.
     response_delays_ms      INT[],
