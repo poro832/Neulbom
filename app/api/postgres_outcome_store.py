@@ -249,3 +249,10 @@ class PostgresOutcomeStore:
                         (call_id if elder_id == 12 else call_id + 1000,
                          elder_id, f"{call_id}.wav"),
                     )
+            # 껍데기의 call_id를 손으로 정했으므로 시퀀스를 그 위로 민다.
+            # 안 하면 다음 create()가 nextval로 1을 받아 여기 넣은 행과
+            # 부딪힌다 — 조립부 테스트가 실제로 이렇게 터졌다.
+            conn.execute(
+                "SELECT setval('calls_call_id_seq', "
+                "  (SELECT MAX(call_id) FROM calls))"
+            )

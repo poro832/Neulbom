@@ -36,6 +36,7 @@ from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
+from app.api.db import connect, database_url
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
@@ -470,10 +471,45 @@ def _phones_from_env() -> dict[int, str]:
     return phones
 
 
+def stores_from_env() -> tuple[CallStore, OutcomeStore | None, object | None]:
+    """DATABASE_URL이 있으면 Postgres, 없으면 메모리. 저장소와 연결 풀을 준다.
+
+    **둘 다 가거나 둘 다 안 간다.** 통화 저장소만 Postgres로 두고 결과
+    저장소를 메모리로 두면, 재시작 뒤 통화 이력은 있는데 점수가 없는 상태가
+    된다 — 기준선이 빈 표본에서 만들어지고 아무 오류 없이 점수만 틀린다.
+    그래서 하나만 고르는 길을 아예 두지 않는다.
+
+    **풀을 돌려주는 이유.** 저장소 둘이 한 풀을 나눠 쓴다. 닫을 책임은
+    호출부에 있으므로 숨기지 않고 넘긴다. 메모리면 None이다.
+    """
+    url = database_url()
+    if url is None:
+        logger.info("DATABASE_URL이 없다 — 메모리 저장소로 돈다. 재시작하면 다 사라진다")
+        return InMemoryCallStore(phones=_phones_from_env()), None, None
+
+    from app.api.postgres_outcome_store import PostgresOutcomeStore
+    from app.api.postgres_store import PostgresCallStore
+
+    pool = connect(url)
+    logger.info("Postgres 저장소로 돈다")
+    return (
+        PostgresCallStore(pool=pool, phones=_phones_from_env()),
+        PostgresOutcomeStore(pool=pool),
+        pool,
+    )
+
+
+_store, _outcomes, _pool = stores_from_env()
+
 app = build_server(
-    store=InMemoryCallStore(phones=_phones_from_env()),
+    store=_store,
+    outcomes=_outcomes,
     telephony=_telephony_from_env(),
     public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000"),
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
 )
+
+# 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.
+if _pool is not None:
+    app.router.add_event_handler("shutdown", _pool.close)
