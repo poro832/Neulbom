@@ -71,7 +71,8 @@ class ConversationResponder:
         retry_prompt: str = RETRY_PROMPT,
     ) -> None:
         # 주입한 협력자는 공개한다 — 조립부가 무엇을 끼웠는지 확인할 수
-        # 있어야 "개발엔 Polly, 시연엔 CLOVA"를 테스트로 고정할 수 있다.
+        # 있어야 TTS 벤더를 바꿔도 조립부만 손대면 된다는 것을 테스트로
+        # 고정할 수 있다.
         self.stt = stt
         self.chat = chat
         self.voice = voice

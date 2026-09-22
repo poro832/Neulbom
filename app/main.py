@@ -74,7 +74,8 @@ BASE_ENV_KEYS = (
 )
 
 # TTS만 벤더를 고른다. CLOVA Voice는 월 정액이라 개발 기간에는 켜지 않고,
-# 목소리 품질이 실제로 중요해지는 시연 달에만 바꾼다. Polly는 자격 증명을
+# 기본은 polly다. CLOVA Voice는 실제로 들어 보고 못 쓰겠을 때만 간다 —
+# 바꾸는 순간 AI 발화 길이가 달라져 점수 시계열이 끊긴다. Polly는 자격 증명을
 # 환경/인스턴스 프로파일에서 찾으므로 여기 키가 없다.
 CLOVA_VOICE_ENV_KEYS = ("CLOVA_VOICE_CLIENT_ID", "CLOVA_VOICE_CLIENT_SECRET")
 
