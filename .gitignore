@@ -20,6 +20,10 @@ client/macos/Flutter/ephemeral/
 client/android/app/google-services.json
 client/ios/Runner/GoogleService-Info.plist
 .env
+# .env.bak, .env.local 같은 사본도 같은 비밀을 담는다. .env 하나만
+# 적어 두면 백업을 뜨는 순간 git이 커밋하자고 권한다.
+.env.*
+!.env.example
 
 # 통화 원본(어르신 육성)은 30일 삭제 정책이 걸린 개인정보라 저장소에 들어가면 안 된다
 recordings/
