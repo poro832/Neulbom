@@ -74,10 +74,13 @@ BASE_ENV_KEYS = (
     "CLOVA_STUDIO_API_KEY",
 )
 
-# TTS만 벤더를 고른다. CLOVA Voice는 월 정액이라 개발 기간에는 켜지 않고,
-# 기본은 polly다. CLOVA Voice는 실제로 들어 보고 못 쓰겠을 때만 간다 —
-# 바꾸는 순간 AI 발화 길이가 달라져 점수 시계열이 끊긴다. Polly는 자격 증명을
-# 환경/인스턴스 프로파일에서 찾으므로 여기 키가 없다.
+# TTS만 벤더를 고른다. 기본은 clova다 — 2026-09-25에 수업 계정의 Polly
+# 권한 신청이 거부돼 쓸 수 있는 벤더가 하나뿐이다. polly 갈래와 그 테스트는
+# 남겨 둔다: 계정 정책이 바뀌면 TTS_VENDOR 한 줄로 돌아갈 수 있고, 벤더가
+# 하나만 남았다고 갈림길을 지우면 다시 낼 때 훨씬 비싸다.
+#
+# CLOVA Voice는 월 정액이라 실통화를 시작하는 달에 켠다. 그전에는 키를
+# 비워 두면 아래에서 고정 응답으로 내려간다.
 CLOVA_VOICE_ENV_KEYS = ("CLOVA_VOICE_CLIENT_ID", "CLOVA_VOICE_CLIENT_SECRET")
 
 CLOVA_ENV_KEYS = BASE_ENV_KEYS + CLOVA_VOICE_ENV_KEYS
