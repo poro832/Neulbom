@@ -46,6 +46,7 @@ from app.media.clova_speech import ClovaSpeech
 from app.media.clova_voice import DEFAULT_SPEAKER, ClovaVoice
 from app.media.polly_voice import DEFAULT_VOICE_ID as POLLY_DEFAULT_VOICE_ID
 from app.media.polly_voice import PollyVoice
+from app.media.prosody_voice import DEFAULT_EMOTION, ProsodyVoice
 from app.media.conversation import ConversationResponder
 from app.media.responder import Responder
 from app.media.session import CallSession
@@ -85,7 +86,12 @@ CLOVA_VOICE_ENV_KEYS = ("CLOVA_VOICE_CLIENT_ID", "CLOVA_VOICE_CLIENT_SECRET")
 
 CLOVA_ENV_KEYS = BASE_ENV_KEYS + CLOVA_VOICE_ENV_KEYS
 
-TTS_VENDORS = ("clova", "polly")
+# 목소리 이름에 기본값을 두지 않는다. 화자가 114명이고 어느 목소리가
+# 어르신께 맞는지는 들어 봐야 아는데, 기본값을 박아 두면 아무도 안 듣고
+# 그대로 시연까지 간다. 없으면 고정 응답으로 내려간다.
+PROSODY_ENV_KEYS = ("PROSODY_API_KEY", "PROSODY_VOICE_NAME")
+
+TTS_VENDORS = ("prosody", "clova", "polly")
 
 
 def responder_from_env() -> Responder:
@@ -99,7 +105,7 @@ def responder_from_env() -> Responder:
     키가 없어도 서버는 떠야 한다. 계정 신청이 끝나기 전에도 전화 경로
     자체는 고정 응답으로 끝까지 검증된다(_telephony_from_env와 같은 규칙).
     """
-    vendor = os.getenv("TTS_VENDOR", "clova").strip().lower()
+    vendor = os.getenv("TTS_VENDOR", "prosody").strip().lower()
     if vendor not in TTS_VENDORS:
         # 오타 하나로 엉뚱한 벤더에 요금이 나가면 안 된다. 짐작하지 않는다.
         logger.warning(
@@ -112,12 +118,15 @@ def responder_from_env() -> Responder:
     required = BASE_ENV_KEYS
     if vendor == "clova":
         required += CLOVA_VOICE_ENV_KEYS
+    elif vendor == "prosody":
+        required += PROSODY_ENV_KEYS
 
     missing = [name for name in required if not os.getenv(name)]
     if missing:
         logger.warning(
-            "CLOVA 자격 증명이 모자라 고정 응답으로 간다 — AI는 말하지 않는다."
-            " 빠진 값: %s",
+            "자격 증명이 모자라 고정 응답으로 간다 — AI는 말하지 않는다."
+            " 벤더: %s, 빠진 값: %s",
+            vendor,
             ", ".join(missing),
         )
         return default_responder()
@@ -129,7 +138,19 @@ def responder_from_env() -> Responder:
     # 이 셋은 AI 발화 길이를 바꾸고, 그것이 지표의 분모(통화 전체 − AI 발화)를
     # 바꾼다. 어느 설정이 어느 통화를 만들었는지 남기지 않으면 나중에 점수를
     # 비교할 때 무엇이 달라졌는지 알 수 없다(CALCULATOR_VERSION과 같은 성질).
-    if vendor == "clova":
+    if vendor == "prosody":
+        prosody_speed = _float_from_env("PROSODY_SPEED", 1.0)
+        emotion = os.getenv("PROSODY_EMOTION", DEFAULT_EMOTION)
+        voice = ProsodyVoice(
+            os.environ["PROSODY_API_KEY"],
+            voice_name=os.environ["PROSODY_VOICE_NAME"],
+            emotion=emotion,
+            speed=prosody_speed,
+        )
+        voice_label = (
+            f"Prosody {voice.voice_name}/{emotion} (speed {prosody_speed})"
+        )
+    elif vendor == "clova":
         voice = ClovaVoice(
             os.environ["CLOVA_VOICE_CLIENT_ID"],
             os.environ["CLOVA_VOICE_CLIENT_SECRET"],
@@ -158,6 +179,20 @@ def responder_from_env() -> Responder:
         ),
         voice=voice,
     )
+
+
+def _float_from_env(name: str, fallback: float) -> float:
+    """소수를 받는 설정. Prosody의 speed가 배율이라 정수로는 못 쓴다."""
+    raw = os.getenv(name)
+    if raw is None:
+        return fallback
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            "%s를 숫자로 읽을 수 없다 — 기본값 %s를 쓴다 값=%r", name, fallback, raw
+        )
+        return fallback
 
 
 def _int_from_env(name: str, fallback: int) -> int:

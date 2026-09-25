@@ -8,12 +8,21 @@ import logging
 
 import pytest
 
-from app.main import CLOVA_ENV_KEYS, responder_from_env, transcriber_from_env
+from app.main import (
+    CLOVA_ENV_KEYS,
+    PROSODY_ENV_KEYS,
+    responder_from_env,
+    transcriber_from_env,
+)
 from app.media.clova_long_speech import ClovaLongSpeech
 from app.media.conversation import ConversationResponder
 from app.media.responder import CannedResponder
 
+# CLOVA 갈래가 온전히 갖춰진 상태. 기본 벤더가 prosody라 여기서는 벤더를
+# 명시해야 한다 — 안 그러면 이 파일의 CLOVA 테스트들이 전부 prosody 갈래를
+# 검사하게 되고, 이름과 검사 대상이 어긋난 채로 통과한다.
 FULL = {
+    "TTS_VENDOR": "clova",
     "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
     "CLOVA_SPEECH_SECRET": "s-secret",
     "CLOVA_STUDIO_BASE_URL": "https://studio.test",
@@ -24,9 +33,10 @@ FULL = {
 
 
 # 테스트끼리 환경이 새지 않게 관련 변수를 전부 지우고 시작한다.
-_ALL = CLOVA_ENV_KEYS + (
+_ALL = CLOVA_ENV_KEYS + PROSODY_ENV_KEYS + (
     "TTS_VENDOR", "CLOVA_VOICE_SPEAKER", "CLOVA_VOICE_SPEED",
     "CLOVA_STUDIO_MODEL", "POLLY_VOICE_ID",
+    "PROSODY_EMOTION", "PROSODY_SPEED",
 )
 
 
@@ -99,7 +109,7 @@ def test_a_bad_speed_value_does_not_stop_the_server(monkeypatch, caplog):
         assert isinstance(responder_from_env(), ConversationResponder)
 
 
-# ------------------------------------------- TTS 벤더 선택 (개발 Polly / 시연 CLOVA)
+# ------------------------------------------------------- TTS 벤더 선택
 
 POLLY_ENV = {
     "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
@@ -125,12 +135,79 @@ def test_polly_needs_no_clova_voice_keys(monkeypatch):
     assert isinstance(responder.voice, PollyVoice)
 
 
-def test_the_default_vendor_is_clova(monkeypatch):
-    from app.media.clova_voice import ClovaVoice
+PROSODY_ENV = {
+    "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
+    "CLOVA_SPEECH_SECRET": "s-secret",
+    "CLOVA_STUDIO_BASE_URL": "https://studio.test",
+    "CLOVA_STUDIO_API_KEY": "studio-key",
+    "PROSODY_API_KEY": "prosody-key",
+    "PROSODY_VOICE_NAME": "시아",
+}
 
-    set_env(monkeypatch, FULL)
 
-    assert isinstance(responder_from_env().voice, ClovaVoice)
+def test_the_default_vendor_is_prosody(monkeypatch):
+    """2026-09-25에 Polly 권한이 거부되면서 프레소디로 정했다.
+
+    기본값을 명시적으로 고정해 둔다 — 아무도 TTS_VENDOR를 안 적은 서버가
+    어느 목소리로 말하는지가 곧 점수의 전제다.
+    """
+    from app.media.prosody_voice import ProsodyVoice
+
+    set_env(monkeypatch, PROSODY_ENV)
+
+    assert isinstance(responder_from_env().voice, ProsodyVoice)
+
+
+def test_prosody_needs_no_clova_voice_keys(monkeypatch):
+    """CLOVA Voice는 채우는 순간 월 정액이 시작된다. 그 두 키가 없다고
+    대화를 막으면 프레소디로 옮긴 의미가 없다."""
+    set_env(monkeypatch, PROSODY_ENV)
+
+    assert isinstance(responder_from_env(), ConversationResponder)
+
+
+@pytest.mark.parametrize("missing", sorted(PROSODY_ENV_KEYS))
+def test_prosody_falls_back_when_either_of_its_keys_is_missing(monkeypatch, missing):
+    """목소리 이름도 키만큼 필수다.
+
+    화자가 114명이라 기본값을 박아 둘 수가 없다 — 어느 목소리가 어르신께
+    맞는지는 들어 봐야 알고, 기본값이 있으면 아무도 안 듣는다.
+    """
+    set_env(monkeypatch, {k: v for k, v in PROSODY_ENV.items() if k != missing})
+
+    assert isinstance(responder_from_env(), CannedResponder)
+
+
+def test_the_missing_prosody_keys_are_named_in_the_log(monkeypatch, caplog):
+    set_env(monkeypatch, {k: v for k, v in PROSODY_ENV.items()
+                          if not k.startswith("PROSODY")})
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        responder_from_env()
+
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "PROSODY_API_KEY" in message
+    assert "PROSODY_VOICE_NAME" in message
+
+
+def test_the_prosody_voice_and_emotion_are_logged(monkeypatch, caplog):
+    """목소리·감정·속도는 AI 발화 길이를 바꾸고, 그게 지표의 분모를 바꾼다."""
+    set_env(monkeypatch, {**PROSODY_ENV, "PROSODY_EMOTION": "happy",
+                          "PROSODY_SPEED": "0.9"})
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        responder_from_env()
+
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "시아" in message and "happy" in message and "0.9" in message
+
+
+def test_a_bad_prosody_speed_does_not_stop_the_server(monkeypatch, caplog):
+    """speed는 배율이라 소수다. 숫자가 아닌 값이 와도 서버는 떠야 한다."""
+    set_env(monkeypatch, {**PROSODY_ENV, "PROSODY_SPEED": "천천히"})
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        assert isinstance(responder_from_env(), ConversationResponder)
 
 
 def test_an_unknown_vendor_falls_back_instead_of_guessing(monkeypatch, caplog):
