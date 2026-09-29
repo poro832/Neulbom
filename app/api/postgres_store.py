@@ -36,6 +36,7 @@ from app.api.store import (
     MAX_ACTIVE_SECONDS,
     CallRecord,
 )
+from app.scheduler import RosterEntry
 
 logger = logging.getLogger(__name__)
 
@@ -299,3 +300,40 @@ class PostgresCallStore:
                     "ON CONFLICT (elder_id) DO NOTHING",
                     (elder_id, f"테스트 어르신 {elder_id}", phone),
                 )
+
+
+class PostgresRoster:
+    """스케줄러가 볼 명부 — 동의한 어르신과 마지막 예약 통화 시각.
+
+    **동의가 없으면 여기 나오지 않는다.** `consent_at IS NOT NULL`이 유일한
+    발신 자격 조건이고, `elders_due_idx`가 그 조건으로 걸려 있다. 동의를
+    코드 여러 곳에서 확인하면 언젠가 한 곳이 빠지므로, 명부를 읽는 이
+    질의 하나에만 둔다.
+
+    **판정은 여기서 하지 않는다.** "지금 걸 시각인가"는 app/scheduler.py의
+    순수 함수가 정한다 — SQL에 시간 논리를 넣으면 DB 없이 테스트할 수 없고,
+    스케줄러에서 가장 틀리기 쉬운 부분이 바로 거기다.
+    """
+
+    def __init__(self, *, pool) -> None:
+        self._pool = pool
+
+    def entries(self) -> list[RosterEntry]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.elder_id,
+                       e.call_time,
+                       (SELECT max(c.created_at)
+                          FROM calls c
+                         WHERE c.elder_id = e.elder_id
+                           AND c.trigger_type = 'scheduled') AS last_scheduled_at
+                  FROM elders e
+                 WHERE e.consent_at IS NOT NULL
+                 ORDER BY e.elder_id
+                """
+            ).fetchall()
+        return [
+            RosterEntry(elder_id=row[0], call_time=row[1], last_scheduled_at=row[2])
+            for row in rows
+        ]

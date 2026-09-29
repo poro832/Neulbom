@@ -12,6 +12,7 @@ from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from app.api.dialer import DialFailed, answer_url_for, dial
 from app.api.lifecycle import CallLifecycle
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
@@ -37,7 +38,7 @@ def build_app(
     # 끝을 양쪽이 각자 처리하면 한쪽만 일어난다(lifecycle 모듈 설명 참고).
     lifecycle = lifecycle or CallLifecycle(store, registry)
     app = FastAPI(title="늘봄 통화 트리거")
-    answer_url = f"{public_base_url.rstrip('/')}/v1/voiceml"
+    answer_url = answer_url_for(public_base_url)
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
     stream_url = f"{stream_base_url.rstrip('/')}/v1/stream"
 
@@ -61,35 +62,17 @@ def build_app(
         return _dial(call)
 
     def _dial(call: CallRecord) -> JSONResponse:
-        phone = store.find_elder(call.elder_id)
+        # 실제 발신은 app/api/dialer.py에 있다. 스케줄러가 같은 경로를 쓴다.
         try:
-            sid = telephony.place_call(to=phone, answer_url=answer_url)
-        except Exception:
-            # 발신 자체가 실패했다 — 실제 통화는 나가지 않았다. 안전하게
-            # 실패 처리해 재시도를 열어준다.
-            store.mark_failed(call.call_id)
-            logger.exception("발신 실패 call_id=%s", call.call_id)
-            raise HTTPException(status_code=502, detail="전화를 걸지 못했습니다")
-
-        try:
-            store.attach_sid(call.call_id, sid)
-            lifecycle.issue_token(call.call_id, sid)
-        except Exception:
-            # 여기서부터는 전화가 이미 걸렸다 — Telephony에는 취소/끊기
-            # 수단이 없으므로 그 통화를 멈출 수 없다. 하지만 토큰이 없으면
-            # 그 통화는 VoiceML에서 404로 끝나 어차피 오디오가 붙지 않는다.
-            # '진행 중'으로 영원히 잠그면(이번 버그) 그 어르신은 다시는
-            # 요청할 수 없게 되는데, 이는 절대 복구가 안 된다. 반면 실패로
-            # 돌려 재시도를 열어주면 최악의 경우 전화가 중복으로 한 번 더
-            # 울리는 정도다 — 복구 가능한 쪽을 택한다.
-            lifecycle.discard_token(sid)
-            store.mark_failed(call.call_id)
-            logger.exception(
-                "발신 후 처리 실패 call_id=%s sid=%s — 통화가 걸렸어도 연결되지 않는다",
-                call.call_id,
-                sid,
+            dial(
+                call,
+                store=store,
+                telephony=telephony,
+                lifecycle=lifecycle,
+                answer_url=answer_url,
             )
-            raise HTTPException(status_code=502, detail="통화 연결 준비에 실패했습니다")
+        except DialFailed as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         return JSONResponse(
             status_code=202,

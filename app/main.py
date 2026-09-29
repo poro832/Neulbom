@@ -37,6 +37,7 @@ from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
 from app.api.db import connect, database_url
+from app.api.dialer import answer_url_for, place_scheduled_call
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
@@ -59,6 +60,7 @@ from app.media.stream_server import (
 )
 from app.post_call import analyze_session
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
+from app.scheduler import Roster, Scheduler
 from app.transcription import TranscriptionWorker
 
 logger = logging.getLogger(__name__)
@@ -339,6 +341,7 @@ def build_server(
     outcomes: OutcomeStore | None = None,
     sink: AnalysisSink | None = None,
     transcriber: ClovaLongSpeech | None = None,
+    roster: Roster | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -370,6 +373,28 @@ def build_server(
         worker.start()
         # FastAPI 0.141부터 app.add_event_handler가 사라졌다 — router로 부른다.
         app.router.add_event_handler("shutdown", lambda: worker.stop())
+
+    # 스케줄러. 명부가 없으면 켜지 않는다 — 어르신 명부는 DB에만 있고,
+    # 메모리 저장소로 도는 동안 예약 통화를 만들면 재시작마다 "오늘 이미
+    # 걸었다"가 사라져 같은 어르신께 또 건다.
+    if roster is not None:
+        scheduler = Scheduler(
+            roster=roster,
+            place=lambda elder_id: place_scheduled_call(
+                elder_id,
+                store=store,
+                telephony=telephony,
+                lifecycle=lifecycle,
+                answer_url=answer_url_for(public_base_url),
+            ),
+        )
+        scheduler.start()
+        app.router.add_event_handler("shutdown", scheduler.stop)
+    else:
+        logger.info(
+            "스케줄러를 켜지 않는다 — 명부가 없다(DATABASE_URL이 있어야 한다)."
+            " 미응답 20점은 계속 0이다"
+        )
 
     add_stream_route(
         app,
@@ -537,6 +562,20 @@ def stores_from_env() -> tuple[CallStore, OutcomeStore | None, object | None]:
     )
 
 
+def roster_for(pool) -> Roster | None:
+    """풀이 있으면 명부를, 없으면 None.
+
+    명부는 `elders` 테이블에만 있다. 메모리 저장소에는 그 테이블이 없으므로
+    스케줄러도 같이 꺼진다 — 반쯤 도는 것보다 낫다.
+    """
+    if pool is None:
+        return None
+
+    from app.api.postgres_store import PostgresRoster
+
+    return PostgresRoster(pool=pool)
+
+
 _store, _outcomes, _pool = stores_from_env()
 
 app = build_server(
@@ -546,6 +585,7 @@ app = build_server(
     public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:8000"),
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
+    roster=roster_for(_pool),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

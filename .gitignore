@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# pip install -e . 가 만드는 빌드 산출물. EC2 배포에서 처음 돌렸다.
+*.egg-info/
+build/
+dist/
 .venv/
 venv/
 
