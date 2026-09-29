@@ -37,6 +37,11 @@ _ALL = CLOVA_ENV_KEYS + PROSODY_ENV_KEYS + (
     "TTS_VENDOR", "CLOVA_VOICE_SPEAKER", "CLOVA_VOICE_SPEED",
     "CLOVA_STUDIO_MODEL", "POLLY_VOICE_ID",
     "PROSODY_EMOTION", "PROSODY_SPEED",
+    # AWS_REGION이 비면 boto3가 ~/.aws/config를 뒤진다. 그래서 이 파일의
+    # polly 테스트가 **개발자 PC에 AWS CLI가 설정돼 있느냐**에 따라 통과하고
+    # 실패했다 — 로컬 520 통과, EC2 2 실패로 드러났다. 지우고 나서
+    # POLLY_ENV가 명시적으로 넣는다.
+    "AWS_REGION", "AWS_DEFAULT_REGION",
 )
 
 
@@ -117,6 +122,9 @@ POLLY_ENV = {
     "CLOVA_STUDIO_BASE_URL": "https://studio.test",
     "CLOVA_STUDIO_API_KEY": "studio-key",
     "TTS_VENDOR": "polly",
+    # 값 자체는 아무 리전이어도 된다. 중요한 건 **어디서 오느냐**다 —
+    # 여기서 주지 않으면 테스트가 실행 환경의 AWS 설정을 읽는다.
+    "AWS_REGION": "ap-northeast-2",
 }
 
 
