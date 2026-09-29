@@ -51,3 +51,34 @@ def connect(url: str):
     )
     logger.info("Postgres 연결 풀을 열었다 — 최대 %d", MAX_POOL)
     return pool
+
+
+# 로컬 개발 DB로 인정하는 호스트. 여기 없으면 파괴적인 작업을 거부한다.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+def assert_local(url: str | None = None) -> None:
+    """이 DB가 로컬 개발용인지 확인한다. 아니면 그 자리에서 멈춘다.
+
+    **왜 필요했나.** 테스트용 초기화 함수들이 `TRUNCATE ... CASCADE`로
+    시작한다. 2026-09-29에 그 테스트를 실제 RDS를 대상으로 돌리라고 안내한
+    적이 있고, 실제로 명부가 날아갔다. 그때는 실통화 전이라 seed를 다시
+    돌리면 끝이었지만, 첫 통화가 들어온 뒤였다면 **통화 이력과 위험 점수가
+    전부 사라졌을 것이다.** 녹음은 30일 뒤 지워지므로 복구할 방법도 없다.
+
+    이름에 `for_tests`를 붙이는 것만으로는 부족했다. 사람이 읽고 조심할
+    것을 기대하는 대신, 대상이 로컬이 아니면 코드가 거부하게 한다.
+    """
+    from urllib.parse import urlparse
+
+    target = url if url is not None else database_url()
+    if target is None:
+        raise RuntimeError("DATABASE_URL이 없다 — 지울 DB가 없다")
+
+    host = (urlparse(target).hostname or "").lower()
+    if host not in LOCAL_HOSTS:
+        raise RuntimeError(
+            f"로컬 DB가 아니라 거부한다 — host={host!r}. "
+            "이 작업은 테이블을 통째로 비운다. 원격 DB(RDS 등)에서는 "
+            "실통화 기록과 위험 점수가 전부 사라지고 되돌릴 수 없다."
+        )

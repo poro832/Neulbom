@@ -38,6 +38,8 @@ from app.api.store import (
 )
 from app.scheduler import RosterEntry
 
+from app.api.db import assert_local
+
 logger = logging.getLogger(__name__)
 
 # SELECT가 CallRecord를 만들 때 쓰는 열 순서. 한 군데만 두어 조회마다
@@ -282,6 +284,9 @@ class PostgresCallStore:
         운영 경로에서는 절대 불리지 않는다. 이름에 그렇게 적어 둔다.
         calls를 지우면 call_metrics와 call_transcripts는 CASCADE로 따라간다.
         """
+        # 원격 DB에서 부르면 실통화 기록이 전부 사라진다(app/api/db.py 참고).
+        assert_local()
+
         with self._pool.connection() as conn:
             conn.execute("TRUNCATE calls RESTART IDENTITY CASCADE")
             # 어르신 행이 없으면 FK 때문에 통화를 못 넣는다. 명부는 아직

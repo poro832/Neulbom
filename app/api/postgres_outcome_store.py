@@ -21,6 +21,8 @@ import logging
 from app.analysis.metrics_calculator import BaselineDelta, CallMetrics, RiskAssessment
 from app.analysis.outcome import CallOutcome
 
+from app.api.db import assert_local
+
 logger = logging.getLogger(__name__)
 
 # 읽는 열 순서. 한 군데만 두어 조회마다 어긋나지 않게 한다 — 순서가 밀리면
@@ -222,6 +224,9 @@ class PostgresOutcomeStore:
         calls를 참조한다. 규약 테스트가 call_id를 직접 고르므로(10, 20, 30…)
         그 번호의 통화 껍데기를 미리 넣어 둔다.
         """
+        # 원격 DB에서 부르면 실통화 기록이 전부 사라진다(app/api/db.py 참고).
+        assert_local()
+
         with self._pool.connection() as conn:
             conn.execute("TRUNCATE calls RESTART IDENTITY CASCADE")
             conn.execute(

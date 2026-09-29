@@ -24,8 +24,11 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def roster():
-    from app.api.db import connect
+    from app.api.db import assert_local, connect
     from app.api.postgres_store import PostgresRoster
+
+    # 이 픽스처는 TRUNCATE로 시작한다. 원격 DB를 가리키면 거부한다.
+    assert_local(DATABASE_URL)
 
     pool = connect(DATABASE_URL)
     with pool.connection() as conn:
@@ -124,3 +127,26 @@ def test_the_newest_scheduled_call_wins(roster):
         ).fetchone()[0]
 
     assert newest == expected
+
+
+def test_a_remote_database_is_refused():
+    """이름에 test를 붙이는 것만으로는 부족했다.
+
+    2026-09-29에 이 테스트를 실제 RDS 대상으로 돌리라고 안내한 적이 있고,
+    실제로 명부가 날아갔다. 그때는 실통화 전이라 seed를 다시 돌리면
+    끝이었지만, 첫 통화 뒤였다면 통화 이력과 위험 점수가 전부 사라졌고
+    녹음은 30일 뒤 지워지므로 되돌릴 방법도 없다.
+    """
+    from app.api.db import assert_local
+
+    with pytest.raises(RuntimeError, match="로컬 DB가 아니라"):
+        assert_local(
+            "postgresql://u:p@sgu-pj-03-rds.abc.ap-northeast-2.rds.amazonaws.com:5432/x"
+        )
+
+
+def test_a_local_database_is_allowed():
+    from app.api.db import assert_local
+
+    assert_local("postgresql://postgres:dev@localhost:5432/nulbom")
+    assert_local("postgresql://postgres:dev@127.0.0.1:5432/nulbom")
