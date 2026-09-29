@@ -45,7 +45,11 @@ def parse_phones(raw: str) -> dict[int, str]:
         try:
             phones[int(elder_id.strip())] = phone.strip()
         except ValueError:
-            logger.error("ELDER_PHONES 항목을 읽을 수 없다 — 건너뛴다 entry=%s", entry)
+            logger.error(
+                "ELDER_PHONES 항목을 읽을 수 없다 — 건너뛴다 entry=%s."
+                ' 형식은 "어르신번호:전화번호"다 (예: 1:070-1111-2222)',
+                entry,
+            )
     return phones
 
 
@@ -84,9 +88,18 @@ def main() -> int:
         print("DATABASE_URL이 없다 — 채울 DB가 없다.", file=sys.stderr)
         return 1
 
-    phones = parse_phones(os.getenv("ELDER_PHONES", ""))
-    if not phones:
+    raw = os.getenv("ELDER_PHONES", "").strip()
+    if not raw:
         print("ELDER_PHONES가 비어 있다 — 넣을 어르신이 없다.", file=sys.stderr)
+        return 1
+
+    # 값은 있는데 하나도 못 읽은 경우를 따로 말한다. 예전에는 둘 다 "비어
+    # 있다"로 나가서, 형식을 틀린 사람이 변수를 안 채운 줄 알고 한참 헤맸다.
+    phones = parse_phones(raw)
+    if not phones:
+        print("ELDER_PHONES에서 읽어낸 어르신이 없다 — 형식을 확인하라.", file=sys.stderr)
+        print('  형식: "어르신번호:전화번호", 여럿이면 쉼표로 잇는다', file=sys.stderr)
+        print('  예시: ELDER_PHONES="1:070-1111-2222,2:070-3333-4444"', file=sys.stderr)
         return 1
 
     pool = connect(url)
