@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ansimcare"
 version = "0.1.0"
@@ -28,6 +32,10 @@ dependencies = [
     # ImportError로 발견하게 된다.
     "boto3>=1.34",
 ]
+
+[tool.setuptools.packages.find]
+# 서버 코드만 패키지다. db/는 SQL, client/는 Flutter라 파이썬이 아니다.
+include = ["app*"]
 
 [dependency-groups]
 dev = [
