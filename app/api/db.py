@@ -53,6 +53,30 @@ def connect(url: str):
     return pool
 
 
+def check(pool, timeout: float = 10.0) -> bool:
+    """DB에 실제로 한 번 물어본다. 안 되면 크게 남기고 False.
+
+    **왜 필요했나.** 2026-09-30에 RDS가 꺼져 있었는데 서버는 "풀을 열었다"만
+    찍고 멀쩡히 떠 있었다. 풀은 연결을 뒤에서 여는 탓이다. 그동안 스케줄러는
+    1분마다 명부를 못 읽었고, 그걸 안 건 우연히 로그를 본 덕이었다.
+
+    **서버를 멈추지는 않는다.** 풀은 DB가 돌아오면 알아서 다시 붙는다 —
+    멈추면 DB가 켜진 뒤에도 사람이 다시 띄워야 한다.
+    """
+    try:
+        with pool.connection(timeout=timeout) as conn:
+            conn.execute("SELECT 1")
+    except Exception:
+        logger.exception(
+            "DB에 연결할 수 없다 — 명부·통화 기록·점수를 읽고 쓰지 못한다. "
+            "RDS가 켜져 있는지(stopped?)와 보안 그룹을 확인할 것. "
+            "DB가 돌아오면 재시작 없이 다시 붙는다"
+        )
+        return False
+    logger.info("DB 연결 확인됨")
+    return True
+
+
 # 로컬 개발 DB로 인정하는 호스트. 여기 없으면 파괴적인 작업을 거부한다.
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
 

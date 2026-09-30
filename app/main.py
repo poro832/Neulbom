@@ -36,7 +36,7 @@ from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
-from app.api.db import connect, database_url
+from app.api.db import check, connect, database_url
 from app.archiver import RecordingArchiver, archiver_from_env
 from app.api.dialer import answer_url_for, place_scheduled_call
 from app.api.lifecycle import CallLifecycle
@@ -575,6 +575,7 @@ def stores_from_env() -> tuple[CallStore, OutcomeStore | None, object | None]:
     from app.api.postgres_store import PostgresCallStore
 
     pool = connect(url)
+    check(pool)
     logger.info("Postgres 저장소로 돈다")
     return (
         PostgresCallStore(pool=pool, phones=_phones_from_env()),
