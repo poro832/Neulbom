@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import os
 import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -210,11 +211,19 @@ class CallSession:
         """
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / self._recording_name
-        with wave.open(str(path), "wb") as wav:
+
+        # 임시 이름으로 다 쓴 뒤 한 번에 이름을 바꾼다. wave는 헤더의 길이를
+        # 닫을 때 고쳐 쓰므로, 쓰는 도중의 파일은 헤더가 틀린 반쪽이다.
+        # 녹음 보관기(app/archiver.py)가 1분마다 *.wav를 훑는데, 그 틈에
+        # 집어 가면 잘린 녹음이 S3에 올라가고 "올림" 표시가 붙어 다시는
+        # 안 올린다. 이름 바꾸기는 원자적이라 보관기는 완성본만 본다.
+        partial = path.with_name(path.name + ".part")
+        with wave.open(str(partial), "wb") as wav:
             wav.setnchannels(1)
             wav.setsampwidth(_BYTES_PER_SAMPLE)
             wav.setframerate(self._sample_rate)
             wav.writeframes(bytes(self._recorded))
+        os.replace(partial, path)
         return path
 
     def _on_speech_end(self, start_ms: int, end_ms: int) -> list[Outgoing]:

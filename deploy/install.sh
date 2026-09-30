@@ -17,6 +17,7 @@
 #   앱 설정       cp .env.example .env && chmod 600 .env && nano .env
 #                 PUBLIC_BASE_URL=https://nuelbom.duckdns.org
 #                 STREAM_BASE_URL=wss://nuelbom.duckdns.org
+#                 RECORDINGS_BUCKET=sgu-pj-03-nulbom-recordings
 #
 #   DuckDNS       sudo nano /etc/duckdns.env   (deploy/duckdns.env.example 참고)
 #                 sudo chmod 600 /etc/duckdns.env

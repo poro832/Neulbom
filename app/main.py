@@ -37,6 +37,7 @@ from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
 from app.api.db import connect, database_url
+from app.archiver import RecordingArchiver, archiver_from_env
 from app.api.dialer import answer_url_for, place_scheduled_call
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
@@ -342,6 +343,7 @@ def build_server(
     sink: AnalysisSink | None = None,
     transcriber: ClovaLongSpeech | None = None,
     roster: Roster | None = None,
+    archiver: RecordingArchiver | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -396,12 +398,19 @@ def build_server(
             " 미응답 20점은 계속 0이다"
         )
 
+    # 녹음 보관기는 서버가 실제로 뜰 때(startup)만 켠다. 여기서 바로 켜면
+    # app.main을 import하기만 해도 스레드가 돌아, 테스트가 개발 PC의
+    # recordings/를 훑고 30일 지난 파일을 지운다.
+    if archiver is not None:
+        app.router.add_event_handler("startup", archiver.start)
+        app.router.add_event_handler("shutdown", archiver.stop)
+
     add_stream_route(
         app,
         registry=registry,
         responder_factory=responder_factory,
         recordings_dir=recordings_dir,
-        on_call_end=_end_of_call(lifecycle, sink, worker),
+        on_call_end=_end_of_call(lifecycle, sink, worker, archiver),
         on_call_start=_start_of_call(lifecycle),
     )
     return app
@@ -429,6 +438,7 @@ def _end_of_call(
     lifecycle: CallLifecycle,
     sink: AnalysisSink,
     worker: TranscriptionWorker | None = None,
+    archiver: RecordingArchiver | None = None,
 ):
     """통화가 끝나는 순간 — 여기가 분석이 실제로 도는 유일한 지점이다.
 
@@ -464,6 +474,11 @@ def _end_of_call(
                 lifecycle.stream_finished(
                     call_id, wav_path.name if wav_path is not None else None
                 )
+            # 다음 틱(최대 1분)을 기다리지 않고 바로 S3에 올리게 깨운다.
+            # 그 사이 인스턴스가 죽으면 녹음이 사라진다. 올리는 일 자체는
+            # 보관기 스레드가 한다 — 여기서 네트워크를 기다리지 않는다.
+            if archiver is not None and wav_path is not None:
+                archiver.notify()
 
     return handle
 
@@ -586,6 +601,7 @@ app = build_server(
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
     roster=roster_for(_pool),
+    archiver=archiver_from_env(RECORDINGS_DIR),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

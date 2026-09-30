@@ -26,3 +26,6 @@ def _no_ambient_batch_transcription(monkeypatch):
     monkeypatch.delenv("BATCH_TRANSCRIPTION", raising=False)
     monkeypatch.delenv("CLOVA_SPEECH_INVOKE_URL", raising=False)
     monkeypatch.delenv("CLOVA_SPEECH_SECRET", raising=False)
+    # 켜 둔 셸에서 pytest를 돌리면 테스트 녹음이 진짜 버킷에 올라간다.
+    # BATCH_TRANSCRIPTION과 같은 종류의 구멍이다.
+    monkeypatch.delenv("RECORDINGS_BUCKET", raising=False)
