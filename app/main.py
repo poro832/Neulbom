@@ -42,6 +42,7 @@ from app.api.dialer import answer_url_for, place_scheduled_call
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
+from app.api.transcript_store import InMemoryTranscriptStore, TranscriptStore
 from app.media.clova_chat import DEFAULT_MODEL, ClovaChat
 from app.media.clova_long_speech import ClovaLongSpeech
 from app.media.clova_speech import ClovaSpeech
@@ -344,6 +345,7 @@ def build_server(
     transcriber: ClovaLongSpeech | None = None,
     roster: Roster | None = None,
     archiver: RecordingArchiver | None = None,
+    transcripts: TranscriptStore | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -371,7 +373,11 @@ def build_server(
 
     worker: TranscriptionWorker | None = None
     if transcriber is not None:
-        worker = TranscriptionWorker(transcribe=transcriber.transcribe, sink=sink)
+        worker = TranscriptionWorker(
+            transcribe=transcriber.transcribe,
+            sink=sink,
+            transcripts=transcripts if transcripts is not None else InMemoryTranscriptStore(),
+        )
         worker.start()
         # FastAPI 0.141부터 app.add_event_handler가 사라졌다 — router로 부른다.
         app.router.add_event_handler("shutdown", lambda: worker.stop())
@@ -591,7 +597,22 @@ def roster_for(pool) -> Roster | None:
     return PostgresRoster(pool=pool)
 
 
+def transcripts_for(pool) -> TranscriptStore:
+    """풀이 있으면 Postgres, 없으면 메모리.
+
+    워커(저장)와 보관기(30일 삭제)가 **같은 저장소**를 받아야 한다. 따로
+    만들면 저장은 DB에 하고 삭제는 빈 메모리에 해서 약속이 조용히 깨진다.
+    """
+    if pool is None:
+        return InMemoryTranscriptStore()
+
+    from app.api.postgres_transcript_store import PostgresTranscriptStore
+
+    return PostgresTranscriptStore(pool=pool)
+
+
 _store, _outcomes, _pool = stores_from_env()
+_transcripts = transcripts_for(_pool)
 
 app = build_server(
     store=_store,
@@ -601,7 +622,8 @@ app = build_server(
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
     roster=roster_for(_pool),
-    archiver=archiver_from_env(RECORDINGS_DIR),
+    archiver=archiver_from_env(RECORDINGS_DIR, transcripts=_transcripts),
+    transcripts=_transcripts,
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

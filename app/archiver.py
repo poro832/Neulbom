@@ -16,6 +16,9 @@
    지울 때는 크게 남긴다. 이 규칙은 버킷 설정과 무관하게 항상 돈다 —
    약속이 환경 변수 하나에 달려 있으면 안 된다.
 
+**전사 원문도 여기서 30일에 지운다.** 원문은 녹음을 글로 옮긴 것이라 같은
+약속이 걸린다. 약속을 지키는 곳을 한 군데로 모은다.
+
 **통화 끝 경로에서 올리지 않는다.** 거기서 네트워크를 기다리면 그 어르신이
 409로 잠긴다. 배치 전사를 통화 밖으로 뺀 것과 같은 이유다.
 
@@ -39,6 +42,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Callable, Protocol
+
+from app.api.transcript_store import TranscriptStore
 
 logger = logging.getLogger(__name__)
 
@@ -108,9 +113,11 @@ class RecordingArchiver:
         keep_local_seconds: float = DEFAULT_KEEP_LOCAL_SECONDS,
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
+        transcripts: TranscriptStore | None = None,
     ) -> None:
         self.directory = Path(directory)
         self.uploader = uploader
+        self.transcripts = transcripts
         self._clock = clock
         self._keep_local = keep_local_seconds
         self._max_age = max_age_seconds
@@ -122,10 +129,13 @@ class RecordingArchiver:
     # ------------------------------------------------------------ 한 번 훑기
 
     def sweep(self) -> None:
+        now = self._clock()
+        # 녹음 폴더가 없어도(새 서버) 원문 30일은 지킨다. 그래서 폴더 확인보다 먼저.
+        self._purge_transcripts(now)
+
         if not self.directory.is_dir():
             return
 
-        now = self._clock()
         for wav in sorted(self.directory.glob("*.wav")):
             try:
                 self._handle(wav, now)
@@ -139,6 +149,18 @@ class RecordingArchiver:
             recording = marker.with_name(marker.name[: -len(MARKER_SUFFIX)])
             if not recording.exists():
                 marker.unlink(missing_ok=True)
+
+    def _purge_transcripts(self, now: float) -> None:
+        if self.transcripts is None:
+            return
+        try:
+            removed = self.transcripts.purge_older_than(now - self._max_age)
+        except Exception:
+            # 녹음 쪽 30일까지 멈추면 안 된다. 다음 틱에 다시 한다.
+            logger.exception("30일 지난 전사 원문을 지우지 못했다 — 다음에 다시 한다")
+            return
+        if removed:
+            logger.info("30일 지난 전사 원문 %d건을 지웠다", removed)
 
     def _handle(self, wav: Path, now: float) -> None:
         marker = wav.with_name(wav.name + MARKER_SUFFIX)
@@ -222,17 +244,22 @@ class RecordingArchiver:
             self._wake.clear()
 
 
-def archiver_from_env(directory: Path) -> RecordingArchiver:
+def archiver_from_env(
+    directory: Path, transcripts: TranscriptStore | None = None
+) -> RecordingArchiver:
     """RECORDINGS_BUCKET이 있으면 S3에 올리고, 없으면 로컬 30일 삭제만 한다.
 
     어느 쪽이든 보관기는 만든다. 30일 삭제가 설정에 달려 있으면 안 된다.
     """
     bucket = os.getenv("RECORDINGS_BUCKET", "").strip()
     if not bucket:
-        return RecordingArchiver(directory=directory, uploader=None)
+        return RecordingArchiver(
+            directory=directory, uploader=None, transcripts=transcripts
+        )
 
     region = os.getenv("AWS_REGION", "").strip() or DEFAULT_REGION
     return RecordingArchiver(
         directory=directory,
         uploader=S3Uploader(bucket=bucket, region=region),
+        transcripts=transcripts,
     )

@@ -149,3 +149,31 @@ def test_a_whole_call_runs_on_postgres_and_survives_the_stores(tmp_path, monkeyp
         assert 0.3 < got[0].metrics.speech_ratio < 0.7
     finally:
         fresh_pool.close()
+
+
+def test_without_a_database_transcripts_live_in_memory():
+    from app.api.transcript_store import InMemoryTranscriptStore
+    from app.main import transcripts_for
+
+    assert isinstance(transcripts_for(None), InMemoryTranscriptStore)
+
+
+def test_with_a_database_transcripts_go_to_postgres():
+    from app.api.postgres_transcript_store import PostgresTranscriptStore
+    from app.main import transcripts_for
+
+    assert isinstance(transcripts_for(object()), PostgresTranscriptStore)
+
+
+def test_the_worker_and_the_archiver_share_one_transcript_store():
+    """저장하는 쪽과 30일에 지우는 쪽이 다른 저장소면 약속이 조용히 깨진다."""
+    import app.main as main
+
+    assert main._transcripts is not None
+    # 모듈 조립에서 보관기에 넘긴 것이 같은 객체인지 본다.
+    archivers = [
+        h.__self__
+        for h in main.app.router.on_startup
+        if getattr(h, "__self__", None).__class__.__name__ == "RecordingArchiver"
+    ]
+    assert archivers and archivers[0].transcripts is main._transcripts

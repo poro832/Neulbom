@@ -426,3 +426,48 @@ def test_a_finished_call_wakes_the_archiver(tmp_path):
         run_stream(client, token, frames=5)
 
     assert keeper.notified == 1
+
+
+# ------------------------------------------------------------ 전사 원문 30일
+
+
+def test_old_transcripts_are_purged_with_the_recordings(tmp_path):
+    """원문은 녹음을 글로 옮긴 것이라 같은 30일 약속이 걸린다."""
+    from app.api.transcript_store import InMemoryTranscriptStore
+
+    saved_at = {"now": NOW - DEFAULT_MAX_AGE_SECONDS - HOUR}
+    store = InMemoryTranscriptStore(clock=lambda: saved_at["now"])
+    store.save(1, "오래된 통화")
+    saved_at["now"] = NOW - HOUR
+    store.save(2, "최근 통화")
+
+    archiver(tmp_path, FakeUploader(), transcripts=store).sweep()
+
+    assert store.get(1) is None
+    assert store.get(2) == "최근 통화"
+
+
+def test_transcripts_are_purged_even_before_any_recording_exists(tmp_path):
+    """새 서버라 녹음 폴더가 없어도 원문 30일은 지킨다."""
+    from app.api.transcript_store import InMemoryTranscriptStore
+
+    store = InMemoryTranscriptStore(clock=lambda: NOW - DEFAULT_MAX_AGE_SECONDS - HOUR)
+    store.save(1, "오래된 통화")
+
+    archiver(tmp_path / "없음", None, transcripts=store).sweep()
+
+    assert store.get(1) is None
+
+
+def test_a_failing_purge_does_not_stop_the_recording_rules(tmp_path, caplog):
+    class Broken:
+        def purge_older_than(self, cutoff):
+            raise RuntimeError("DB 끊김")
+
+    old = recording(tmp_path, "1-a.wav", age=DEFAULT_MAX_AGE_SECONDS + HOUR)
+
+    with caplog.at_level(logging.ERROR, logger="app.archiver"):
+        archiver(tmp_path, None, transcripts=Broken()).sweep()
+
+    assert not old.exists()
+    assert "전사 원문을 지우지 못했다" in caplog.text

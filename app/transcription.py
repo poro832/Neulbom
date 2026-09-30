@@ -19,6 +19,8 @@ from app.analysis.call_analysis import (
     with_transcript,
 )
 
+from app.api.transcript_store import TranscriptStore
+
 logger = logging.getLogger(__name__)
 
 # 연결 실패만 다시 해본다. 세 번째도 실패하면 포기한다(설계 5장).
@@ -68,9 +70,13 @@ class TranscriptionWorker:
         transcribe: Callable[[Path], str],
         sink: Callable[[int, CallAnalysis], None],
         max_retries: int = MAX_RETRIES,
+        transcripts: TranscriptStore | None = None,
     ) -> None:
         self._transcribe = transcribe
         self._sink = sink
+        # 전사 원문 보관소. 부정어 사전을 고쳤을 때 과거 통화를 다시 셀
+        # 원본이 이것뿐이다 — 녹음은 30일 뒤 지워진다.
+        self._transcripts = transcripts
         self._max_retries = max_retries
         self._queue: queue.Queue[PendingTranscription | None] = queue.Queue()
         self._thread: threading.Thread | None = None
@@ -205,6 +211,7 @@ class TranscriptionWorker:
                     + (DEGRADED_NO_TRANSCRIPT,),
                 )
             else:
+                self._keep(job.call_id, transcript)
                 analysis = with_transcript(job.analysis, transcript)
         except Exception:
             logger.exception(
@@ -218,6 +225,26 @@ class TranscriptionWorker:
                 + (DEGRADED_NO_TRANSCRIPT,),
             )
         self._sink(job.call_id, analysis)
+
+    def _keep(self, call_id: int, transcript: str) -> None:
+        """원문을 남긴다. 실패해도 점수에는 손대지 않는다.
+
+        전사는 성공했고 보관만 못 한 것이다. 이 예외가 _handle의 바깥
+        except로 새면 "전사 실패"로 접혀 멀쩡한 통화가 점수를 잃는다.
+
+        로그에 원문을 찍지 않는다. 어르신의 사적인 대화 전문이고, 로그는
+        원문보다 오래·넓게 남는다.
+        """
+        if self._transcripts is None:
+            return
+        try:
+            self._transcripts.save(call_id, transcript)
+        except Exception:
+            logger.exception(
+                "전사 원문을 남기지 못했다 — 점수는 그대로 낸다 call_id=%s 길이=%d",
+                call_id,
+                len(transcript),
+            )
 
     def _transcribe_with_retries(self, job: PendingTranscription) -> str | None:
         for attempt in range(self._max_retries + 1):
