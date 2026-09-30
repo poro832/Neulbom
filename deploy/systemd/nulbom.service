@@ -1,0 +1,19 @@
+# /etc/systemd/system/nulbom.service — 앱 서버.
+#
+# uvicorn을 직접 부르지 않고 app.serve를 부른다. 그래야 .env가 앱보다 먼저
+# 읽히고 우리 INFO 로그(저장소 종류, 스케줄러 켜짐)가 journal에 남는다.
+# 127.0.0.1에만 붙는다 — 바깥은 Caddy가 받는다.
+[Unit]
+Description=Nulbom API server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ssm-user
+WorkingDirectory=/home/ssm-user/Nulbom
+ExecStart=/home/ssm-user/Nulbom/.venv/bin/python -m app.serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

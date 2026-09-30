@@ -1,0 +1,9 @@
+# /etc/systemd/system/duckdns.service — duckdns.timer가 5분마다 부른다.
+[Unit]
+Description=DuckDNS IP update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/duckdns-update

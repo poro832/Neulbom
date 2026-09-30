@@ -1,0 +1,21 @@
+# /etc/systemd/system/caddy.service — HTTPS 역방향 프록시.
+#
+# root로 돌리지 않는다. 80/443을 잡는 권한만 따로 준다.
+# 인증서와 ACME 계정은 /var/lib/caddy 아래에 쌓인다.
+[Unit]
+Description=Caddy reverse proxy
+After=network-online.target nulbom.service
+Wants=network-online.target
+
+[Service]
+User=caddy
+Group=caddy
+Environment=XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/var/lib/caddy
+ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
