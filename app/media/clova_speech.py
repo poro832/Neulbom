@@ -63,6 +63,26 @@ def _http_post(url: str, *, headers: dict, content: bytes, timeout: float) -> by
     return response.content
 
 
+def _short_stt_url(invoke_url: str) -> str:
+    """단문 인식 주소는 Invoke URL 뒤가 아니라 **게이트웨이 주소 바로 아래**다.
+
+    장문 인식은 `https://<게이트웨이>/external/v1/<앱ID>/<해시>/recognizer/upload`
+    처럼 Invoke URL 전체를 쓰지만, 단문 인식은 공식 문서에
+    `https://clovaspeech-gw.ncloud.com/recog/v1/stt`로 적혀 있다. 처음에는
+    Invoke URL 뒤에 `/recog/v1/stt`를 붙였는데, 2026-10-06 첫 실통화에서 404가
+    났다(경로가 `.../external/v1/<앱ID>/<해시>/recog/v1/stt`가 되어 존재하지
+    않는다). 그래서 같은 환경 변수에서 스킴과 호스트만 가져온다.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(invoke_url.strip())
+    if not parts.scheme or not parts.netloc:
+        # 주소 모양이 아니면 짐작하지 않고 예전 방식으로 둔다. 어차피 호출할 때
+        # 실패하고 그 오류가 로그에 남는다.
+        return f"{invoke_url.rstrip('/')}/recog/v1/stt"
+    return f"{parts.scheme}://{parts.netloc}/recog/v1/stt"
+
+
 class ClovaSpeech:
     """실제 인식. 자격 증명은 생성자로만 받는다 — 코드에 박지 않는다."""
 
@@ -75,7 +95,7 @@ class ClovaSpeech:
         transport: Transport = _http_post,
         timeout_seconds: float = 10.0,
     ) -> None:
-        self._url = f"{invoke_url.rstrip('/')}/recog/v1/stt"
+        self._url = _short_stt_url(invoke_url)
         self._secret_key = secret_key
         self._language = language
         self._transport = transport

@@ -64,7 +64,9 @@ def test_it_posts_to_the_domains_recognition_path():
     stt.transcribe(tone(1.0), 8000)
 
     url, _, _ = transport.calls[0]
-    assert url == "https://example.test/external/v1/1234/abcd/recog/v1/stt?lang=Kor"
+    # 단문 인식은 Invoke URL 뒤가 아니라 게이트웨이 바로 아래다(공식 문서).
+    # 예전에는 .../external/v1/1234/abcd/recog/v1/stt 로 보내 404가 났다.
+    assert url == "https://example.test/recog/v1/stt?lang=Kor"
 
 
 def test_the_secret_key_goes_in_the_clovaspeech_header():
