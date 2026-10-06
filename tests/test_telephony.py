@@ -70,5 +70,36 @@ def test_missing_call_id_error_carries_status_and_body(monkeypatch):
 
     message = str(excinfo.value)
     assert "200" in message
-    # call_id는 없지만 원본 본문이 그대로 남아 있어야 실제 필드명을 알 수 있다.
+    # callId는 없지만 원본 본문이 그대로 남아 있어야 실제 필드명을 알 수 있다.
     assert "abc123" in message
+
+
+def test_the_call_id_is_read_from_the_documented_field(monkeypatch):
+    """공식 문서의 응답은 callId(camelCase)다. call_id로 읽으면 전화가 나간
+    뒤에 실패한다."""
+    response = _fake_response(
+        status_code=201, json={"callId": "CAabc123", "status": "queued"}
+    )
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: response)
+
+    assert _clawops().place_call(to="070-1", answer_url="https://x") == "CAabc123"
+
+
+def test_numbers_are_sent_as_digits_only(monkeypatch):
+    """ClawOps는 번호를 07052767846처럼 숫자만으로 저장한다."""
+    sent = {}
+
+    def fake_post(url, **kwargs):
+        sent["url"] = url
+        sent["headers"] = kwargs["headers"]
+        sent["data"] = kwargs["data"]
+        return _fake_response(status_code=201, json={"callId": "CAx"})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    _clawops().place_call(to="010-3447-2884", answer_url="https://x/voiceml")
+
+    assert sent["data"]["To"] == "01034472884"
+    assert sent["data"]["From"] == "07000000000"
+    assert sent["url"].endswith("/v1/accounts/AC1/calls")
+    assert sent["headers"]["Authorization"] == "Bearer key"

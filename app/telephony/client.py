@@ -60,14 +60,21 @@ class ClawOpsTelephony:
         response = httpx.post(
             f"{self._base_url}/v1/accounts/{self._account_sid}/calls",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            data={"To": to, "From": self._from_number, "Url": answer_url},
+            # ClawOps는 번호를 숫자만으로 저장하고 응답한다(07052767846).
+            # 하이픈을 그대로 보내도 되는지 문서에 없어서, 보내는 쪽에서 맞춘다.
+            data={
+                "To": _digits(to),
+                "From": _digits(self._from_number),
+                "Url": answer_url,
+            },
             timeout=self._timeout,
         )
         response.raise_for_status()
 
-        # 엔드포인트 경로·인증 헤더·응답 필드명(call_id) 셋 다 계정 없이 작성한
-        # 추측이다. 실제 API와 어긋나면 바로 여기서 처음 드러난다 — 그 순간
-        # 팀원이 가진 단서는 이 예외 메시지뿐이므로 상태 코드와 본문을 남긴다.
+        # 경로·인증 헤더는 공식 문서(2026-10-06)와 맞는다. 응답 필드는 처음에
+        # call_id로 추측했는데 실제는 callId였다 — 전화는 이미 나간 뒤에 이
+        # 줄에서 터졌을 것이다. 어긋나면 여기서 드러나므로 상태 코드와 본문을
+        # 남긴다.
         try:
             payload = response.json()
         except ValueError as exc:
@@ -77,12 +84,16 @@ class ClawOpsTelephony:
             ) from exc
 
         try:
-            return payload["call_id"]
-        except KeyError as exc:
+            return payload["callId"]
+        except (KeyError, TypeError) as exc:
             raise RuntimeError(
-                "ClawOps 응답에 call_id 필드가 없다: "
+                "ClawOps 응답에 callId 필드가 없다: "
                 f"status={response.status_code} body={_truncate(response.text)}"
             ) from exc
+
+
+def _digits(number: str) -> str:
+    return "".join(ch for ch in number if ch.isdigit())
 
 
 def _truncate(body: str, limit: int = 300) -> str:
