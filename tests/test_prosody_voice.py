@@ -208,3 +208,42 @@ def test_absurdly_long_text_is_truncated_and_says_so(caplog):
 
     assert "자른다" in caplog.text
     assert sum(len(c["json"]["text"]) for c in transport.calls) <= TTS_MAX_CHARS
+
+
+# ------------------------------------------------ 요청 수 (분당 5건 한도)
+
+
+def test_a_short_multi_sentence_reply_is_one_request():
+    """첫 AI 대화 통화(2026-10-06)에서 문장마다 요청을 보내 한 턴이 2~3건이
+    되었고, 무료 플랜의 분당 5건에 두 번째 턴에서 걸렸다."""
+    transport = FakeTransport()
+
+    voice(transport).synthesize(
+        "다행이에요, 어르신. 아침 잘 챙겨 드셔서요. 점심 메뉴는 뭐로 정하셨나요?", 8000
+    )
+
+    assert len(transport.calls) == 1
+    assert "점심 메뉴" in transport.calls[0]["json"]["text"]
+
+
+def test_the_same_phrase_is_not_synthesized_twice():
+    """되묻는 말 같은 고정 문구가 턴마다 요청과 글자 수를 쓰지 않게 한다."""
+    transport = FakeTransport()
+    v = voice(transport)
+
+    first = v.synthesize("죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?", 8000)
+    second = v.synthesize("죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?", 8000)
+
+    assert first == second
+    assert len(transport.calls) == 1
+
+
+def test_the_cache_is_per_sample_rate_and_per_text():
+    transport = FakeTransport()
+    v = voice(transport)
+
+    v.synthesize("안녕하세요.", 8000)
+    v.synthesize("안녕하세요.", 16000)
+    v.synthesize("안녕히 계세요.", 8000)
+
+    assert len(transport.calls) == 3

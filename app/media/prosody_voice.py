@@ -30,6 +30,7 @@ ClovaVoice와 같은 VoiceSynthesizer 규약을 구현한다. 전송 계층을 �
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import Protocol
 
 import httpx
@@ -58,6 +59,11 @@ SUPPORTED_SAMPLE_RATES = frozenset({8000, 16000, 24000, 48000})
 OUTPUT_FORMAT_HEADER = "x-prosody-output-format"
 
 DEFAULT_EMOTION = "neutral"
+
+# 같은 문장을 다시 합성하지 않으려고 기억하는 개수. 고정 문구(되묻기 등)가
+# 대부분이라 작아도 충분하다. 목소리나 속도가 다르면 다른 ProsodyVoice이므로
+# 키에 넣지 않는다.
+CACHE_MAX_ENTRIES = 64
 
 # 문장 사이에 업체가 넣는 무음(초). 기본값과 같은 값이지만 **명시적으로
 # 보낸다** — 이 무음은 AI 오디오 안에 들어가고, AI 발화 길이는 지표의
@@ -120,6 +126,7 @@ class ProsodyVoice:
         self._sentence_silence = sentence_silence_seconds
         self._transport = transport
         self._timeout = timeout_seconds
+        self._cache: OrderedDict[tuple[str, int], bytes] = OrderedDict()
 
     @property
     def voice_name(self) -> str:
@@ -146,10 +153,27 @@ class ProsodyVoice:
             )
             spoken = spoken[:TTS_MAX_CHARS]
 
-        pieces = split_for_tts(spoken, TTS_MAX_PIECE_CHARS)
-        return b"".join(
-            self._synthesize_one(piece, sample_rate) for piece in pieces
-        )
+        # 같은 문장을 같은 설정으로 다시 합성하지 않는다. 되묻는 말이나 인사처럼
+        # 고정된 문구가 통화마다, 턴마다 같은 요청을 만들고 글자 수도 그만큼
+        # 쓴다. 무료 한도가 월 10,000자, 분당 5건이다.
+        key = (spoken, sample_rate)
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            return cached
+
+        # **문장마다 요청을 보내지 않는다.** 처음에는 CLOVA Voice 어댑터처럼
+        # 문장 단위로 쪼개 보냈는데, 2026-10-06 첫 AI 대화 통화에서 한 턴이
+        # 두세 요청이 되어 두 번째 턴에서 429(분당 5건)로 막혔다. DIVE는 문장
+        # 사이 무음을 스스로 넣으므로(sentenceSilenceSec) 요청당 상한까지는
+        # 한 번에 보낸다.
+        pieces = _pack(split_for_tts(spoken, TTS_MAX_PIECE_CHARS), TTS_MAX_PIECE_CHARS)
+        audio = b"".join(self._synthesize_one(piece, sample_rate) for piece in pieces)
+
+        self._cache[key] = audio
+        if len(self._cache) > CACHE_MAX_ENTRIES:
+            self._cache.popitem(last=False)
+        return audio
 
     def _synthesize_one(self, spoken: str, sample_rate: int) -> bytes:
         wanted = f"pcm_{sample_rate}"
@@ -176,6 +200,22 @@ class ProsodyVoice:
         )
         _check_format(headers, wanted)
         return raw
+
+
+def _pack(pieces: list[str], limit: int) -> list[str]:
+    """문장 조각을 요청당 상한까지 이어 붙인다. 순서는 그대로다."""
+    packed: list[str] = []
+    current = ""
+    for piece in pieces:
+        if current and len(current) + 1 + len(piece) <= limit:
+            current = f"{current} {piece}"
+        else:
+            if current:
+                packed.append(current)
+            current = piece
+    if current:
+        packed.append(current)
+    return packed
 
 
 def _check_format(headers: dict, wanted: str) -> None:

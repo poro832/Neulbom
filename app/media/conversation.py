@@ -129,5 +129,7 @@ class ConversationResponder:
             return self.voice.synthesize(text, sample_rate)
         except Exception:
             # 통화를 끊지 않는다. 한 턴 침묵하는 것과 전화가 죽는 것은 다르다.
-            logger.exception("음성 합성 실패 — 이 턴은 침묵한다 text=%r", text[:60])
+            # AI의 말에는 어르신이 한 말의 내용이 묻어 있다("아침 잘 챙겨 드셔서요").
+            # 로그는 오래 남고 넓게 읽히므로 길이만 남긴다.
+            logger.exception("음성 합성 실패 — 이 턴은 침묵한다 길이=%d", len(text))
             return b""
