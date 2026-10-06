@@ -88,6 +88,13 @@ class ConversationResponder:
             logger.exception("전사 실패 — 이 턴은 넘어간다")
             return b""
 
+        # 몇 초를 보내 몇 글자가 돌아왔는지만 남긴다. 내용은 남기지 않는다 —
+        # 어르신의 말이고, 로그는 오래 남고 넓게 읽힌다. 되묻기가 나왔을 때
+        # "소리가 너무 짧았나, 작았나, 인식이 비었나"를 가르려면 이 숫자가 필요하다.
+        logger.info(
+            "턴 인식 오디오=%.1f초 글자=%d", audio.size / sample_rate, len(said)
+        )
+
         if not said:
             return self._ask_again(sample_rate)
 

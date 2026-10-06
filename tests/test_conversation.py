@@ -182,3 +182,32 @@ def test_the_transcript_is_kept_for_the_report_not_for_the_score():
         ("elder", "밥 먹었어요"),
         ("ai", "네."),
     ]
+
+
+def test_a_turn_logs_how_much_audio_went_in_and_how_much_text_came_back(caplog):
+    """되묻기가 나왔을 때 원인을 가르는 숫자다. 내용은 남기지 않는다."""
+    import logging
+
+    import numpy as np
+
+    from app.media.conversation import ConversationResponder
+
+    class Stt:
+        def transcribe(self, audio, sample_rate):
+            return "아침은 먹었어요"
+
+    class Chat:
+        def reply(self, history):
+            return "다행이에요."
+
+    class Voice:
+        def synthesize(self, text, sample_rate):
+            return b"\x00\x00"
+
+    responder = ConversationResponder(stt=Stt(), chat=Chat(), voice=Voice())
+
+    with caplog.at_level(logging.INFO, logger="app.media.conversation"):
+        responder.respond(np.zeros(16000, dtype=np.float32), 8000)
+
+    assert "오디오=2.0초 글자=8" in caplog.text
+    assert "아침은 먹었어요" not in caplog.text
