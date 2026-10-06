@@ -449,3 +449,39 @@ def test_finish_twice_writes_the_same_file(tmp_path):
 
     assert session.finish(tmp_path) == session.finish(tmp_path)
     assert len(list(tmp_path.glob("*.wav"))) == 1
+
+
+# ------------------------------------------------ 타임스탬프 흔들림 (실통화)
+
+
+def test_small_timestamp_jitter_neither_drops_nor_fills(tmp_path):
+    """첫 실통화(2026-10-06)에서 사업자 타임스탬프가 프레임마다 1~3ms 흔들렸다.
+
+    이전 구현은 늦게 온 프레임 뒤에 제시간에 온 프레임을 '과거'로 보고
+    통째로 버렸고, 그 20ms를 침묵으로 채웠다. 오디오는 이어서 들어온
+    것이므로 길이도 침묵 총량도 흔들림과 무관해야 한다.
+    """
+    session = CallSession("c-jitter", GAP_SAMPLE_RATE, _SilentResponder())
+    jitter = [0, 3, 0, 2, -1, 3, 0, 1, 3, 0]   # 늦게/일찍 오는 정도(ms)
+
+    for i, shake in enumerate(jitter):
+        session.push_audio(silence_frame(), timestamp_ms=i * GAP_FRAME_MS + shake)
+
+    path = session.finish(tmp_path)
+    assert session.stream_duration_ms == len(jitter) * GAP_FRAME_MS
+    assert wav_duration_ms(path) == len(jitter) * GAP_FRAME_MS
+    assert session.filled_gap_ms == 0
+
+
+def test_jitter_does_not_hide_a_real_duplicate_or_a_real_loss(tmp_path):
+    """흔들림을 봐주는 폭은 프레임의 절반까지다. 한 프레임 중복은 버리고,
+    한 프레임 유실은 메운다."""
+    session = CallSession("c-real", GAP_SAMPLE_RATE, _SilentResponder())
+    session.push_audio(silence_frame(), timestamp_ms=0)
+    session.push_audio(silence_frame(), timestamp_ms=20)
+    session.push_audio(silence_frame(), timestamp_ms=20)    # 중복 — 버린다
+    session.push_audio(silence_frame(), timestamp_ms=60)    # 20ms 유실 — 메운다
+
+    assert session.stream_duration_ms == 80
+    assert session.filled_gap_ms == 20
+    assert wav_duration_ms(session.finish(tmp_path)) == 80

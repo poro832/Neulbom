@@ -58,6 +58,16 @@ class MarkMessage:
 Outgoing = TextMessage | AudioMessage | MarkMessage
 
 
+# 사업자가 준 타임스탬프가 프레임 간격(20ms)에서 몇 ms 흔들리는 것은
+# 정상이다. 2026-10-06 첫 실통화에서 9초 동안 "뒤로 갔다 gap=-1~-3ms"가
+# 수십 번 찍혔다. 이전 구현은 이걸 중복으로 보고 **프레임 20ms를 통째로
+# 버린 뒤 그 자리를 침묵으로 채웠다** — 늦은 프레임이 먼저 침묵을 끼워 넣어
+# 시계를 앞세우고, 제시간에 온 다음 프레임이 "과거"가 돼 버려지는 연쇄다.
+# 프레임 길이의 절반 이하는 흔들림으로 보고 이어 붙인다. 진짜 중복(-20ms)과
+# 진짜 유실(+20ms)은 이보다 멀리 있어 그대로 걸린다.
+JITTER_TOLERANCE_MS = 10
+
+
 class CallSession:
     def __init__(
         self,
@@ -118,6 +128,10 @@ class CallSession:
         stream_server._push가 지킨다(MAX_GAP_MS).
         """
         gap_ms = timestamp_ms - self._next_timestamp_ms
+        if abs(gap_ms) <= JITTER_TOLERANCE_MS:
+            # 타임스탬프의 몇 ms 흔들림은 유실도 중복도 아니다. 오디오는 이어서
+            # 들어온 것이다(2026-10-06 첫 실통화에서 확인).
+            gap_ms = 0
         if gap_ms < 0:
             # 중복이거나 순서가 뒤집혔다 — 이 바이트가 가리키는 시간대는 이미
             # 버퍼에 있다. 그런데도 붙이면 녹음이 통화보다 길어져 그 뒤 모든
