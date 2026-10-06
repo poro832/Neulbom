@@ -35,7 +35,7 @@ FULL = {
 # 테스트끼리 환경이 새지 않게 관련 변수를 전부 지우고 시작한다.
 _ALL = CLOVA_ENV_KEYS + PROSODY_ENV_KEYS + (
     "TTS_VENDOR", "CLOVA_VOICE_SPEAKER", "CLOVA_VOICE_SPEED",
-    "CLOVA_STUDIO_MODEL", "POLLY_VOICE_ID",
+    "CLOVA_STUDIO_MODEL", "POLLY_VOICE_ID", "CLOVA_SPEECH_SHORT_SECRET",
     "PROSODY_EMOTION", "PROSODY_SPEED",
     # AWS_REGION이 비면 boto3가 ~/.aws/config를 뒤진다. 그래서 이 파일의
     # polly 테스트가 **개발자 PC에 AWS CLI가 설정돼 있느냐**에 따라 통과하고
@@ -307,3 +307,18 @@ def test_batch_transcription_on_with_keys_returns_the_adapter_and_logs_the_score
     assert isinstance(result, ClovaLongSpeech)
     message = " ".join(record.getMessage() for record in caplog.records)
     assert "60" in message and "80" in message
+
+
+def test_short_recognition_uses_its_own_secret_when_given(monkeypatch):
+    """단문 인식은 장문과 다른 NCP 도메인이라 시크릿이 따로다."""
+    set_env(monkeypatch, {**FULL, "CLOVA_SPEECH_SHORT_SECRET": "short-secret"})
+
+    responder = responder_from_env()
+
+    assert responder.stt._secret_key == "short-secret"
+
+
+def test_short_recognition_falls_back_to_the_main_secret(monkeypatch):
+    set_env(monkeypatch, FULL)
+
+    assert responder_from_env().stt._secret_key == "s-secret"

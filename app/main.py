@@ -174,7 +174,12 @@ def responder_from_env() -> Responder:
     return ConversationResponder(
         stt=ClovaSpeech(
             os.environ["CLOVA_SPEECH_INVOKE_URL"],
-            os.environ["CLOVA_SPEECH_SECRET"],
+            # 단문 인식은 장문과 **다른 도메인**이라 시크릿도 따로다(NCP 콘솔의
+            # 도메인 유형: 장문 / 단문 / 스트리밍). 2026-10-06 첫 AI 대화 통화에서
+            # 장문 도메인의 시크릿으로 단문을 불러 401 Invalid secret이 났다.
+            # 따로 만들기 전까지는 예전처럼 장문 시크릿으로 간다.
+            os.getenv("CLOVA_SPEECH_SHORT_SECRET")
+            or os.environ["CLOVA_SPEECH_SECRET"],
         ),
         chat=ClovaChat(
             os.environ["CLOVA_STUDIO_API_KEY"],
