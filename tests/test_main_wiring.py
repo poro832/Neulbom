@@ -322,3 +322,96 @@ def test_short_recognition_falls_back_to_the_main_secret(monkeypatch):
     set_env(monkeypatch, FULL)
 
     assert responder_from_env().stt._secret_key == "s-secret"
+
+
+# ------------------------------------------------ 켜질 때 점검 (전화 없이 확인한다)
+
+
+PROSODY_FULL = {
+    "CLOVA_SPEECH_INVOKE_URL": "https://spch.test/external/v1/1/a",
+    "CLOVA_SPEECH_SECRET": "s-secret",
+    "CLOVA_STUDIO_BASE_URL": "https://studio.test",
+    "CLOVA_STUDIO_API_KEY": "studio-key",
+    "PROSODY_API_KEY": "p-key",
+    "PROSODY_VOICE_NAME": "은린",
+}
+
+
+def test_startup_says_when_everything_for_the_conversation_is_there(monkeypatch, caplog):
+    import logging
+
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, {**PROSODY_FULL, "CLOVA_SPEECH_SHORT_SECRET": "short"})
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        log_startup_readiness()
+
+    assert "AI 대화가 켜진다" in caplog.text
+    assert "은린" in caplog.text
+    assert "빠진 값" not in caplog.text
+
+
+def test_startup_names_every_missing_value(monkeypatch, caplog):
+    """전화가 연결돼야 경고가 찍히던 것을, 켜질 때 알려 준다."""
+    import logging
+
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, {"PROSODY_API_KEY": "p-key"})
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        log_startup_readiness()
+
+    assert "AI 대화가 꺼진 채" in caplog.text
+    assert "PROSODY_VOICE_NAME" in caplog.text
+    assert "CLOVA_STUDIO_API_KEY" in caplog.text
+
+
+def test_startup_warns_when_the_short_recognition_secret_is_missing(monkeypatch, caplog):
+    """단문은 장문과 다른 NCP 도메인이라 시크릿이 다르다(2026-10-06, 401)."""
+    import logging
+
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, PROSODY_FULL)
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        log_startup_readiness()
+
+    assert "CLOVA_SPEECH_SHORT_SECRET" in caplog.text
+
+
+def test_startup_rejects_an_unknown_vendor_loudly(monkeypatch, caplog):
+    import logging
+
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, {**PROSODY_FULL, "TTS_VENDOR": "prosodi"})
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        log_startup_readiness()
+
+    assert "모르는 TTS 벤더" in caplog.text
+
+
+def test_startup_reminds_that_batch_transcription_is_off(monkeypatch, caplog):
+    import logging
+
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, PROSODY_FULL)
+    monkeypatch.delenv("BATCH_TRANSCRIPTION", raising=False)
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        log_startup_readiness()
+
+    assert "배치 전사가 꺼져 있다" in caplog.text
+
+
+def test_startup_check_never_raises_or_builds_a_responder(monkeypatch):
+    from app.main import log_startup_readiness
+
+    set_env(monkeypatch, {})
+
+    log_startup_readiness()  # 키가 하나도 없어도 서버는 떠야 한다

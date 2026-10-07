@@ -30,6 +30,7 @@ ClovaVoice와 같은 VoiceSynthesizer 규약을 구현한다. 전송 계층을 �
 from __future__ import annotations
 
 import logging
+import threading
 from collections import OrderedDict
 from typing import Protocol
 
@@ -61,9 +62,42 @@ OUTPUT_FORMAT_HEADER = "x-prosody-output-format"
 DEFAULT_EMOTION = "neutral"
 
 # 같은 문장을 다시 합성하지 않으려고 기억하는 개수. 고정 문구(되묻기 등)가
-# 대부분이라 작아도 충분하다. 목소리나 속도가 다르면 다른 ProsodyVoice이므로
-# 키에 넣지 않는다.
+# 대부분이라 작아도 충분하다.
 CACHE_MAX_ENTRIES = 64
+
+# 무료 플랜의 월 글자 수(DIVE 1자 = 3크레딧, 월 30,000크레딧). 환경 변수
+# PROSODY_MONTHLY_CHARS로 바꾼다(Starter는 66,666).
+DEFAULT_MONTHLY_CHARS = 10_000
+
+# 이 비율을 넘으면 경고한다. 넘기면 과금이 아니라 **정지**라서, 시연 날
+# 갑자기 AI가 말을 못 하게 되는 걸 미리 알려야 한다.
+USAGE_WARN_RATIO = 0.8
+
+
+class _Shared:
+    """프로세스 전체가 나눠 쓰는 기억과 사용량.
+
+    **통화마다 새로 만들어지는 객체에 두면 안 된다.** 응답기와 이 어댑터는
+    통화 하나마다 만들어지므로(stream_server가 통화마다 factory를 부른다),
+    객체 안에 두면 통화가 끝날 때 기억도 사용량도 사라진다. 되묻기 같은
+    고정 문구는 통화마다 같은 요청을 다시 보내고, 사용량은 한 통화 분만
+    보인다.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.cache: OrderedDict[tuple, bytes] = OrderedDict()
+        self.chars_used = 0
+        self.warned = False
+
+
+_SHARED = _Shared()
+
+
+def reset_shared_state() -> None:
+    """테스트가 서로 새지 않게 비운다."""
+    global _SHARED
+    _SHARED = _Shared()
 
 # 문장 사이에 업체가 넣는 무음(초). 기본값과 같은 값이지만 **명시적으로
 # 보낸다** — 이 무음은 AI 오디오 안에 들어가고, AI 발화 길이는 지표의
@@ -116,8 +150,10 @@ class ProsodyVoice:
         sentence_silence_seconds: float = DEFAULT_SENTENCE_SILENCE_SECONDS,
         transport: Transport = _http_post,
         timeout_seconds: float = 10.0,
+        monthly_chars: int = DEFAULT_MONTHLY_CHARS,
     ) -> None:
         self._api_key = api_key
+        self._monthly_chars = monthly_chars
         self._voice_name = voice_name
         self._emotion = emotion
         self._speed = speed
@@ -126,7 +162,6 @@ class ProsodyVoice:
         self._sentence_silence = sentence_silence_seconds
         self._transport = transport
         self._timeout = timeout_seconds
-        self._cache: OrderedDict[tuple[str, int], bytes] = OrderedDict()
 
     @property
     def voice_name(self) -> str:
@@ -156,11 +191,17 @@ class ProsodyVoice:
         # 같은 문장을 같은 설정으로 다시 합성하지 않는다. 되묻는 말이나 인사처럼
         # 고정된 문구가 통화마다, 턴마다 같은 요청을 만들고 글자 수도 그만큼
         # 쓴다. 무료 한도가 월 10,000자, 분당 5건이다.
-        key = (spoken, sample_rate)
-        cached = self._cache.get(key)
-        if cached is not None:
-            self._cache.move_to_end(key)
-            return cached
+        # 목소리, 감정, 속도 같은 설정이 다르면 다른 소리다 — 키에 넣지 않으면
+        # 설정을 바꾼 뒤에도 예전 소리가 나온다.
+        key = (
+            self._voice_name, self._emotion, self._speed, self._pitch,
+            self._volume, self._sentence_silence, sample_rate, spoken,
+        )
+        with _SHARED.lock:
+            cached = _SHARED.cache.get(key)
+            if cached is not None:
+                _SHARED.cache.move_to_end(key)
+                return cached
 
         # **문장마다 요청을 보내지 않는다.** 처음에는 CLOVA Voice 어댑터처럼
         # 문장 단위로 쪼개 보냈는데, 2026-10-06 첫 AI 대화 통화에서 한 턴이
@@ -170,10 +211,42 @@ class ProsodyVoice:
         pieces = _pack(split_for_tts(spoken, TTS_MAX_PIECE_CHARS), TTS_MAX_PIECE_CHARS)
         audio = b"".join(self._synthesize_one(piece, sample_rate) for piece in pieces)
 
-        self._cache[key] = audio
-        if len(self._cache) > CACHE_MAX_ENTRIES:
-            self._cache.popitem(last=False)
+        with _SHARED.lock:
+            _SHARED.cache[key] = audio
+            if len(_SHARED.cache) > CACHE_MAX_ENTRIES:
+                _SHARED.cache.popitem(last=False)
+        self._note_usage(sum(len(piece) for piece in pieces))
         return audio
+
+    def _note_usage(self, chars: int) -> None:
+        """이번에 실제로 요청한 글자 수와 서버 시작 후 누적을 남긴다.
+
+        무료 한도가 월 10,000자이고 넘으면 정지다. 청구서나 콘솔을 보고서야
+        알게 되면 늦으므로 통화마다 로그에 남긴다. 누적은 **서버를 켠 뒤**의
+        값이다(재시작하면 0부터). 월 합계는 로그의 이 줄들을 더해 구한다.
+        """
+        with _SHARED.lock:
+            _SHARED.chars_used += chars
+            used = _SHARED.chars_used
+            warn = (
+                not _SHARED.warned
+                and used >= self._monthly_chars * USAGE_WARN_RATIO
+            )
+            if warn:
+                _SHARED.warned = True
+        logger.info(
+            "Prosody 합성 %d자 — 서버 시작 후 누적 %d자 (월 한도 %d자의 %d%%)",
+            chars,
+            used,
+            self._monthly_chars,
+            used * 100 // self._monthly_chars,
+        )
+        if warn:
+            logger.warning(
+                "Prosody 사용량이 월 한도의 %d%%를 넘었다 — 넘기면 다음 달까지 "
+                "AI가 말을 못 한다. 플랜을 올리거나 시험을 줄일 것",
+                int(USAGE_WARN_RATIO * 100),
+            )
 
     def _synthesize_one(self, spoken: str, sample_rate: int) -> bytes:
         wanted = f"pcm_{sample_rate}"

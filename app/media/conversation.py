@@ -23,6 +23,15 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
+class TooShortSound(Exception):
+    """인식기가 '소리가 너무 짧다'고 거절했다.
+
+    **못 알아들은 것과 다르다.** 숨소리나 기침 같은 짧은 소리는 말이 아니라
+    소음이고, 거기에 "죄송해요, 잘 못 들었어요"라고 되묻는 건 어르신께
+    이상하다. 되묻지 않고 조용히 넘기며 실패 횟수에도 세지 않는다.
+    """
+
 # 전사가 비었을 때 되묻는 횟수. 한 번도 안 되물으면 어르신은 무시당했다고
 # 느끼고, 계속 되물으면 같은 문장만 반복하는 고장난 기계가 된다.
 #
@@ -84,6 +93,12 @@ class ConversationResponder:
     def respond(self, audio: np.ndarray, sample_rate: int) -> bytes:
         try:
             said = self.stt.transcribe(audio, sample_rate).strip()
+        except TooShortSound:
+            logger.info(
+                "너무 짧은 소리 — 되묻지 않고 넘긴다 오디오=%.1f초",
+                audio.size / sample_rate,
+            )
+            return b""
         except Exception:
             logger.exception("전사 실패 — 이 턴은 넘어간다")
             return b""

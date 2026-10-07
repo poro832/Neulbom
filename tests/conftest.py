@@ -29,3 +29,13 @@ def _no_ambient_batch_transcription(monkeypatch):
     # 켜 둔 셸에서 pytest를 돌리면 테스트 녹음이 진짜 버킷에 올라간다.
     # BATCH_TRANSCRIPTION과 같은 종류의 구멍이다.
     monkeypatch.delenv("RECORDINGS_BUCKET", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_prosody_memory():
+    """Prosody 어댑터의 기억과 사용량은 프로세스 전체가 나눠 쓴다. 테스트끼리
+    새면 앞 테스트가 합성해 둔 소리 때문에 뒤 테스트의 요청이 사라진다."""
+    from app.media import prosody_voice
+
+    prosody_voice.reset_shared_state()
+    yield

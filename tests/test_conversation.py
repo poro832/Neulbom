@@ -211,3 +211,62 @@ def test_a_turn_logs_how_much_audio_went_in_and_how_much_text_came_back(caplog):
 
     assert "오디오=2.0초 글자=8" in caplog.text
     assert "아침은 먹었어요" not in caplog.text
+
+
+def test_a_too_short_sound_is_skipped_without_asking_again():
+    """숨소리에 "죄송해요, 잘 못 들었어요"라고 되묻지 않는다."""
+    import numpy as np
+
+    from app.media.conversation import ConversationResponder, TooShortSound
+
+    class Stt:
+        def transcribe(self, audio, sample_rate):
+            raise TooShortSound("STT007")
+
+    class Chat:
+        def reply(self, history):
+            raise AssertionError("짧은 소리에 답을 만들면 안 된다")
+
+    class Voice:
+        spoken = []
+
+        def synthesize(self, text, sample_rate):
+            Voice.spoken.append(text)
+            return b"\x00\x00"
+
+    responder = ConversationResponder(stt=Stt(), chat=Chat(), voice=Voice())
+
+    assert responder.respond(np.zeros(800, dtype=np.float32), 8000) == b""
+    assert Voice.spoken == []
+
+
+def test_too_short_sounds_do_not_use_up_the_retries():
+    """짧은 소리를 몇 번 넘겼다고 진짜 못 알아들은 턴의 되묻기가 막히면 안 된다."""
+    import numpy as np
+
+    from app.media.conversation import ConversationResponder, TooShortSound
+
+    outcomes = [TooShortSound("x"), TooShortSound("x"), TooShortSound("x"), ""]
+
+    class Stt:
+        def transcribe(self, audio, sample_rate):
+            item = outcomes.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    class Chat:
+        def reply(self, history):
+            return "네."
+
+    class Voice:
+        def synthesize(self, text, sample_rate):
+            return b"\x01\x00"
+
+    responder = ConversationResponder(stt=Stt(), chat=Chat(), voice=Voice())
+    audio = np.zeros(800, dtype=np.float32)
+
+    for _ in range(3):
+        assert responder.respond(audio, 8000) == b""
+    # 진짜로 못 알아들은 첫 턴에는 되묻는다.
+    assert responder.respond(audio, 8000) == b"\x01\x00"

@@ -247,3 +247,66 @@ def test_the_cache_is_per_sample_rate_and_per_text():
     v.synthesize("안녕히 계세요.", 8000)
 
     assert len(transport.calls) == 3
+
+
+# ------------------------------------------------ 통화를 넘어 기억하고, 사용량을 센다
+
+
+def test_the_memory_outlives_the_call():
+    """응답기와 어댑터는 통화마다 새로 만들어진다. 기억이 객체 안에 있으면
+    같은 되묻기 문구를 통화마다 다시 합성한다."""
+    transport = FakeTransport()
+    phrase = "죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?"
+
+    voice(transport).synthesize(phrase, 8000)   # 첫 통화
+    voice(transport).synthesize(phrase, 8000)   # 다음 통화
+
+    assert len(transport.calls) == 1
+
+
+def test_changing_the_voice_or_speed_never_replays_the_old_sound():
+    transport = FakeTransport()
+    phrase = "안녕하세요."
+
+    voice(transport).synthesize(phrase, 8000)
+    voice(transport, speed=0.9).synthesize(phrase, 8000)
+    ProsodyVoice(KEY, voice_name="다른목소리", transport=transport).synthesize(phrase, 8000)
+
+    assert len(transport.calls) == 3
+
+
+def test_each_request_logs_its_characters_and_the_running_total(caplog):
+    transport = FakeTransport()
+
+    with caplog.at_level(logging.INFO, logger="app.media.prosody_voice"):
+        voice(transport).synthesize("가나다라마.", 8000)          # 6자
+        voice(transport).synthesize("바사아자차카타파하.", 8000)  # 10자
+
+    assert "합성 6자" in caplog.text
+    assert "누적 16자" in caplog.text
+    assert "월 한도 10000자" in caplog.text
+
+
+def test_remembered_phrases_cost_nothing_and_are_not_counted(caplog):
+    transport = FakeTransport()
+    v = voice(transport)
+    v.synthesize("같은 문구입니다.", 8000)
+
+    with caplog.at_level(logging.INFO, logger="app.media.prosody_voice"):
+        v.synthesize("같은 문구입니다.", 8000)
+
+    assert "Prosody 합성" not in caplog.text
+
+
+def test_it_warns_once_when_the_monthly_budget_is_nearly_gone(caplog):
+    """넘기면 과금이 아니라 정지다. 시연 날 갑자기 말을 못 하게 되기 전에 안다."""
+    transport = FakeTransport()
+    v = voice(transport, monthly_chars=20)
+
+    with caplog.at_level(logging.WARNING, logger="app.media.prosody_voice"):
+        v.synthesize("가" * 10 + ".", 8000)      # 11자 — 55%
+        assert "넘었다" not in caplog.text
+        v.synthesize("나" * 10 + ".", 8000)      # 누적 22자 — 110%
+        v.synthesize("다" * 10 + ".", 8000)
+
+    assert caplog.text.count("월 한도의 80%를 넘었다") == 1

@@ -171,3 +171,40 @@ def test_audio_longer_than_the_limit_is_cut_and_reported(caplog):
     source, frames = sent_audio(transport)
     assert source.getnframes() == 8000 * STT_MAX_SECONDS
     assert caplog.records
+
+
+def test_too_short_sound_is_raised_not_swallowed(monkeypatch):
+    """STT007은 오류가 아니라 숨소리 같은 짧은 소리다. 삼켜서 ''로 돌려주면
+    응답기가 '못 알아들었다'로 보고 되묻는다."""
+    import httpx
+
+    from app.media.conversation import TooShortSound
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(
+            400,
+            text='{"error":{"errorCode":"STT007","message":"Too Short Sound Data"}}',
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    stt = ClovaSpeech("https://example.test/external/v1/1234/abcd", "secret")
+
+    with pytest.raises(TooShortSound):
+        stt.transcribe(np.ones(1600, dtype=np.float32) * 0.1, 8000)
+
+
+def test_other_failures_are_still_swallowed_into_not_understood(monkeypatch):
+    import httpx
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(
+            401,
+            text='{"error":{"errorCode":"401","message":"Invalid secret"}}',
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    stt = ClovaSpeech("https://example.test/external/v1/1234/abcd", "secret")
+
+    assert stt.transcribe(np.ones(1600, dtype=np.float32) * 0.1, 8000) == ""

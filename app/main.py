@@ -49,7 +49,7 @@ from app.media.clova_speech import ClovaSpeech
 from app.media.clova_voice import DEFAULT_SPEAKER, ClovaVoice
 from app.media.polly_voice import DEFAULT_VOICE_ID as POLLY_DEFAULT_VOICE_ID
 from app.media.polly_voice import PollyVoice
-from app.media.prosody_voice import DEFAULT_EMOTION, ProsodyVoice
+from app.media.prosody_voice import DEFAULT_EMOTION, DEFAULT_MONTHLY_CHARS, ProsodyVoice
 from app.media.conversation import ConversationResponder
 from app.media.responder import Responder
 from app.media.session import CallSession
@@ -98,6 +98,66 @@ PROSODY_ENV_KEYS = ("PROSODY_API_KEY", "PROSODY_VOICE_NAME")
 TTS_VENDORS = ("prosody", "clova", "polly")
 
 
+def _required_env_keys(vendor: str) -> tuple[str, ...]:
+    """AI 대화를 켜는 데 꼭 있어야 하는 환경 변수. 벤더마다 다르다."""
+    required = BASE_ENV_KEYS
+    if vendor == "clova":
+        required += CLOVA_VOICE_ENV_KEYS
+    elif vendor == "prosody":
+        required += PROSODY_ENV_KEYS
+    return required
+
+
+def log_startup_readiness() -> None:
+    """서버가 켜질 때 AI 대화 설정이 갖춰졌는지 한 번 남긴다.
+
+    **왜 필요했나.** 응답기는 통화 하나마다 만들어지므로 빠진 키 경고가
+    전화가 연결될 때야 찍힌다. 서버를 켜고 로그를 봐도 "문제 없음"과
+    "키가 빠짐"이 구별되지 않아, 2026-10-06에 설정을 확인하려고 매번 전화를
+    걸어야 했다. 전화 없이도 여기서 알 수 있어야 한다.
+
+    응답기를 만들지는 않는다(통화마다 만드는 쪽과 같은 규칙을 쓰되 부수 효과가
+    없다). 서버는 멈추지 않는다 — 키가 없어도 고정 응답으로 돈다.
+    """
+    vendor = os.getenv("TTS_VENDOR", "prosody").strip().lower()
+    if vendor not in TTS_VENDORS:
+        logger.warning(
+            "시작 점검 — 모르는 TTS 벤더 %r. AI 대화는 꺼진 채(고정 응답)로 시작한다."
+            " 가능한 값: %s",
+            vendor,
+            ", ".join(TTS_VENDORS),
+        )
+        return
+
+    missing = [name for name in _required_env_keys(vendor) if not os.getenv(name)]
+    if missing:
+        logger.warning(
+            "시작 점검 — AI 대화가 꺼진 채(고정 응답)로 시작한다. 빠진 값: %s",
+            ", ".join(missing),
+        )
+    else:
+        voice = os.getenv("PROSODY_VOICE_NAME", "") if vendor == "prosody" else ""
+        logger.info(
+            "시작 점검 — AI 대화가 켜진다. TTS %s%s",
+            vendor,
+            f" ({voice})" if voice else "",
+        )
+
+        # 단문 인식은 장문과 **다른 NCP 도메인**이라 시크릿도 다르다. 따로
+        # 넣지 않으면 장문 시크릿으로 불러 401 Invalid secret이 난다.
+        if not os.getenv("CLOVA_SPEECH_SHORT_SECRET"):
+            logger.warning(
+                "시작 점검 — CLOVA_SPEECH_SHORT_SECRET이 없어 단문 인식이 장문 시크릿으로"
+                " 간다. 단문 인식 도메인을 따로 만들었다면 401이 난다"
+            )
+
+    if os.getenv("BATCH_TRANSCRIPTION", "").strip().lower() not in ("1", "true", "on"):
+        logger.info(
+            "시작 점검 — 배치 전사가 꺼져 있다. 부정 표현 20점은 0으로 고정이고"
+            " 실효 만점은 80이다"
+        )
+
+
 def responder_from_env() -> Responder:
     """환경에서 자율 대화 응답기를 만든다. 자격 증명이 없으면 고정 응답.
 
@@ -119,13 +179,7 @@ def responder_from_env() -> Responder:
         )
         return default_responder()
 
-    required = BASE_ENV_KEYS
-    if vendor == "clova":
-        required += CLOVA_VOICE_ENV_KEYS
-    elif vendor == "prosody":
-        required += PROSODY_ENV_KEYS
-
-    missing = [name for name in required if not os.getenv(name)]
+    missing = [name for name in _required_env_keys(vendor) if not os.getenv(name)]
     if missing:
         logger.warning(
             "자격 증명이 모자라 고정 응답으로 간다 — AI는 말하지 않는다."
@@ -150,6 +204,7 @@ def responder_from_env() -> Responder:
             voice_name=os.environ["PROSODY_VOICE_NAME"],
             emotion=emotion,
             speed=prosody_speed,
+            monthly_chars=_int_from_env("PROSODY_MONTHLY_CHARS", DEFAULT_MONTHLY_CHARS),
         )
         voice_label = (
             f"Prosody {voice.voice_name}/{emotion} (speed {prosody_speed})"
@@ -617,6 +672,8 @@ def transcripts_for(pool) -> TranscriptStore:
 
     return PostgresTranscriptStore(pool=pool)
 
+
+log_startup_readiness()
 
 _store, _outcomes, _pool = stores_from_env()
 _transcripts = transcripts_for(_pool)

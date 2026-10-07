@@ -26,7 +26,12 @@ from typing import Protocol
 import httpx
 import numpy as np
 
+from app.media.conversation import TooShortSound
+
 logger = logging.getLogger(__name__)
+
+# 인식기가 소리가 너무 짧을 때 돌려주는 오류 코드(2026-10-06 실호출).
+TOO_SHORT_CODE = "STT007"
 
 # 단문 인식의 상한. 넘겨 보내면 요청이 통째로 실패한다.
 STT_MAX_SECONDS = 60
@@ -51,6 +56,9 @@ class SpeechToText(Protocol):
 
 def _http_post(url: str, *, headers: dict, content: bytes, timeout: float) -> bytes:
     response = httpx.post(url, headers=headers, content=content, timeout=timeout)
+    if response.status_code >= 400 and TOO_SHORT_CODE in response.text:
+        # 오류가 아니라 숨소리 같은 짧은 소리다. 호출부가 조용히 넘긴다.
+        raise TooShortSound(response.text[:200])
     if response.status_code >= 400:
         # 본문에 사업자 오류 코드가 들어 있다. 버리면 로그에 상태 코드만 남아
         # 키가 틀린 건지 오디오가 긴 건지 포맷이 안 맞는 건지 알 수 없다.
@@ -126,6 +134,9 @@ class ClovaSpeech:
                 content=_wav_bytes(audio, sample_rate),
                 timeout=self._timeout,
             )
+        except TooShortSound:
+            # 못 알아들은 게 아니라 소리가 아닌 것이다. 되묻지 않도록 그대로 올린다.
+            raise
         except Exception:
             # 한 턴 못 알아들은 것으로 처리한다. ConversationResponder가
             # 되묻기로 받아 주므로 통화는 이어진다.
