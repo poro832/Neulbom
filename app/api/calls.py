@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import logging
+import re
 
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from app.api.dialer import DialFailed, answer_url_for, dial
+from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url_for
 from app.api.lifecycle import CallLifecycle
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
@@ -20,6 +21,35 @@ from app.telephony.client import Telephony
 from app.telephony.voiceml import connect_stream, say_and_hangup
 
 logger = logging.getLogger(__name__)
+
+# 상태 통보 본문을 이만큼보다 크게 받지 않는다. 바깥에 열린 주소다.
+MAX_STATUS_BODY_BYTES = 8 * 1024
+# 로그에 남기는 값 하나의 최대 길이.
+_MAX_LOGGED_VALUE = 48
+# 전화번호처럼 보이는 값. 로그에는 남기지 않는다.
+_PHONE_LIKE = re.compile(r"^\+?[\d\- ]{8,}$")
+
+
+def describe_status_payload(data: dict) -> str:
+    """상태 통보의 필드 이름과 값을 로그용 한 줄로 만든다.
+
+    **왜 내용을 남기나.** ClawOps 문서에 이 통보의 필드 이름과 상태 값이
+    적혀 있지 않다. 안 받음을 '미응답'으로 세려면 어느 필드의 어느 값이
+    안 받음인지 알아야 하는데, 추측으로 짜면 틀린 채로 조용히 통과한다.
+    그래서 실제로 온 것을 먼저 본다.
+
+    전화번호처럼 보이는 값은 가린다 — 어르신의 번호다. 값은 짧게 자르고
+    줄바꿈은 지운다(바깥에 열린 주소라 로그를 어지럽힐 수 있다).
+    """
+    parts = []
+    for key, value in data.items():
+        text = str(value).replace("\n", " ").replace("\r", " ")
+        if _PHONE_LIKE.match(text):
+            text = "***"
+        if len(text) > _MAX_LOGGED_VALUE:
+            text = text[:_MAX_LOGGED_VALUE] + "…"
+        parts.append(f"{str(key)[:32]}={text}")
+    return ", ".join(parts)
 
 
 class CallRequest(BaseModel):
@@ -39,6 +69,7 @@ def build_app(
     lifecycle = lifecycle or CallLifecycle(store, registry)
     app = FastAPI(title="늘봄 통화 트리거")
     answer_url = answer_url_for(public_base_url)
+    status_callback_url = status_callback_url_for(public_base_url)
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
     stream_url = f"{stream_base_url.rstrip('/')}/v1/stream"
 
@@ -70,6 +101,7 @@ def build_app(
                 telephony=telephony,
                 lifecycle=lifecycle,
                 answer_url=answer_url,
+                status_callback_url=status_callback_url,
             )
         except DialFailed as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -119,5 +151,46 @@ def build_app(
             content=say_and_hangup("오늘도 좋은 하루 보내세요. 안녕히 계세요."),
             media_type="application/xml",
         )
+
+    @app.post("/v1/call-status")
+    async def call_status(request: Request) -> Response:
+        """통화 상태가 바뀔 때 사업자가 부른다. **지금은 로그만 남긴다.**
+
+        어르신이 받지 않으면 VoiceML도 종료 웹훅도 오지 않아서, 이 통보가
+        안 받음을 아는 유일한 길이다. 다만 필드 이름과 값을 문서에서 확인하지
+        못해 상태는 바꾸지 않고 실제로 온 것을 먼저 기록한다. 모양을 본 뒤에
+        안 받음 처리를 붙인다.
+
+        바깥에 열린 주소이므로 본문 크기를 제한하고, 어떤 모양이 와도(폼,
+        JSON, 빈 본문) 오류로 돌려보내지 않는다 — 사업자가 실패로 보고 재전송
+        하면 같은 통보가 반복된다.
+        """
+        body = await request.body()
+        if len(body) > MAX_STATUS_BODY_BYTES:
+            logger.warning("상태 통보가 너무 커서 버린다 bytes=%d", len(body))
+            return Response(status_code=204)
+
+        content_type = request.headers.get("content-type", "")
+        data: dict = {}
+        try:
+            if "json" in content_type:
+                import json
+
+                parsed = json.loads(body or b"{}")
+                data = parsed if isinstance(parsed, dict) else {"body": parsed}
+            else:
+                from urllib.parse import parse_qsl
+
+                data = dict(parse_qsl(body.decode("utf-8", "replace")))
+        except Exception:
+            logger.warning("상태 통보를 읽지 못했다 content-type=%s bytes=%d", content_type, len(body))
+            return Response(status_code=204)
+
+        logger.info(
+            "통화 상태 통보 content-type=%s 필드: %s",
+            content_type.split(";")[0] or "-",
+            describe_status_payload(data),
+        )
+        return Response(status_code=204)
 
     return app

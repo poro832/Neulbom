@@ -30,6 +30,11 @@ def answer_url_for(public_base_url: str) -> str:
     return f"{public_base_url.rstrip('/')}/v1/voiceml"
 
 
+def status_callback_url_for(public_base_url: str) -> str:
+    """사업자가 통화 상태가 바뀔 때 부를 주소. 안 받음을 아는 유일한 길이다."""
+    return f"{public_base_url.rstrip('/')}/v1/call-status"
+
+
 def dial(
     call: CallRecord,
     *,
@@ -37,11 +42,16 @@ def dial(
     telephony: Telephony,
     lifecycle: CallLifecycle,
     answer_url: str,
+    status_callback_url: str | None = None,
 ) -> None:
     """이미 만들어진 통화에 실제로 전화를 건다."""
     phone = store.find_elder(call.elder_id)
     try:
-        sid = telephony.place_call(to=phone, answer_url=answer_url)
+        sid = telephony.place_call(
+            to=phone,
+            answer_url=answer_url,
+            status_callback_url=status_callback_url,
+        )
     except Exception as exc:
         # 발신 자체가 실패했다 — 실제 통화는 나가지 않았다. 안전하게
         # 실패 처리해 재시도를 열어준다.
@@ -72,6 +82,7 @@ def place_scheduled_call(
     telephony: Telephony,
     lifecycle: CallLifecycle,
     answer_url: str,
+    status_callback_url: str | None = None,
 ) -> None:
     """스케줄러가 부르는 자리. 예약 통화를 만들고 건다.
 
@@ -93,4 +104,5 @@ def place_scheduled_call(
         telephony=telephony,
         lifecycle=lifecycle,
         answer_url=answer_url,
+        status_callback_url=status_callback_url,
     )

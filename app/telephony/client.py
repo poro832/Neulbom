@@ -13,13 +13,22 @@ import httpx
 
 CLAWOPS_BASE_URL = "https://api.claw-ops.com"
 
+# 상태 통보를 받을 이벤트(공백으로 구분). 공식 문서의 기본값과 같다.
+STATUS_CALLBACK_EVENTS = "initiated ringing answered completed"
+
 
 class Telephony(Protocol):
-    def place_call(self, *, to: str, answer_url: str) -> str:
+    def place_call(
+        self, *, to: str, answer_url: str, status_callback_url: str | None = None
+    ) -> str:
         """발신을 요청하고 사업자 측 통화 식별자를 돌려준다.
 
         실패하면 예외를 던진다. 미응답은 실패가 아니다 — 그건 통화가
         시작된 뒤에 웹훅으로 알려진다.
+
+        status_callback_url은 통화 상태가 바뀔 때마다 사업자가 부르는 주소다.
+        **안 받음을 아는 유일한 길이다** — 어르신이 받지 않으면 answer_url
+        (VoiceML)은 한 번도 불리지 않고, 그 안에 든 종료 웹훅도 오지 않는다.
         """
         ...
 
@@ -29,13 +38,18 @@ class FakeTelephony:
 
     def __init__(self, fail_with: Exception | None = None) -> None:
         self.placed: list[tuple[str, str]] = []
+        # placed의 모양을 바꾸지 않으려고 따로 둔다(기존 테스트가 튜플을 비교한다).
+        self.status_callbacks: list[str | None] = []
         self._fail_with = fail_with
         self._counter = itertools.count(1)
 
-    def place_call(self, *, to: str, answer_url: str) -> str:
+    def place_call(
+        self, *, to: str, answer_url: str, status_callback_url: str | None = None
+    ) -> str:
         if self._fail_with is not None:
             raise self._fail_with
         self.placed.append((to, answer_url))
+        self.status_callbacks.append(status_callback_url)
         return f"CA{next(self._counter):08d}"
 
 
@@ -56,17 +70,26 @@ class ClawOpsTelephony:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
 
-    def place_call(self, *, to: str, answer_url: str) -> str:
+    def place_call(
+        self, *, to: str, answer_url: str, status_callback_url: str | None = None
+    ) -> str:
+        # ClawOps는 번호를 숫자만으로 저장하고 응답한다(07052767846).
+        # 하이픈을 그대로 보내도 되는지 문서에 없어서, 보내는 쪽에서 맞춘다.
+        data = {
+            "To": _digits(to),
+            "From": _digits(self._from_number),
+            "Url": answer_url,
+        }
+        if status_callback_url:
+            data["StatusCallback"] = status_callback_url
+            # 문서의 기본값과 같지만 **명시한다** — 기본값이 바뀌는 날 안 받음
+            # 통보가 조용히 끊기면 미응답 이력(20점)이 다시 죽는다.
+            data["StatusCallbackEvent"] = STATUS_CALLBACK_EVENTS
+
         response = httpx.post(
             f"{self._base_url}/v1/accounts/{self._account_sid}/calls",
             headers={"Authorization": f"Bearer {self._api_key}"},
-            # ClawOps는 번호를 숫자만으로 저장하고 응답한다(07052767846).
-            # 하이픈을 그대로 보내도 되는지 문서에 없어서, 보내는 쪽에서 맞춘다.
-            data={
-                "To": _digits(to),
-                "From": _digits(self._from_number),
-                "Url": answer_url,
-            },
+            data=data,
             timeout=self._timeout,
         )
         response.raise_for_status()

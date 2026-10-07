@@ -38,7 +38,7 @@ from app.analysis.outcome import CallOutcome
 from app.api import calls
 from app.api.db import check, connect, database_url
 from app.archiver import RecordingArchiver, archiver_from_env
-from app.api.dialer import answer_url_for, place_scheduled_call
+from app.api.dialer import answer_url_for, place_scheduled_call, status_callback_url_for
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
@@ -399,6 +399,7 @@ def build_server(
                 telephony=telephony,
                 lifecycle=lifecycle,
                 answer_url=answer_url_for(public_base_url),
+                status_callback_url=status_callback_url_for(public_base_url),
             ),
         )
         scheduler.start()
