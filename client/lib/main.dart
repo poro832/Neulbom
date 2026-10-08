@@ -8,9 +8,14 @@ import 'firebase_options.dart';
 import 'screens/elder/emergency_screen.dart';
 import 'screens/elder/history_screen.dart';
 import 'screens/elder/main_screen.dart';
+import 'screens/guardian/conversation_history_screen.dart';
+import 'screens/guardian/elderly_list_screen.dart';
+import 'screens/guardian/guardian_account_screen.dart';
 import 'screens/guardian/guardian_home_screen.dart';
+import 'screens/guardian/health_alerts_screen.dart';
 import 'services/fcm_service.dart';
 import 'theme/app_theme.dart';
+import 'widgets/sample_data_banner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -89,6 +94,12 @@ class _RoleRouterState extends State<RoleRouter> {
     });
   }
 
+  Future<void> _resetRole() async {
+    await RoleStore.clear();
+    if (!mounted) return;
+    setState(() => _role = null);
+  }
+
   Future<void> _choose(AppRole role) async {
     await RoleStore.write(role);
     if (!mounted) return;
@@ -105,7 +116,7 @@ class _RoleRouterState extends State<RoleRouter> {
     return switch (_role) {
       null => RoleGate(onSelected: _choose),
       AppRole.elder => const ElderShell(),
-      AppRole.guardian => const GuardianShell(),
+      AppRole.guardian => GuardianShell(onChangeRole: _resetRole),
     };
   }
 }
@@ -121,11 +132,7 @@ class ElderShell extends StatefulWidget {
 class _ElderShellState extends State<ElderShell> {
   int _index = 0;
 
-  static const _screens = [
-    MainScreen(),
-    HistoryScreen(),
-    EmergencyScreen(),
-  ];
+  static const _screens = [MainScreen(), HistoryScreen(), EmergencyScreen()];
 
   @override
   Widget build(BuildContext context) {
@@ -153,11 +160,63 @@ class _ElderShellState extends State<ElderShell> {
 }
 
 /// 보호자용. 지금은 홈 하나지만 알림·설정이 붙을 자리를 남겨 둔다.
-class GuardianShell extends StatelessWidget {
-  const GuardianShell({super.key});
+/// 보호자 화면 — 탭 다섯 개.
+///
+/// 홈만 실제 서버에 연결돼 있다. 나머지는 팀원이 만든 화면으로, 아직 화면 안의
+/// 예시 값을 보여 주므로 위에 "예시 화면" 띠를 단다.
+class GuardianShell extends StatefulWidget {
+  const GuardianShell({super.key, this.onChangeRole});
+
+  final VoidCallback? onChangeRole;
+
+  @override
+  State<GuardianShell> createState() => _GuardianShellState();
+}
+
+class _GuardianShellState extends State<GuardianShell> {
+  int _index = 0;
 
   @override
   Widget build(BuildContext context) {
-    return const GuardianHomeScreen();
+    final screens = <Widget>[
+      const GuardianHomeScreen(),
+      const ConversationHistoryScreen(),
+      const HealthAlertsScreen(),
+      const ElderlyListScreen(),
+      GuardianAccountScreen(onChangeRole: widget.onChangeRole),
+    ];
+    return Scaffold(
+      body: Column(
+        children: [
+          if (_index != 0) const SampleDataBanner(),
+          Expanded(
+            // 띠가 상태 표시줄 자리를 쓰므로, 그 아래 화면은 위쪽 여백을 한 번 더
+            // 두지 않는다.
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: _index != 0,
+              child: IndexedStack(index: _index, children: screens),
+            ),
+          ),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _index,
+        onTap: (index) => setState(() => _index = index),
+        backgroundColor: eCard,
+        selectedItemColor: eAccent,
+        unselectedItemColor: eInkSoft,
+        type: BottomNavigationBarType.fixed,
+        selectedFontSize: 13,
+        unselectedFontSize: 13,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.home), label: '홈'),
+          BottomNavigationBarItem(icon: Icon(Icons.forum), label: '대화'),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: '알림'),
+          BottomNavigationBarItem(icon: Icon(Icons.people), label: '어르신'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: '계정'),
+        ],
+      ),
+    );
   }
 }
