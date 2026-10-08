@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../services/api_service.dart';
-import '../../theme/app_theme.dart';
+import '../services/api_service.dart';
 
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
@@ -67,18 +72,33 @@ class _AiChatScreenState extends State<AiChatScreen> {
       appBar: AppBar(
         backgroundColor: eBg,
         elevation: 0,
-        leading: IconButton(
-          icon: Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white,
-              border: Border.all(color: eLine, width: 1),
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: IconButton(
+            icon: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+                border: Border.all(color: eLine, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: eInk.withOpacity(0.1),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.chevron_left, color: eInk, size: 24),
             ),
-            child: const Icon(Icons.chevron_left, color: eInk, size: 18),
+            onPressed: () => Navigator.pop(context),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: 44,
+              minHeight: 44,
+            ),
           ),
-          onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           'AI 채팅',
@@ -95,38 +115,39 @@ class _AiChatScreenState extends State<AiChatScreen> {
           // 메시지 리스트
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               itemCount: _messages.length,
               reverse: true,
               itemBuilder: (context, index) {
                 final message = _messages[_messages.length - 1 - index];
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Align(
                     alignment: message.isUserMessage
                         ? Alignment.centerRight
                         : Alignment.centerLeft,
                     child: Container(
                       constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.78,
+                        maxWidth: MediaQuery.of(context).size.width * 0.80,
                       ),
                       decoration: BoxDecoration(
                         color: message.isUserMessage ? eAccent : eCard,
                         border: message.isUserMessage
                             ? null
-                            : Border.all(color: eLine, width: 1),
-                        borderRadius: BorderRadius.circular(16),
+                            : Border.all(color: eLine, width: 2),
+                        borderRadius: BorderRadius.circular(22),
                       ),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 17,
-                        vertical: 14,
+                        horizontal: 24,
+                        vertical: 20,
                       ),
                       child: Text(
                         message.text,
                         style: TextStyle(
-                          fontSize: 16.5,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w500,
                           color: message.isUserMessage ? Colors.white : eInk,
-                          height: 1.55,
+                          height: 1.65,
                         ),
                       ),
                     ),
@@ -147,7 +168,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
           // 입력 필드
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             color: eBg,
             child: Row(
               children: [
@@ -155,40 +176,51 @@ class _AiChatScreenState extends State<AiChatScreen> {
                   child: TextField(
                     controller: _messageController,
                     onSubmitted: (_) => _sendMessage(),
-                    style: const TextStyle(fontSize: 16),
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w500,
+                    ),
                     decoration: InputDecoration(
                       hintText: '메시지를 입력하세요',
                       hintStyle: TextStyle(
-                        fontSize: 16,
+                        fontSize: 20,
                         color: eInkSoft,
+                        fontWeight: FontWeight.w400,
                       ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(100),
-                        borderSide: const BorderSide(color: eLine),
+                        borderSide: const BorderSide(color: eLine, width: 2),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 14,
+                        horizontal: 22,
+                        vertical: 18,
                       ),
                       filled: true,
                       fillColor: Colors.white,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 GestureDetector(
                   onTap: _isLoading ? null : _sendMessage,
                   child: Container(
-                    width: 44,
-                    height: 44,
+                    width: 56,
+                    height: 56,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: eAccent,
+                      boxShadow: [
+                        BoxShadow(
+                          color: eAccent.withOpacity(0.3),
+                          blurRadius: 8,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
                     child: Icon(
                       Icons.send,
                       color: Colors.white,
-                      size: 18,
+                      size: 24,
                     ),
                   ),
                 ),

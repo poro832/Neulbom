@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
+import '../services/auth_service.dart';
+import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
-class GuardianAccountScreen extends StatefulWidget {
-  const GuardianAccountScreen({super.key, this.onChangeRole});
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
-  /// 처음 화면으로 돌아가 역할을 다시 고른다. 로그인이 없는 앱이라
-  /// 로그아웃 대신 이것을 둔다.
-  final VoidCallback? onChangeRole;
+class GuardianAccountScreen extends StatefulWidget {
+  const GuardianAccountScreen({super.key});
 
   @override
   State<GuardianAccountScreen> createState() => _GuardianAccountScreenState();
@@ -29,12 +33,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   }
 
   Future<void> _loadGuardianInfo() async {
-    // 로그인이 없다 — 보호자 정보는 아직 서버에 없어 예시 값이다.
-    final info = <String, dynamic>{
-      'name': '보호자',
-      'email': '-',
-      'connectionCode': '-',
-    };
+    final info = await AuthService.getUserInfo();
     setState(() {
       _guardianInfo = info;
       _isLoading = false;
@@ -48,7 +47,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
         return AlertDialog(
           backgroundColor: eCard,
           title: Text(
-            '역할 바꾸기',
+            '로그아웃',
             style: GoogleFonts.notoSansKr(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -56,7 +55,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             ),
           ),
           content: Text(
-            '처음 화면으로 돌아가 역할을 다시 고릅니다.',
+            '로그아웃 하시겠습니까?',
             style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
           ),
           actions: [
@@ -73,11 +72,17 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             ),
             TextButton(
               onPressed: () async {
-                Navigator.pop(context);
-                widget.onChangeRole?.call();
+                await AuthService.logout();
+                if (!mounted) return;
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const RoleSelectionScreen(),
+                  ),
+                );
               },
               child: Text(
-                '역할 바꾸기',
+                '로그아웃',
                 style: GoogleFonts.notoSansKr(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -117,12 +122,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -400,8 +403,72 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               ),
               const SizedBox(height: 28),
 
-              // 비밀번호 변경은 두지 않는다 — 이 앱에는 로그인이 없다.
-              // 역할 바꾸기 버튼
+              // 계정 보안
+              Text(
+                '계정 보안',
+                style: GoogleFonts.notoSerifKr(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: eInk,
+                ),
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('비밀번호 변경 기능은 추후 제공됩니다.'),
+                      backgroundColor: eAccent,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: eCard,
+                    border: Border.all(color: eLine),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.lock_outline_rounded,
+                            color: eAccent,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '비밀번호 변경',
+                                style: GoogleFonts.notoSansKr(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: eInk,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                '계정 보안을 위해 비밀번호를 변경하세요',
+                                style: TextStyle(fontSize: 12, color: eInkSoft),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const Icon(Icons.chevron_right_rounded, color: eInkSoft),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+
+              // 로그아웃 버튼
               SizedBox(
                 width: double.infinity,
                 height: 56,
@@ -409,7 +476,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                   onPressed: _logout,
                   icon: const Icon(Icons.logout_rounded, size: 20),
                   label: Text(
-                    '역할 바꾸기',
+                    '로그아웃',
                     style: GoogleFonts.notoSansKr(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,

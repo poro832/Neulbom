@@ -1,222 +1,129 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:firebase_core/firebase_core.dart';
-
-import 'auth/role.dart';
-import 'auth/role_gate.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
-import 'screens/elder/emergency_screen.dart';
-import 'screens/elder/history_screen.dart';
-import 'screens/elder/main_screen.dart';
-import 'screens/guardian/conversation_history_screen.dart';
-import 'screens/guardian/elderly_list_screen.dart';
-import 'screens/guardian/guardian_account_screen.dart';
-import 'screens/guardian/guardian_home_screen.dart';
-import 'screens/guardian/health_alerts_screen.dart';
 import 'services/fcm_service.dart';
-import 'theme/app_theme.dart';
-import 'widgets/sample_data_banner.dart';
+import 'services/auth_service.dart';
+import 'screens/role_selection_screen.dart';
+import 'screens/elderly_login_screen.dart';
+import 'screens/elderly_home_page.dart';
+import 'screens/guardian_home_page.dart';
+
+// 어르신 앱 색상
+const Color eBg = Color(0xFFFBF6ED);
+const Color eBg2 = Color(0xFFF3E7D3);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
+const Color eAccentSoft = Color(0xFFFBE4D3);
+const Color eBrass = Color(0xFFB78A4A);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Firebase 설정이 아직 이 프로젝트 것으로 바뀌지 않았어도 앱은 떠야 한다.
-  // 알림만 빠지고 나머지 화면은 그대로 개발할 수 있다.
+  // Firebase 설정이 이 프로젝트 것이 아니어도 앱은 떠야 한다. 알림만 빠진다.
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
+    // FCM 초기화
     await FcmService.init();
     FcmService.listenToTokenRefresh();
   } catch (error) {
     debugPrint('Firebase 초기화를 건너뜁니다: $error');
   }
 
-  runApp(const AnsimCareApp());
+  runApp(const ElderCareApp());
 }
 
-class AnsimCareApp extends StatelessWidget {
-  const AnsimCareApp({super.key});
+class ElderCareApp extends StatefulWidget {
+  const ElderCareApp({super.key});
 
-  /// 어르신이 쓰는 앱이라 날짜 선택기·텍스트 선택 메뉴 같은 Material 기본
-  /// 문자열까지 한국어여야 한다. 기기 언어가 영어여도 한국어로 떨어지도록
-  /// 지원 로케일을 하나만 둔다.
-  static const List<Locale> supportedLocales = [Locale('ko', 'KR')];
+  @override
+  State<ElderCareApp> createState() => _ElderCareAppState();
+}
 
-  static const List<LocalizationsDelegate<dynamic>> localizationsDelegates = [
-    GlobalMaterialLocalizations.delegate,
-    GlobalWidgetsLocalizations.delegate,
-    GlobalCupertinoLocalizations.delegate,
-  ];
+class _ElderCareAppState extends State<ElderCareApp> {
+  late Future<Widget> _homeScreen;
+
+  @override
+  void initState() {
+    super.initState();
+    _homeScreen = _determineHomeScreen();
+  }
+
+  Future<Widget> _determineHomeScreen() async {
+    final isLoggedIn = await AuthService.isLoggedIn();
+    final userType = await AuthService.getUserType();
+
+    if (isLoggedIn && userType != null) {
+      if (userType == 'elderly') {
+        return const ElderlyHomePage();
+      } else if (userType == 'guardian') {
+        return const GuardianHomePage();
+      }
+    }
+
+    // 로그인되지 않았으면 역할 선택 화면으로
+    return const RoleSelectionScreen();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '늘봄',
-      theme: buildAppTheme(context),
-      locale: supportedLocales.first,
-      supportedLocales: supportedLocales,
-      localizationsDelegates: localizationsDelegates,
-      home: const RoleRouter(),
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
-
-/// 한 앱을 어르신과 보호자가 함께 쓴다.
-///
-/// 첫 실행에서 역할을 한 번 고르면 기기에 저장되고, 다음부터는 곧바로
-/// 해당 화면으로 들어간다. 정식 계정 시스템은 범위 밖이므로(설계 2장)
-/// 로그인 대신 이 한 단계만 둔다.
-class RoleRouter extends StatefulWidget {
-  const RoleRouter({super.key});
-
-  @override
-  State<RoleRouter> createState() => _RoleRouterState();
-}
-
-class _RoleRouterState extends State<RoleRouter> {
-  AppRole? _role;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _restore();
-  }
-
-  Future<void> _restore() async {
-    final saved = await RoleStore.read();
-    if (!mounted) return;
-    setState(() {
-      _role = saved;
-      _loading = false;
-    });
-  }
-
-  Future<void> _resetRole() async {
-    await RoleStore.clear();
-    if (!mounted) return;
-    setState(() => _role = null);
-  }
-
-  Future<void> _choose(AppRole role) async {
-    await RoleStore.write(role);
-    if (!mounted) return;
-    setState(() => _role = role);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: eAccent)),
-      );
-    }
-    return switch (_role) {
-      null => RoleGate(onSelected: _choose),
-      AppRole.elder => const ElderShell(),
-      AppRole.guardian => GuardianShell(onChangeRole: _resetRole),
-    };
-  }
-}
-
-/// 어르신용. 이전 프로젝트에서 가져온 화면들을 그대로 쓴다.
-class ElderShell extends StatefulWidget {
-  const ElderShell({super.key});
-
-  @override
-  State<ElderShell> createState() => _ElderShellState();
-}
-
-class _ElderShellState extends State<ElderShell> {
-  int _index = 0;
-
-  static const _screens = [MainScreen(), HistoryScreen(), EmergencyScreen()];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_index],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (index) => setState(() => _index = index),
-        backgroundColor: eCard,
-        selectedItemColor: eAccent,
-        unselectedItemColor: eInkSoft,
-        type: BottomNavigationBarType.fixed,
-        // 어르신 화면은 글자를 키운다.
-        selectedFontSize: 15,
-        unselectedFontSize: 15,
-        iconSize: 28,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: '홈'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: '통화기록'),
-          BottomNavigationBarItem(icon: Icon(Icons.emergency), label: '비상연락'),
-        ],
-      ),
-    );
-  }
-}
-
-/// 보호자용. 지금은 홈 하나지만 알림·설정이 붙을 자리를 남겨 둔다.
-/// 보호자 화면 — 탭 다섯 개.
-///
-/// 홈만 실제 서버에 연결돼 있다. 나머지는 팀원이 만든 화면으로, 아직 화면 안의
-/// 예시 값을 보여 주므로 위에 "예시 화면" 띠를 단다.
-class GuardianShell extends StatefulWidget {
-  const GuardianShell({super.key, this.onChangeRole});
-
-  final VoidCallback? onChangeRole;
-
-  @override
-  State<GuardianShell> createState() => _GuardianShellState();
-}
-
-class _GuardianShellState extends State<GuardianShell> {
-  int _index = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    final screens = <Widget>[
-      const GuardianHomeScreen(),
-      const ConversationHistoryScreen(),
-      const HealthAlertsScreen(),
-      const ElderlyListScreen(),
-      GuardianAccountScreen(onChangeRole: widget.onChangeRole),
-    ];
-    return Scaffold(
-      body: Column(
-        children: [
-          if (_index != 0) const SampleDataBanner(),
-          Expanded(
-            // 띠가 상태 표시줄 자리를 쓰므로, 그 아래 화면은 위쪽 여백을 한 번 더
-            // 두지 않는다.
-            child: MediaQuery.removePadding(
-              context: context,
-              removeTop: _index != 0,
-              child: IndexedStack(index: _index, children: screens),
-            ),
+      theme: ThemeData(
+        useMaterial3: true,
+        scaffoldBackgroundColor: eBg,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: eAccent,
+          brightness: Brightness.light,
+        ),
+        textTheme: GoogleFonts.notoSansKrTextTheme(
+          Theme.of(context).textTheme,
+        ).copyWith(
+          headlineSmall: GoogleFonts.notoSerifKr(
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+            color: eInk,
           ),
-        ],
+          titleLarge: GoogleFonts.notoSerifKr(
+            fontSize: 21,
+            fontWeight: FontWeight.w700,
+            color: eInk,
+          ),
+        ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (index) => setState(() => _index = index),
-        backgroundColor: eCard,
-        selectedItemColor: eAccent,
-        unselectedItemColor: eInkSoft,
-        type: BottomNavigationBarType.fixed,
-        selectedFontSize: 13,
-        unselectedFontSize: 13,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: '홈'),
-          BottomNavigationBarItem(icon: Icon(Icons.forum), label: '대화'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: '알림'),
-          BottomNavigationBarItem(icon: Icon(Icons.people), label: '어르신'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: '계정'),
-        ],
+      home: FutureBuilder<Widget>(
+        future: _homeScreen,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.done) {
+            return snapshot.data ?? const ElderlyLoginScreen();
+          }
+          return Scaffold(
+            backgroundColor: eBg,
+            body: Center(
+              child: CircularProgressIndicator(
+                valueColor: const AlwaysStoppedAnimation<Color>(eAccent),
+              ),
+            ),
+          );
+        },
       ),
+      debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('ko', 'KR'),
     );
   }
 }

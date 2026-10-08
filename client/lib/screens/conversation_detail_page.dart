@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
+const Color eAccentSoft = Color(0xFFFBE4D3);
 
 class ConversationDetailPage extends StatefulWidget {
   final int elderlyId;
@@ -93,30 +100,31 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
       appBar: AppBar(
         backgroundColor: eBg,
         elevation: 0,
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    border: Border.all(color: eLine, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: eInk.withOpacity(0.1),
-                        blurRadius: 6,
-                        spreadRadius: 1,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.chevron_left, color: eInk, size: 24),
+        leading: IconButton(
+          icon: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              border: Border.all(color: eLine, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: eInk.withOpacity(0.1),
+                  blurRadius: 6,
+                  spreadRadius: 1,
                 ),
-                onPressed: () => Navigator.pop(context),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              )
-            : null,
+              ],
+            ),
+            child: const Icon(Icons.chevron_left, color: eInk, size: 24),
+          ),
+          onPressed: () => Navigator.pop(context),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(
+            minWidth: 44,
+            minHeight: 44,
+          ),
+        ),
         title: Text(
           '${widget.elderlyName} - 상세 대화기록',
           style: GoogleFonts.notoSerifKr(
@@ -199,116 +207,114 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
 
                 // 대화 목록
                 ...selectedConversations
-                    .map(
-                      (conv) => Padding(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: eCard,
-                            border: Border.all(color: eLine),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // 시간
-                              Text(
-                                conv['time'] as String,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: eInkSoft,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-
-                              // 어르신 발언
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  border: Border.all(color: eLine),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  '어르신: ${conv['elderly']}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: eInk,
-                                    fontWeight: FontWeight.w500,
+                    .map((conv) => Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: eCard,
+                              border: Border.all(color: eLine),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 시간
+                                Text(
+                                  conv['time'] as String,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: eInkSoft,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
+                                const SizedBox(height: 10),
 
-                              // AI 응답
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: eAccentSoft,
-                                  border: Border.all(color: eLine),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'AI 친구: ${conv['ai']}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF8B4A2A),
-                                    fontWeight: FontWeight.w500,
+                                // 어르신 발언
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    border: Border.all(color: eLine),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '어르신: ${conv['elderly']}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: eInk,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 12),
+                                const SizedBox(height: 8),
 
-                              // 음성 다운로드 버튼
-                              if (conv['hasAudio'] as bool)
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 10,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: eAccent.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            8,
+                                // AI 응답
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: eAccentSoft,
+                                    border: Border.all(color: eLine),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'AI 친구: ${conv['ai']}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF8B4A2A),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+
+                                // 음성 다운로드 버튼
+                                if (conv['hasAudio'] as bool)
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 10,
                                           ),
-                                          border: Border.all(
-                                            color: eAccent.withOpacity(0.3),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            Icon(
-                                              Icons.download_rounded,
-                                              color: eAccent,
-                                              size: 18,
+                                          decoration: BoxDecoration(
+                                            color: eAccent.withOpacity(0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            border: Border.all(
+                                              color: eAccent.withOpacity(0.3),
                                             ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '음성 다운로드 (${conv['duration']})',
-                                              style: GoogleFonts.notoSansKr(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
+                                          ),
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                Icons.download_rounded,
                                                 color: eAccent,
+                                                size: 18,
                                               ),
-                                            ),
-                                          ],
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '음성 다운로드 (${conv['duration']})',
+                                                style: GoogleFonts.notoSansKr(
+                                                  fontSize: 12,
+                                                  fontWeight:
+                                                      FontWeight.w600,
+                                                  color: eAccent,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                            ],
+                                    ],
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ),
-                    )
+                        ))
                     .toList(),
 
                 if (selectedConversations.isEmpty)
@@ -317,7 +323,10 @@ class _ConversationDetailPageState extends State<ConversationDetailPage> {
                       padding: const EdgeInsets.symmetric(vertical: 40),
                       child: Text(
                         '선택한 날짜에 대화 기록이 없습니다.',
-                        style: TextStyle(fontSize: 14, color: eInkSoft),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: eInkSoft,
+                        ),
                       ),
                     ),
                   ),

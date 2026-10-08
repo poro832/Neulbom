@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
 import 'conversation_detail_page.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
 class ElderlyDetailScreen extends StatefulWidget {
   final int elderlyId;
@@ -225,18 +231,12 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final monthStart = DateTime(
-              visibleMonth.year,
-              visibleMonth.month,
-              1,
-            );
+            final monthStart = DateTime(visibleMonth.year, visibleMonth.month, 1);
             final gridStart = _weekStart(monthStart);
-            final canGoPrev = visibleMonth.isAfter(
-              DateTime(firstDate.year, firstDate.month),
-            );
-            final canGoNext = visibleMonth.isBefore(
-              DateTime(today.year, today.month),
-            );
+            final canGoPrev =
+                visibleMonth.isAfter(DateTime(firstDate.year, firstDate.month));
+            final canGoNext =
+                visibleMonth.isBefore(DateTime(today.year, today.month));
 
             return Dialog(
               backgroundColor: eCard,
@@ -433,8 +433,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     '2024-12-15': {
       'summary':
           '오늘 오전 9시 30분부터 저녁 6시 45분까지 약 9시간 동안 총 3회의 대화가 이루어졌습니다. 아침에는 날씨가 좋다며 긍정적인 감정으로 하루를 시작했고, 낮 시간에는 손주를 만나고 싶은 마음을 표현했습니다. 저녁에는 AI 친구와의 통화로 활발한 상호작용을 보였습니다.',
-      'changeIndex': '2.4/10',
-      'changeStatus': '정상',
+      'depressionIndex': '2.4/10',
+      'depressionStatus': '정상',
       'conversationCount': '3회',
       'conversationStatus': '활발함',
       'activityStatus': '정상',
@@ -465,8 +465,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     '2024-12-14': {
       'summary':
           '어제는 오전 10시부터 오후 4시까지 약 6시간 동안 2회의 대화가 있었습니다. 아침에는 다소 조용한 모습을 보였으나, 오후에 활동적인 대화를 나누며 기분이 좋아졌습니다. 수면이 충분했으며 활동량도 적절한 상태입니다.',
-      'changeIndex': '3.1/10',
-      'changeStatus': '정상',
+      'depressionIndex': '3.1/10',
+      'depressionStatus': '정상',
       'conversationCount': '2회',
       'conversationStatus': '정상',
       'activityStatus': '정상',
@@ -491,8 +491,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     '2024-12-13': {
       'summary':
           '2일 전에는 오전 9시부터 저녁 8시까지 총 4회의 대화가 이루어졌습니다. 하루 종일 활발한 상호작용을 보였으며, 특히 손자와의 대화 시간이 길었습니다. 전반적으로 긍정적인 감정 상태를 유지했습니다.',
-      'changeIndex': '2.0/10',
-      'changeStatus': '정상',
+      'depressionIndex': '2.0/10',
+      'depressionStatus': '정상',
       'conversationCount': '4회',
       'conversationStatus': '매우 활발함',
       'activityStatus': '활동적',
@@ -569,12 +569,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -599,7 +597,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               children: [
                 Expanded(
                   child: _buildStatCard(
-                    title: '평소와 다른 정도',
+                    title: '우울 수치',
                     value: isWeekly ? '2.8/10' : '2.6/10',
                     subtitle: '정상',
                     color: const Color(0xFF4CAF50),
@@ -679,12 +677,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -725,9 +721,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                 children: [
                   Expanded(
                     child: _buildStatCard(
-                      title: '평소와 다른 정도',
-                      value: data['changeIndex'],
-                      subtitle: data['changeStatus'],
+                      title: '우울 수치',
+                      value: data['depressionIndex'],
+                      subtitle: data['depressionStatus'],
                       color: const Color(0xFF4CAF50),
                     ),
                   ),
@@ -871,11 +867,11 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               const SizedBox(height: 12),
               Container(
                 decoration: BoxDecoration(
-                  color: data['changeStatus'] == '정상'
+                  color: data['depressionStatus'] == '정상'
                       ? const Color(0xFF4CAF50).withOpacity(0.1)
                       : const Color(0xFFFFA726).withOpacity(0.1),
                   border: Border.all(
-                    color: data['changeStatus'] == '정상'
+                    color: data['depressionStatus'] == '정상'
                         ? const Color(0xFF4CAF50).withOpacity(0.3)
                         : const Color(0xFFFFA726).withOpacity(0.3),
                   ),
@@ -888,21 +884,21 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                     Row(
                       children: [
                         Icon(
-                          data['changeStatus'] == '정상'
+                          data['depressionStatus'] == '정상'
                               ? Icons.check_circle_outline_rounded
                               : Icons.warning_amber_rounded,
-                          color: data['changeStatus'] == '정상'
+                          color: data['depressionStatus'] == '정상'
                               ? const Color(0xFF4CAF50)
                               : const Color(0xFFFFA726),
                           size: 24,
                         ),
                         const SizedBox(width: 12),
                         Text(
-                          data['changeStatus'] == '정상' ? '정상 상태' : '주의 필요',
+                          data['depressionStatus'] == '정상' ? '정상 상태' : '주의 필요',
                           style: GoogleFonts.notoSansKr(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: data['changeStatus'] == '정상'
+                            color: data['depressionStatus'] == '정상'
                                 ? const Color(0xFF4CAF50)
                                 : const Color(0xFFFFA726),
                           ),
@@ -911,9 +907,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      data['changeStatus'] == '정상'
+                      data['depressionStatus'] == '정상'
                           ? '• 대화 활동이 활발함\n• 수면 시간이 충분함\n• 특이사항 없음'
-                          : '• 평소보다 말수 감소\n• 대답이 느려짐\n• 보호자 연락 권장',
+                          : '• 우울 수치 증가\n• 활동량 감소 주의\n• 보호자 연락 권장',
                       style: const TextStyle(
                         fontSize: 14,
                         color: eInkSoft,

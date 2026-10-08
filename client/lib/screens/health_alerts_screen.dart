@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
 class MedicationAlert {
   final String elder;
@@ -107,12 +113,10 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
         bottom: TabBar(
           controller: _tabController,
           labelColor: eAccent,
@@ -316,24 +320,25 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
 
   Widget _buildHealthAlertTab() {
     final alerts = <HealthAlert>[
-      // 평소와 다름 - High severity
+      // 우울의심 (Depression Suspicion) - High severity
       HealthAlert(
         alertId: '1',
-        type: '평소와 다름',
+        type: '우울의심',
         elder: '이할아버지',
-        message: '최근 3일간 통화에서 말수가 줄고 대답이 느려졌습니다. 평소와 다른 모습이니 가족이 한 번 연락해 보세요.',
+        message:
+            '최근 3일간 대화 감정 분석 결과 부정적인 감정이 증가하고 있습니다. 우울증의 징후가 보입니다. 가족과의 대화를 늘리고 주의 깊은 관찰이 필요합니다.',
         time: '오늘 11:30',
         severity: 'high',
-        action: '연락해 보기',
+        action: '심리상담사 연결',
       ),
       HealthAlert(
         alertId: '2',
-        type: '평소와 다름',
+        type: '우울의심',
         elder: '김할머니',
-        message: '이번 주 통화에서 부정적인 표현이 평소보다 늘었습니다. 안부를 한 번 확인해 보세요.',
+        message: '이번 주 통화 중 우울 지수가 평소보다 높아졌습니다. 건강한 활동과 사회적 상호작용을 권장합니다.',
         time: '어제 15:45',
         severity: 'high',
-        action: '안부 확인',
+        action: '즉시 확인',
       ),
       // 미응답 (No Response) - Medium severity
       HealthAlert(
@@ -380,8 +385,8 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
         : alerts.where((alert) => alert.elder == widget.elderName).toList();
 
     // 타입별로 그룹화
-    final changeAlerts = filteredAlerts
-        .where((a) => a.type == '평소와 다름')
+    final depressionAlerts = filteredAlerts
+        .where((a) => a.type == '우울의심')
         .toList();
     final noResponseAlerts = filteredAlerts
         .where((a) => a.type == '미응답')
@@ -396,12 +401,12 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 평소와 다름 섹션
+            // 우울의심 섹션
             _buildAlertSection(
-              title: '평소와 다름',
-              icon: Icons.trending_down_rounded,
+              title: '우울의심',
+              icon: Icons.sentiment_very_dissatisfied_rounded,
               color: const Color(0xFFF44336),
-              alerts: changeAlerts,
+              alerts: depressionAlerts,
             ),
             const SizedBox(height: 20),
 

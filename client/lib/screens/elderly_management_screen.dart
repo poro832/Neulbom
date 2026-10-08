@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
+const Color eAccentSoft = Color(0xFFFBE4D3);
 
 class ElderlyManagementScreen extends StatefulWidget {
   const ElderlyManagementScreen({super.key});
@@ -21,9 +28,21 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
       'age': 78,
       'status': '정상',
       'contacts': [
-        {'name': '김보호 (딸)', 'relation': '보호자', 'number': '010-1234-5678'},
-        {'name': '이효준 (아들)', 'relation': '보호자', 'number': '010-2345-6789'},
-        {'name': '박은숙 (며느리)', 'relation': '보호자', 'number': '010-3456-7890'},
+        {
+          'name': '김보호 (딸)',
+          'relation': '보호자',
+          'number': '010-1234-5678',
+        },
+        {
+          'name': '이효준 (아들)',
+          'relation': '보호자',
+          'number': '010-2345-6789',
+        },
+        {
+          'name': '박은숙 (며느리)',
+          'relation': '보호자',
+          'number': '010-3456-7890',
+        },
       ],
     },
     {
@@ -32,8 +51,16 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
       'age': 82,
       'status': '주의',
       'contacts': [
-        {'name': '이순신 (아들)', 'relation': '보호자', 'number': '010-4567-8901'},
-        {'name': '정욕심 (딸)', 'relation': '보호자', 'number': '010-5678-9012'},
+        {
+          'name': '이순신 (아들)',
+          'relation': '보호자',
+          'number': '010-4567-8901',
+        },
+        {
+          'name': '정욕심 (딸)',
+          'relation': '보호자',
+          'number': '010-5678-9012',
+        },
       ],
     },
   ];
@@ -161,7 +188,10 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
         ),
         content: Text(
           '${_elders[index]['name']}을(를) 정말로 삭제하시겠습니까?',
-          style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
+          style: GoogleFonts.notoSansKr(
+            fontSize: 14,
+            color: eInkSoft,
+          ),
         ),
         actions: [
           TextButton(
@@ -225,7 +255,10 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Text(
                     '등록된 연락처가 없습니다.',
-                    style: TextStyle(fontSize: 14, color: eInkSoft),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: eInkSoft,
+                    ),
                   ),
                 )
               else
@@ -445,30 +478,31 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
       appBar: AppBar(
         backgroundColor: eBg,
         elevation: 0,
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    border: Border.all(color: eLine, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: eInk.withOpacity(0.1),
-                        blurRadius: 6,
-                        spreadRadius: 1,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(Icons.chevron_left, color: eInk, size: 24),
+        leading: IconButton(
+          icon: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              border: Border.all(color: eLine, width: 2),
+              boxShadow: [
+                BoxShadow(
+                  color: eInk.withOpacity(0.1),
+                  blurRadius: 6,
+                  spreadRadius: 1,
                 ),
-                onPressed: () => Navigator.pop(context),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              )
-            : null,
+              ],
+            ),
+            child: const Icon(Icons.chevron_left, color: eInk, size: 24),
+          ),
+          onPressed: () => Navigator.pop(context),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(
+            minWidth: 44,
+            minHeight: 44,
+          ),
+        ),
         title: Text(
           '어르신 관리',
           style: GoogleFonts.notoSerifKr(
@@ -503,7 +537,10 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                     alignment: Alignment.center,
                     child: Text(
                       '관리 중인 어르신이 없습니다.',
-                      style: TextStyle(fontSize: 16, color: eInkSoft),
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: eInkSoft,
+                      ),
                     ),
                   )
                 else
@@ -562,14 +599,11 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                                     vertical: 6,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: const Color(
-                                      0xFFF44336,
-                                    ).withOpacity(0.1),
+                                    color: const Color(0xFFF44336).withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                      color: const Color(
-                                        0xFFF44336,
-                                      ).withOpacity(0.3),
+                                      color: const Color(0xFFF44336)
+                                          .withOpacity(0.3),
                                     ),
                                   ),
                                   child: Text(

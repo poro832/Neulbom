@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
 class ConversationDetailScreen extends StatelessWidget {
   final String date;
@@ -30,15 +36,19 @@ class ConversationDetailScreen extends StatelessWidget {
     Color sentimentColor = sentiment == '긍정적'
         ? const Color(0xFF4CAF50)
         : sentiment == '부정적'
-        ? const Color(0xFFF44336)
-        : const Color(0xFFFFA726);
+            ? const Color(0xFFF44336)
+            : const Color(0xFFFFA726);
 
     String typeLabel = type == 'call' ? '통화' : '채팅';
     Color typeColor = type == 'call' ? const Color(0xFF2196F3) : eAccent;
 
     // 샘플 대화 내용
     final conversationMessages = [
-      {'type': 'user', 'time': '14:30:15', 'content': '안녕하세요, 오늘 기분 어떠신가요?'},
+      {
+        'type': 'user',
+        'time': '14:30:15',
+        'content': '안녕하세요, 오늘 기분 어떠신가요?',
+      },
       {
         'type': 'elder',
         'time': '14:30:45',
@@ -79,12 +89,10 @@ class ConversationDetailScreen extends StatelessWidget {
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -107,7 +115,7 @@ class ConversationDetailScreen extends StatelessWidget {
                             color: const Color(0xFFF44336).withOpacity(0.2),
                             blurRadius: 8,
                             spreadRadius: 1,
-                          ),
+                          )
                         ]
                       : [],
                 ),
@@ -382,7 +390,9 @@ class ConversationDetailScreen extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                   color: sentimentColor.withOpacity(0.08),
-                  border: Border.all(color: sentimentColor.withOpacity(0.2)),
+                  border: Border.all(
+                    color: sentimentColor.withOpacity(0.2),
+                  ),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 padding: const EdgeInsets.all(16),

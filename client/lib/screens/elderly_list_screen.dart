@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
 import 'elderly_detail_screen.dart';
+
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
 
 class ElderlyListScreen extends StatefulWidget {
   const ElderlyListScreen({super.key});
@@ -40,7 +46,10 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
     ];
   }
 
-  void _showManagementMenu(BuildContext context, Map<String, dynamic> elderly) {
+  void _showManagementMenu(
+    BuildContext context,
+    Map<String, dynamic> elderly,
+  ) {
     showModalBottomSheet(
       context: context,
       builder: (BuildContext context) {
@@ -162,7 +171,10 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
           ),
           content: Text(
             '${elderly['name']}님을 관리 목록에서 제거하시겠습니까?',
-            style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
+            style: GoogleFonts.notoSansKr(
+              fontSize: 14,
+              color: eInkSoft,
+            ),
           ),
           actions: [
             TextButton(
@@ -220,12 +232,10 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
             color: eInk,
           ),
         ),
-        leading: Navigator.canPop(context)
-            ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: eInk),
-                onPressed: () => Navigator.pop(context),
-              )
-            : null,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: eInk),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -257,11 +267,18 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
                         const SizedBox(height: 4),
                         const Text(
                           '관리 중',
-                          style: TextStyle(fontSize: 12, color: eInkSoft),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: eInkSoft,
+                          ),
                         ),
                       ],
                     ),
-                    Container(width: 1, height: 40, color: eLine),
+                    Container(
+                      width: 1,
+                      height: 40,
+                      color: eLine,
+                    ),
                     Column(
                       children: [
                         Text(
@@ -275,11 +292,18 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
                         const SizedBox(height: 4),
                         const Text(
                           '정상',
-                          style: TextStyle(fontSize: 12, color: eInkSoft),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: eInkSoft,
+                          ),
                         ),
                       ],
                     ),
-                    Container(width: 1, height: 40, color: eLine),
+                    Container(
+                      width: 1,
+                      height: 40,
+                      color: eLine,
+                    ),
                     Column(
                       children: [
                         Text(
@@ -293,7 +317,10 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
                         const SizedBox(height: 4),
                         const Text(
                           '주의',
-                          style: TextStyle(fontSize: 12, color: eInkSoft),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: eInkSoft,
+                          ),
                         ),
                       ],
                     ),
@@ -389,14 +416,12 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
                                     vertical: 6,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: elderly['statusColor'].withOpacity(
-                                      0.15,
-                                    ),
+                                    color:
+                                        elderly['statusColor'].withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(8),
                                     border: Border.all(
-                                      color: elderly['statusColor'].withOpacity(
-                                        0.3,
-                                      ),
+                                      color: elderly['statusColor']
+                                          .withOpacity(0.3),
                                     ),
                                   ),
                                   child: Text(
@@ -457,9 +482,9 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
                                         MaterialPageRoute(
                                           builder: (context) =>
                                               ElderlyDetailScreen(
-                                                elderlyId: elderly['id'],
-                                                elderlyName: elderly['name'],
-                                              ),
+                                            elderlyId: elderly['id'],
+                                            elderlyName: elderly['name'],
+                                          ),
                                         ),
                                       );
                                     },
@@ -557,7 +582,11 @@ class _ElderlyListScreenState extends State<ElderlyListScreen> {
               ),
             ),
             const Spacer(),
-            Icon(Icons.chevron_right_rounded, color: eInkSoft, size: 20),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: eInkSoft,
+              size: 20,
+            ),
           ],
         ),
       ),
