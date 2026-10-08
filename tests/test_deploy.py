@@ -36,10 +36,23 @@ def test_every_path_caddy_opens_exists_in_the_app(tmp_path):
     assert not missing, f"Caddy는 여는데 앱에 없는 경로: {sorted(missing)}"
 
 
-def test_the_trigger_api_is_not_opened_to_the_internet():
-    """/v1/calls/request에는 인증이 없다. 열면 누구나 어르신께 전화를
-    걸게 할 수 있다. 보호자 앱이 쓰려면 인증을 먼저 붙인다."""
-    assert "/v1/calls/request" not in caddy_allowlist()
+def test_the_trigger_api_is_open_only_because_it_demands_a_key():
+    """/v1/calls/request는 열쇠 없이는 401이다. 열린 문에 자물쇠가 실제로 있는지
+    검사한다 — 이 검사가 빠지면 누구나 어르신께 전화를 걸게 할 수 있다."""
+    from fastapi.testclient import TestClient
+
+    import app.main as main
+
+    assert "/v1/calls/request" in caddy_allowlist()
+
+    client = TestClient(main.app)
+    assert client.post("/v1/calls/request", json={"elder_id": 1}).status_code == 401
+    assert (
+        client.post(
+            "/v1/calls/request", json={"elder_id": 1}, headers={"Authorization": "Bearer nlb_x"}
+        ).status_code
+        == 401
+    )
 
 
 def test_nothing_else_is_proxied():
