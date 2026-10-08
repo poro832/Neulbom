@@ -30,6 +30,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def _memory_store(**kwargs):
+    import time
+
+    kwargs.setdefault("wall_clock", kwargs.get("clock", time.time))
     return InMemoryCallStore(phones=PHONES, **kwargs)
 
 
@@ -351,3 +354,78 @@ def test_active_statuses_are_the_ones_that_block_a_new_call(store):
     """ACTIVE_STATUSES가 이 저장소의 '잠김' 정의다. 값이 바뀌면 409 경로가
     통째로 달라지므로 여기 고정한다."""
     assert ACTIVE_STATUSES == frozenset({"scheduled", "ringing", "answered"})
+
+
+# ------------------------------------------------ 수동 요청 횟수와 요청한 보호자
+
+
+class _WallClock:
+    def __init__(self, now=1_800_000_000.0):
+        self.now = now
+
+    def __call__(self):
+        return self.now
+
+
+def _ensure_guardian(store, guardian_id):
+    """Postgres는 requested_by가 guardians를 참조한다. 메모리 쪽은 할 일이 없다."""
+    pool = getattr(store, "_pool", None)
+    if pool is None:
+        return
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO guardians (guardian_id, name, email, password_hash, phone_number) "
+            "VALUES (%s, 'g', %s, 'not-a-login', '000') ON CONFLICT (guardian_id) DO NOTHING",
+            (guardian_id, f"g{guardian_id}@example.invalid"),
+        )
+
+
+def test_requested_calls_are_counted_since_a_time(make_store):
+    clock = _WallClock()
+    store = make_store(clock=clock)
+    call, _ = store.find_active_or_create(ELDER, "requested")
+    store.mark_failed(call.call_id)
+
+    assert store.count_requested_since(ELDER, clock.now - 10) == 1
+    assert store.count_requested_since(ELDER, clock.now + 10) == 0
+
+
+def test_scheduled_calls_are_not_counted(make_store):
+    clock = _WallClock()
+    store = make_store(clock=clock)
+    store.find_active_or_create(ELDER, "scheduled")
+
+    assert store.count_requested_since(ELDER, clock.now - 10) == 0
+
+
+def test_another_elders_requests_are_not_counted(make_store):
+    clock = _WallClock()
+    store = make_store(clock=clock)
+    store.find_active_or_create(99, "requested")
+
+    assert store.count_requested_since(ELDER, clock.now - 10) == 0
+
+
+def test_a_second_press_during_a_call_is_not_counted_twice(make_store):
+    clock = _WallClock()
+    store = make_store(clock=clock)
+    store.find_active_or_create(ELDER, "requested")
+    again, created = store.find_active_or_create(ELDER, "requested")
+
+    assert created is False
+    assert store.count_requested_since(ELDER, clock.now - 10) == 1
+
+
+def test_a_requested_call_remembers_who_pressed_the_button(make_store):
+    store = make_store()
+    _ensure_guardian(store, 7)
+
+    call, _ = store.find_active_or_create(ELDER, "requested", requested_by=7)
+
+    assert store.get(call.call_id).requested_by == 7
+
+
+def test_a_scheduled_call_has_no_requester(store):
+    call, _ = store.find_active_or_create(ELDER, "scheduled")
+
+    assert store.get(call.call_id).requested_by is None
