@@ -22,21 +22,25 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
   String _reportPeriod = 'daily';
   DateTime _periodDate = DateTime.now();
 
-  static String _todayKey() {
-    final today = DateTime.now();
-    final month = today.month.toString().padLeft(2, '0');
-    final day = today.day.toString().padLeft(2, '0');
-    return '${today.year}-$month-$day';
+  static String _todayKey() => _dateKey(DateTime.now());
+
+  static String _dateKey(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
   }
 
   String _formatKoreanDate(DateTime date) {
     return '${date.year}년 ${date.month}월 ${date.day}일';
   }
 
+  DateTime _weekStart(DateTime date) {
+    final day = DateTime(date.year, date.month, date.day);
+    return day.subtract(Duration(days: day.weekday % 7));
+  }
+
   String _weeklyRangeLabel() {
-    final sunday = _periodDate.subtract(
-      Duration(days: _periodDate.weekday % 7),
-    );
+    final sunday = _weekStart(_periodDate);
     final saturday = sunday.add(const Duration(days: 6));
     return '${_formatKoreanDate(sunday)} ~ ${_formatKoreanDate(saturday)}';
   }
@@ -45,130 +49,383 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     return '${_periodDate.year}년 ${_periodDate.month}월';
   }
 
-  String _periodDateLabel() {
-    return _reportPeriod == 'weekly'
-        ? '${_periodDate.year}년 ${_periodDate.month}월 ${_periodDate.day}일 기준'
-        : _monthlyLabel();
-  }
-
-  Future<void> _selectReportPeriodDate() async {
-    if (_reportPeriod == 'monthly') {
-      await _selectReportMonth();
-      return;
+  Future<DateTime?> _showReportDatePicker(DateTime initialDate) {
+    final now = DateTime.now();
+    final lastDate = DateTime(now.year, now.month, now.day);
+    final firstDate = DateTime(2024, 1, 1);
+    var safeInitial = initialDate;
+    if (safeInitial.isAfter(lastDate)) {
+      safeInitial = lastDate;
+    } else if (safeInitial.isBefore(firstDate)) {
+      safeInitial = firstDate;
     }
 
-    final picked = await showDatePicker(
+    return showDatePicker(
       context: context,
-      initialDate: _periodDate,
-      firstDate: DateTime(2024, 1, 1),
-      lastDate: DateTime.now(),
-      helpText: _reportPeriod == 'weekly' ? '주간 기준 날짜 선택' : '월별 기준 날짜 선택',
-      cancelText: '취소',
-      confirmText: '확인',
+      initialDate: safeInitial,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      locale: const Locale('ko', 'KR'),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: eAccent,
+              onPrimary: Colors.white,
+              onSurface: eInk,
+            ),
+            textTheme: Theme.of(
+              context,
+            ).textTheme.apply(fontFamily: 'NotoSansKR'),
+          ),
+          child: Localizations.override(
+            context: context,
+            locale: const Locale('ko', 'KR'),
+            child: child!,
+          ),
+        );
+      },
     );
-    if (picked != null) {
-      setState(() => _periodDate = picked);
-    }
   }
 
-  Future<void> _selectReportMonth() async {
-    var selectedYear = _periodDate.year;
-    var selectedMonth = _periodDate.month;
-    final currentDate = DateTime.now();
-    final firstYear = 2024;
+  Future<DateTime?> _showMonthPicker(DateTime initialDate) {
+    var selectedYear = initialDate.year;
+    final now = DateTime.now();
+    const firstYear = 2024;
 
-    final selected = await showDialog<DateTime>(
+    return showDialog<DateTime>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
+            return Dialog(
               backgroundColor: eCard,
-              title: const Text('월별 리포트 기간 선택'),
-              content: SizedBox(
-                width: 320,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    DropdownButton<int>(
-                      value: selectedYear,
-                      isExpanded: true,
-                      items: [
-                        for (
-                          var year = firstYear;
-                          year <= currentDate.year;
-                          year++
-                        )
-                          DropdownMenuItem(value: year, child: Text('$year년')),
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: selectedYear <= firstYear
+                              ? null
+                              : () => setDialogState(() => selectedYear--),
+                          icon: const Icon(Icons.chevron_left_rounded),
+                          color: eInk,
+                        ),
+                        Expanded(
+                          child: Text(
+                            '$selectedYear년',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.notoSansKr(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: eInk,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: selectedYear >= now.year
+                              ? null
+                              : () => setDialogState(() => selectedYear++),
+                          icon: const Icon(Icons.chevron_right_rounded),
+                          color: eInk,
+                        ),
                       ],
-                      onChanged: (year) {
-                        if (year == null) return;
-                        setDialogState(() {
-                          selectedYear = year;
-                          if (selectedYear == currentDate.year &&
-                              selectedMonth > currentDate.month) {
-                            selectedMonth = currentDate.month;
-                          }
-                        });
-                      },
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     GridView.builder(
                       shrinkWrap: true,
                       itemCount: 12,
+                      physics: const NeverScrollableScrollPhysics(),
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 3,
                             mainAxisSpacing: 8,
                             crossAxisSpacing: 8,
-                            childAspectRatio: 2,
+                            childAspectRatio: 1.6,
                           ),
                       itemBuilder: (context, index) {
                         final month = index + 1;
                         final isFutureMonth =
-                            selectedYear == currentDate.year &&
-                            month > currentDate.month;
-                        final isSelected = month == selectedMonth;
-                        return OutlinedButton(
-                          onPressed: isFutureMonth
-                              ? null
-                              : () {
-                                  Navigator.pop(
+                            selectedYear == now.year && month > now.month;
+                        final isSelected =
+                            selectedYear == initialDate.year &&
+                            month == initialDate.month;
+                        return Material(
+                          color: isSelected
+                              ? eAccent
+                              : isFutureMonth
+                              ? eLine.withValues(alpha: 0.4)
+                              : eBg,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: isFutureMonth
+                                ? null
+                                : () => Navigator.pop(
                                     context,
                                     DateTime(selectedYear, month),
-                                  );
-                                },
-                          style: OutlinedButton.styleFrom(
-                            backgroundColor: isSelected
-                                ? eAccent
-                                : Colors.transparent,
-                            foregroundColor: isSelected ? Colors.white : eInk,
-                            side: BorderSide(
-                              color: isSelected ? eAccent : eLine,
+                                  ),
+                            child: Center(
+                              child: Text(
+                                '$month월',
+                                style: GoogleFonts.notoSansKr(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : isFutureMonth
+                                      ? eInkSoft
+                                      : eInk,
+                                ),
+                              ),
                             ),
                           ),
-                          child: Text('$month월'),
                         );
                       },
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(
+                          '취소',
+                          style: GoogleFonts.notoSansKr(
+                            fontWeight: FontWeight.w600,
+                            color: eInkSoft,
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('취소'),
-                ),
-              ],
             );
           },
         );
       },
     );
+  }
 
-    if (selected != null) {
-      setState(() => _periodDate = selected);
-    }
+  Future<DateTime?> _showWeekPicker(DateTime initialDate) {
+    var visibleMonth = DateTime(initialDate.year, initialDate.month);
+    final selectedWeekStart = _weekStart(initialDate);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final firstDate = DateTime(2024, 1, 1);
+    const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
+
+    return showDialog<DateTime>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final monthStart = DateTime(
+              visibleMonth.year,
+              visibleMonth.month,
+              1,
+            );
+            final gridStart = _weekStart(monthStart);
+            final canGoPrev = visibleMonth.isAfter(
+              DateTime(firstDate.year, firstDate.month),
+            );
+            final canGoNext = visibleMonth.isBefore(
+              DateTime(today.year, today.month),
+            );
+
+            return Dialog(
+              backgroundColor: eCard,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: canGoPrev
+                              ? () => setDialogState(() {
+                                  visibleMonth = DateTime(
+                                    visibleMonth.year,
+                                    visibleMonth.month - 1,
+                                  );
+                                })
+                              : null,
+                          icon: const Icon(Icons.chevron_left_rounded),
+                          color: eInk,
+                        ),
+                        Expanded(
+                          child: Text(
+                            '${visibleMonth.year}년 ${visibleMonth.month}월',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.notoSansKr(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: eInk,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: canGoNext
+                              ? () => setDialogState(() {
+                                  visibleMonth = DateTime(
+                                    visibleMonth.year,
+                                    visibleMonth.month + 1,
+                                  );
+                                })
+                              : null,
+                          icon: const Icon(Icons.chevron_right_rounded),
+                          color: eInk,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        for (final weekday in weekdays)
+                          Expanded(
+                            child: Text(
+                              weekday,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.notoSansKr(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: eInkSoft,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    for (var week = 0; week < 6; week++)
+                      Builder(
+                        builder: (context) {
+                          final weekDays = [
+                            for (var day = 0; day < 7; day++)
+                              gridStart.add(Duration(days: week * 7 + day)),
+                          ];
+                          final weekStart = weekDays.first;
+                          final weekEnd = weekDays.last;
+                          final isSelected = weekStart == selectedWeekStart;
+                          final isFutureWeek = weekStart.isAfter(today);
+                          final isTooOld = weekEnd.isBefore(firstDate);
+                          final enabled = !isFutureWeek && !isTooOld;
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Material(
+                              color: isSelected
+                                  ? eAccent
+                                  : enabled
+                                  ? eBg
+                                  : eLine.withValues(alpha: 0.4),
+                              borderRadius: BorderRadius.circular(10),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(10),
+                                onTap: enabled
+                                    ? () => Navigator.pop(context, weekStart)
+                                    : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      for (final day in weekDays)
+                                        Expanded(
+                                          child: Text(
+                                            '${day.day}',
+                                            textAlign: TextAlign.center,
+                                            style: GoogleFonts.notoSansKr(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                              color: isSelected
+                                                  ? Colors.white
+                                                  : !enabled ||
+                                                        day.month !=
+                                                            visibleMonth.month
+                                                  ? eInkSoft
+                                                  : eInk,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(
+                          '취소',
+                          style: GoogleFonts.notoSansKr(
+                            fontWeight: FontWeight.w600,
+                            color: eInkSoft,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDateSelector({
+    required String dateText,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: eCard,
+          border: Border.all(color: eAccent, width: 2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today_rounded, color: eAccent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                dateText,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: eInk,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 16,
+              color: eAccent,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // 날짜별 더미 데이터
@@ -261,9 +518,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       ),
       child: Row(
         children: [
-          _buildReportPeriodButton('daily', '일별 리포트'),
-          _buildReportPeriodButton('weekly', '주간 리포트'),
-          _buildReportPeriodButton('monthly', '월별 리포트'),
+          _buildReportPeriodButton('daily', '일간'),
+          _buildReportPeriodButton('weekly', '주간'),
+          _buildReportPeriodButton('monthly', '월간'),
         ],
       ),
     );
@@ -296,7 +553,6 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   Widget _buildPeriodReport() {
     final isWeekly = _reportPeriod == 'weekly';
-    final periodLabel = isWeekly ? '주간 리포트' : '월별 리포트';
     final rangeLabel = isWeekly ? _weeklyRangeLabel() : _monthlyLabel();
     final monthLabel = _monthlyLabel();
 
@@ -326,51 +582,17 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildReportSelector(),
-            const SizedBox(height: 20),
-            Text(
-              periodLabel,
-              style: GoogleFonts.notoSerifKr(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: eInk,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(rangeLabel, style: const TextStyle(color: eInkSoft)),
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: _selectReportPeriodDate,
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: eCard,
-                  border: Border.all(color: eLine),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.calendar_month_rounded,
-                      size: 16,
-                      color: eAccent,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _periodDateLabel(),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: eAccent,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            const SizedBox(height: 16),
+            _buildDateSelector(
+              dateText: isWeekly ? _weeklyRangeLabel() : _monthlyLabel(),
+              onTap: () async {
+                final picked = isWeekly
+                    ? await _showWeekPicker(_periodDate)
+                    : await _showMonthPicker(_periodDate);
+                if (picked != null) {
+                  setState(() => _periodDate = picked);
+                }
+              },
             ),
             const SizedBox(height: 16),
             Row(
@@ -405,7 +627,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              isWeekly ? '주간 분석 요약' : '월별 분석 요약',
+              isWeekly ? '주간 분석 요약' : '월간 분석 요약',
               style: GoogleFonts.notoSerifKr(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -474,71 +696,16 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               const SizedBox(height: 16),
 
               // 날짜 선택
-              GestureDetector(
+              _buildDateSelector(
+                dateText: _selectedDate,
                 onTap: () async {
-                  final DateTime? picked = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.parse(_selectedDate),
-                    firstDate: DateTime(2024, 1, 1),
-                    lastDate: DateTime.now(),
-                    locale: const Locale('ko', 'KR'),
-                    builder: (context, child) {
-                      return Theme(
-                        data: Theme.of(context).copyWith(
-                          colorScheme: const ColorScheme.light(
-                            primary: eAccent,
-                            onPrimary: Colors.white,
-                            onSurface: eInk,
-                          ),
-                          textTheme: Theme.of(
-                            context,
-                          ).textTheme.apply(fontFamily: 'NotoSansKR'),
-                        ),
-                        child: Localizations.override(
-                          context: context,
-                          locale: const Locale('ko', 'KR'),
-                          child: child!,
-                        ),
-                      );
-                    },
+                  final picked = await _showReportDatePicker(
+                    DateTime.parse(_selectedDate),
                   );
                   if (picked != null) {
-                    setState(() {
-                      _selectedDate = picked.toString().split(' ')[0];
-                    });
+                    setState(() => _selectedDate = _dateKey(picked));
                   }
                 },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: eCard,
-                    border: Border.all(color: eAccent, width: 2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_today_rounded, color: eAccent),
-                      const SizedBox(width: 12),
-                      Text(
-                        _selectedDate,
-                        style: GoogleFonts.notoSansKr(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: eInk,
-                        ),
-                      ),
-                      const Spacer(),
-                      const Icon(
-                        Icons.arrow_forward_ios_rounded,
-                        size: 16,
-                        color: eAccent,
-                      ),
-                    ],
-                  ),
-                ),
               ),
               const SizedBox(height: 24),
 
