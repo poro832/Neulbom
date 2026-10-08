@@ -219,12 +219,13 @@ def build_app(
 
     @app.post("/v1/call-status")
     async def call_status(request: Request) -> Response:
-        """통화 상태가 바뀔 때 사업자가 부른다. **지금은 로그만 남긴다.**
+        """통화 상태가 바뀔 때 사업자가 부른다.
 
         어르신이 받지 않으면 VoiceML도 종료 웹훅도 오지 않아서, 이 통보가
-        안 받음을 아는 유일한 길이다. 다만 필드 이름과 값을 문서에서 확인하지
-        못해 상태는 바꾸지 않고 실제로 온 것을 먼저 기록한다. 모양을 본 뒤에
-        안 받음 처리를 붙인다.
+        안 받음을 아는 유일한 길이다. 실제 통보(2026-10-08)에서 안 받으면
+        `ringing` 약 30초 뒤에 `CallStatus=no-answer`(`HangupCause=no_answer`)가
+        온다는 것을 확인했고, **그 값만** 미응답으로 처리한다. 나머지 상태는
+        관찰한 적이 없어 지금은 기록만 한다 — 모르는 모양을 추측하지 않는다.
 
         바깥에 열린 주소이므로 본문 크기를 제한하고, 어떤 모양이 와도(폼,
         JSON, 빈 본문) 오류로 돌려보내지 않는다 — 사업자가 실패로 보고 재전송
@@ -256,6 +257,14 @@ def build_app(
             content_type.split(";")[0] or "-",
             describe_status_payload(data),
         )
+
+        if data.get("CallStatus") == "no-answer" and data.get("CallId"):
+            # 받은 통화는 건드리지 않는다(lifecycle이 answered를 가려낸다). 저장소
+            # 오류가 나도 204로 답한다 — 사업자 재전송을 부르면 안 된다.
+            try:
+                lifecycle.carrier_finished(str(data["CallId"]), "no-answer")
+            except Exception:
+                logger.exception("안 받음 처리 실패 CallId=%s", data.get("CallId"))
         return Response(status_code=204)
 
     return app

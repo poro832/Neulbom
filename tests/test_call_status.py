@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.calls import MAX_STATUS_BODY_BYTES, build_app, describe_status_payload
@@ -156,18 +157,89 @@ def test_an_oversized_body_is_dropped_without_logging_it(caplog):
     assert huge[:50] not in caplog.text
 
 
-def test_it_changes_no_call_state_yet():
-    """지금은 관찰만 한다. 필드 모양을 보기 전에 상태를 바꾸면 추측이 된다."""
-    client, store, _ = make_client()
+def _placed(client, store):
     created = client.post("/v1/calls/request", json={"elder_id": 12}).json()
-    before = store.get(created["call_id"]).status
+    call = store.get(created["call_id"])
+    return call.call_id, call.provider_call_sid
 
-    client.post(
+
+def test_an_unrecognised_field_changes_no_call_state():
+    """CallStatus가 아닌 이름의 필드는 상태를 바꾸지 않는다 — 모르는 모양을 추측하지 않는다."""
+    client, store, _ = make_client()
+    call_id, sid = _placed(client, store)
+    before = store.get(call_id).status
+
+    client.post("/v1/call-status", data={"CallId": sid, "Status": "no-answer"})
+
+    assert store.get(call_id).status == before
+
+
+def test_no_answer_marks_an_unanswered_call_and_frees_the_elder():
+    """실제 통보(2026-10-08): 안 받으면 ringing 약 30초 뒤 CallStatus=no-answer가 온다."""
+    client, store, _ = make_client()
+    call_id, sid = _placed(client, store)
+    assert store.get(call_id).status == "ringing"
+
+    response = client.post(
         "/v1/call-status",
-        data={"CallId": store.get(created["call_id"]).provider_call_sid, "Status": "no-answer"},
+        data={"CallId": sid, "CallStatus": "no-answer", "HangupCause": "no_answer"},
     )
 
-    assert store.get(created["call_id"]).status == before
+    assert response.status_code == 204
+    assert store.get(call_id).status == "no_answer"
+    assert store.find_active(12) is None
+
+
+def test_no_answer_revokes_the_stream_token():
+    client, store, _ = make_client()
+    _, sid = _placed(client, store)
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 200
+
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+
+    assert client.post("/v1/voiceml", data={"CallId": sid}).status_code == 404
+
+
+def test_a_repeated_no_answer_is_harmless():
+    client, store, _ = make_client()
+    call_id, sid = _placed(client, store)
+
+    for _ in range(2):
+        r = client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+        assert r.status_code == 204
+
+    assert store.get(call_id).status == "no_answer"
+
+
+def test_no_answer_never_overwrites_a_call_that_was_answered():
+    """받아서 대화한 통화를 '안 받음'으로 적으면 위험 점수의 미응답 20점이 틀린다."""
+    client, store, _ = make_client()
+    call_id, sid = _placed(client, store)
+    store.mark_answered(call_id)
+
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+
+    assert store.get(call_id).status == "answered"
+
+
+@pytest.mark.parametrize("status", ["initiated", "ringing", "in-progress", "completed", "busy", "failed"])
+def test_other_statuses_do_not_change_the_call(status):
+    """no-answer만 실제 통보로 확인했다. 나머지는 추측하지 않고 기록만 한다."""
+    client, store, _ = make_client()
+    call_id, sid = _placed(client, store)
+    before = store.get(call_id).status
+
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": status})
+
+    assert store.get(call_id).status == before
+
+
+def test_no_answer_for_an_unknown_call_is_ignored_without_an_error():
+    client, _, _ = make_client()
+
+    response = client.post("/v1/call-status", data={"CallId": "CAnope", "CallStatus": "no-answer"})
+
+    assert response.status_code == 204
 
 
 def test_values_are_truncated_and_newlines_removed():
