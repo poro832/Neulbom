@@ -45,6 +45,19 @@ CREATE INDEX elders_guardian_idx ON elders (guardian_id);
 -- 스케줄러가 "지금 걸 어르신"을 찾는 쿼리. 동의 안 한 분은 아예 인덱스에 없다.
 CREATE INDEX elders_due_idx ON elders (call_time) WHERE consent_at IS NOT NULL;
 
+-- 보호자 개인 열쇠. 지문만 저장한다(app/api/guardian_auth.py).
+CREATE TABLE guardian_keys (
+    key_id       BIGSERIAL PRIMARY KEY,
+    guardian_id  BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    key_prefix   TEXT NOT NULL,
+    key_hash     TEXT NOT NULL UNIQUE,
+    label        TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ
+);
+CREATE INDEX guardian_keys_guardian_idx ON guardian_keys (guardian_id);
+
 -- ============================================================
 -- 3. 통화
 -- ============================================================
@@ -71,6 +84,8 @@ CREATE TABLE calls (
     error_code        TEXT CHECK (error_code IN (
                           'NO_ANSWER', 'CALL_FAILED', 'INVALID_AUDIO', 'VAD_FAILED',
                           'STT_FAILED', 'LLM_ERROR', 'DB_ERROR', 'INTERNAL')),
+    -- 수동 요청이면 누가 눌렀는지. 스케줄러 통화는 비어 있다.
+    requested_by_guardian_id BIGINT REFERENCES guardians(guardian_id) ON DELETE SET NULL,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT calls_error_requires_failure

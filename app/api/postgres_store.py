@@ -47,7 +47,8 @@ logger = logging.getLogger(__name__)
 # 타입이 같아서 아무 오류가 안 난다.
 _COLUMNS = (
     "call_id, elder_id, trigger_type, status, provider_call_sid, audio_key, "
-    "extract(epoch from created_at)::float8 AS created_at"
+    "extract(epoch from created_at)::float8 AS created_at, "
+    "requested_by_guardian_id"
 )
 
 
@@ -60,6 +61,7 @@ def _record(row) -> CallRecord:
         provider_call_sid=row[4],
         audio_key=row[5],
         created_at=row[6],
+        requested_by=row[7],
     )
 
 
@@ -142,18 +144,31 @@ class PostgresCallStore:
 
     # ------------------------------------------------------------ 생성
 
-    def create(self, elder_id: int, trigger_type: str) -> CallRecord:
+    def create(
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
+    ) -> CallRecord:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "INSERT INTO calls (elder_id, trigger_type, status, created_at) "
-                "VALUES (%s, %s, 'scheduled', to_timestamp(%s)) "
+                "INSERT INTO calls (elder_id, trigger_type, status, created_at, "
+                "                   requested_by_guardian_id) "
+                "VALUES (%s, %s, 'scheduled', to_timestamp(%s), %s) "
                 f"RETURNING {_COLUMNS}",
-                (elder_id, trigger_type, self._clock()),
+                (elder_id, trigger_type, self._clock(), requested_by),
             ).fetchone()
         return _record(row)
 
+    def count_requested_since(self, elder_id: int, since: float) -> int:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM calls "
+                "WHERE elder_id = %s AND trigger_type = 'requested' "
+                "  AND created_at >= to_timestamp(%s)",
+                (elder_id, since),
+            ).fetchone()
+        return row[0]
+
     def find_active_or_create(
-        self, elder_id: int, trigger_type: str
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
     ) -> tuple[CallRecord, bool]:
         """활성 통화를 찾거나, 없으면 만든다 — 검사와 생성을 한 덩어리로.
 
@@ -166,7 +181,7 @@ class PostgresCallStore:
         from psycopg import errors
 
         try:
-            return self.create(elder_id, trigger_type), True
+            return self.create(elder_id, trigger_type, requested_by), True
         except errors.UniqueViolation:
             existing = self.find_active(elder_id)
             if existing is not None:

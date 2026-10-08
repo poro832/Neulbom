@@ -26,6 +26,7 @@ from app.api.store import InMemoryCallStore
 from app.media import ulaw
 from app.telephony.client import FakeTelephony
 from app.transcription import TranscriptionFailed
+from tests.auth_helpers import auth_kit
 
 FRAME_SAMPLES = 160
 
@@ -72,6 +73,7 @@ class _Beep:
 def make_server(tmp_path, sink=None, outcomes=None, transcriber=None):
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
+    kit = auth_kit()
     app = build_server(
         store=store,
         telephony=telephony,
@@ -82,8 +84,10 @@ def make_server(tmp_path, sink=None, outcomes=None, transcriber=None):
         outcomes=outcomes,
         sink=sink,
         transcriber=transcriber,
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    return TestClient(app), store, telephony
+    return TestClient(app, headers=kit.headers), store, telephony
 
 
 def place_call(client, store):

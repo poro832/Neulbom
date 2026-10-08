@@ -380,9 +380,11 @@ def _server(tmp_path, keeper):
     from app.api.store import InMemoryCallStore
     from app.main import build_server
     from app.telephony.client import FakeTelephony
+    from tests.auth_helpers import auth_kit
     from tests.test_server_wiring import _Beep
 
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    kit = auth_kit()
     app = build_server(
         store=store,
         telephony=FakeTelephony(),
@@ -391,8 +393,10 @@ def _server(tmp_path, keeper):
         responder_factory=_Beep,
         recordings_dir=tmp_path,
         archiver=keeper,
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    return app, store
+    return app, store, kit.headers
 
 
 def test_the_archiver_starts_with_the_server_not_on_import(tmp_path):
@@ -401,7 +405,7 @@ def test_the_archiver_starts_with_the_server_not_on_import(tmp_path):
     from fastapi.testclient import TestClient
 
     keeper = FakeArchiver()
-    app, _ = _server(tmp_path, keeper)
+    app, _, _ = _server(tmp_path, keeper)
 
     assert keeper.started == 0
 
@@ -419,9 +423,9 @@ def test_a_finished_call_wakes_the_archiver(tmp_path):
     from tests.test_server_wiring import place_call, run_stream
 
     keeper = FakeArchiver()
-    app, store = _server(tmp_path, keeper)
+    app, store, headers = _server(tmp_path, keeper)
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=headers) as client:
         _, _, token = place_call(client, store)
         run_stream(client, token, frames=5)
 

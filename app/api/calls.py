@@ -8,15 +8,21 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections.abc import Callable
+from datetime import datetime
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url_for
+from app.api.elder_directory import ElderDirectory
+from app.api.guardian_auth import GuardianAuth, attempt_label
 from app.api.lifecycle import CallLifecycle
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
+from app.scheduler import KST
 from app.telephony.client import Telephony
 from app.telephony.voiceml import connect_stream, say_and_hangup
 
@@ -52,8 +58,20 @@ def describe_status_payload(data: dict) -> str:
     return ", ".join(parts)
 
 
+DEFAULT_MANUAL_CALLS_PER_DAY = 3
+# elders.elder_id는 BIGINT다. 이보다 큰 값은 DB가 오류를 낸다 — 서버 오류가 아니라
+# 요청 오류(422)로 돌려보낸다.
+MAX_ELDER_ID = 2**63 - 1
+
+
 class CallRequest(BaseModel):
-    elder_id: int
+    elder_id: int = Field(ge=1, le=MAX_ELDER_ID)
+
+
+def kst_day_start(now: float) -> float:
+    """한국시간 기준 오늘 0시의 유닉스 시각. 수동 요청 횟수는 이 시각부터 센다."""
+    local = datetime.fromtimestamp(now, KST)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
 
 def build_app(
@@ -63,6 +81,10 @@ def build_app(
     public_base_url: str,
     stream_base_url: str,
     lifecycle: CallLifecycle | None = None,
+    guardian_auth: GuardianAuth | None = None,
+    elders: ElderDirectory | None = None,
+    manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
+    wall_clock: Callable[[], float] = time.time,
 ) -> FastAPI:
     # 조립 지점(app/main.py)은 스트림 소켓과 같은 lifecycle을 넘긴다. 통화의
     # 끝을 양쪽이 각자 처리하면 한쪽만 일어난다(lifecycle 모듈 설명 참고).
@@ -73,24 +95,67 @@ def build_app(
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
     stream_url = f"{stream_base_url.rstrip('/')}/v1/stream"
 
-    @app.post("/v1/calls/request")
-    def request_call(body: CallRequest) -> JSONResponse:
-        if store.find_elder(body.elder_id) is None:
-            raise HTTPException(status_code=404, detail="등록되지 않은 어르신입니다")
+    if guardian_auth is not None:
+        if elders is None:
+            raise ValueError("guardian_auth를 쓰려면 elders(어르신 조회)도 있어야 한다")
 
-        # find_active와 create를 store 안에서 락으로 묶어 한 번에 처리한다.
-        # 따로 부르면 sync 라우트가 스레드풀에서 도는 동안 두 스레드가 모두
-        # "활성 통화 없음"을 보고 둘 다 전화를 걸 수 있다.
-        call, created = store.find_active_or_create(body.elder_id, trigger_type="requested")
-        if not created:
-            # 두 번 누르는 것은 오류가 아니다. 전화가 안 오는 것 같아서
-            # 다시 누른 것이므로, 그 통화의 대기 화면으로 보낸다.
-            return JSONResponse(
-                status_code=409,
-                content={"call_id": call.call_id, "status": "in_progress"},
+        def _authorize(body: CallRequest, authorization: str | None) -> int:
+            """다섯 개의 문 중 앞의 넷. 통과하면 보호자 번호를 돌려준다.
+
+            순서가 곧 정보 노출의 경계다. 소유(③)를 동의(④)보다 먼저 보므로,
+            남의 어르신이면 동의 여부를 알려 주기 전에 404로 끝난다.
+            """
+            guardian_id = guardian_auth.authenticate(authorization)
+            if guardian_id is None:
+                # 틀린 시도는 앞 12글자만 남긴다. 이유(없음/틀림/폐기)는 응답에 쓰지 않는다.
+                logger.warning("열쇠 인증 실패 key=%s", attempt_label(authorization))
+                raise HTTPException(status_code=401, detail="열쇠가 필요합니다")
+
+            access = elders.get(body.elder_id)
+            if access is None or access.guardian_id != guardian_id:
+                raise HTTPException(status_code=404, detail="등록되지 않은 어르신입니다")
+            if not access.consenting:
+                raise HTTPException(status_code=403, detail="어르신의 동의가 없습니다")
+
+            since = kst_day_start(wall_clock())
+            if store.count_requested_since(body.elder_id, since) >= manual_calls_per_day:
+                raise HTTPException(status_code=429, detail="오늘 요청 횟수를 넘었습니다")
+            return guardian_id
+
+        @app.post("/v1/calls/request")
+        def request_call(
+            body: CallRequest, authorization: str | None = Header(default=None)
+        ) -> JSONResponse:
+            try:
+                guardian_id = _authorize(body, authorization)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                # 저장소 장애는 "열쇠가 틀렸다"(401)도 "열려 있다"(202)도 아니다.
+                logger.exception("인증 저장소 오류 — 요청을 거부한다")
+                raise HTTPException(
+                    status_code=503, detail="인증을 확인할 수 없습니다"
+                ) from exc
+
+            if store.find_elder(body.elder_id) is None:
+                # 소유와 동의는 통과했지만 전화번호가 없다(명부와 DB가 어긋남).
+                raise HTTPException(status_code=404, detail="등록되지 않은 어르신입니다")
+
+            # find_active와 create를 store 안에서 락으로 묶어 한 번에 처리한다.
+            # 따로 부르면 sync 라우트가 스레드풀에서 도는 동안 두 스레드가 모두
+            # "활성 통화 없음"을 보고 둘 다 전화를 걸 수 있다.
+            call, created = store.find_active_or_create(
+                body.elder_id, trigger_type="requested", requested_by=guardian_id
             )
+            if not created:
+                # 두 번 누르는 것은 오류가 아니다. 전화가 안 오는 것 같아서
+                # 다시 누른 것이므로, 그 통화의 대기 화면으로 보낸다.
+                return JSONResponse(
+                    status_code=409,
+                    content={"call_id": call.call_id, "status": "in_progress"},
+                )
 
-        return _dial(call)
+            return _dial(call)
 
     def _dial(call: CallRecord) -> JSONResponse:
         # 실제 발신은 app/api/dialer.py에 있다. 스케줄러가 같은 경로를 쓴다.
@@ -154,12 +219,13 @@ def build_app(
 
     @app.post("/v1/call-status")
     async def call_status(request: Request) -> Response:
-        """통화 상태가 바뀔 때 사업자가 부른다. **지금은 로그만 남긴다.**
+        """통화 상태가 바뀔 때 사업자가 부른다.
 
         어르신이 받지 않으면 VoiceML도 종료 웹훅도 오지 않아서, 이 통보가
-        안 받음을 아는 유일한 길이다. 다만 필드 이름과 값을 문서에서 확인하지
-        못해 상태는 바꾸지 않고 실제로 온 것을 먼저 기록한다. 모양을 본 뒤에
-        안 받음 처리를 붙인다.
+        안 받음을 아는 유일한 길이다. 실제 통보(2026-10-08)에서 안 받으면
+        `ringing` 약 30초 뒤에 `CallStatus=no-answer`(`HangupCause=no_answer`)가
+        온다는 것을 확인했고, **그 값만** 미응답으로 처리한다. 나머지 상태는
+        관찰한 적이 없어 지금은 기록만 한다 — 모르는 모양을 추측하지 않는다.
 
         바깥에 열린 주소이므로 본문 크기를 제한하고, 어떤 모양이 와도(폼,
         JSON, 빈 본문) 오류로 돌려보내지 않는다 — 사업자가 실패로 보고 재전송
@@ -191,6 +257,14 @@ def build_app(
             content_type.split(";")[0] or "-",
             describe_status_payload(data),
         )
+
+        if data.get("CallStatus") == "no-answer" and data.get("CallId"):
+            # 받은 통화는 건드리지 않는다(lifecycle이 answered를 가려낸다). 저장소
+            # 오류가 나도 204로 답한다 — 사업자 재전송을 부르면 안 된다.
+            try:
+                lifecycle.carrier_finished(str(data["CallId"]), "no-answer")
+            except Exception:
+                logger.exception("안 받음 처리 실패 CallId=%s", data.get("CallId"))
         return Response(status_code=204)
 
     return app

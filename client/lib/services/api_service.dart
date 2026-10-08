@@ -33,6 +33,13 @@ class ApiService {
     defaultValue: 'http://10.0.2.2:8000',
   );
 
+  /// 보호자 개인 열쇠. 빌드할 때 `--dart-define=GUARDIAN_KEY=nlb_...`로 넣는다.
+  ///
+  /// 시연 단계의 방식이다. 앱 파일에 열쇠가 들어가므로 앱 파일을 남에게 주면
+  /// 열쇠도 간다 — 피해는 그 보호자의 어르신께 하루 상한 이하로 한정되고, 서버에서
+  /// 폐기하면 끝난다. 로그인 단계에서 이 상수는 사라진다.
+  static const String guardianKey = String.fromEnvironment('GUARDIAN_KEY');
+
   static const bool useFixtures = bool.fromEnvironment(
     'USE_FIXTURES',
     defaultValue: true,
@@ -113,7 +120,10 @@ class ApiService {
     final response = await http
         .post(
           Uri.parse('$baseUrl/v1/calls/request'),
-          headers: const {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            if (guardianKey.isNotEmpty) 'Authorization': 'Bearer $guardianKey',
+          },
           body: jsonEncode({'elder_id': elderId}),
         )
         .timeout(_timeout);
@@ -127,7 +137,26 @@ class ApiService {
         alreadyInProgress: response.statusCode == 409,
       );
     }
-    throw Exception('전화 요청 실패 (${response.statusCode})');
+    throw Exception(callRequestMessage(response.statusCode));
+  }
+
+  /// 전화 요청이 거절된 이유를 보호자가 알아볼 말로 바꾼다.
+  /// 서버는 401을 열쇠의 없음, 틀림, 폐기에 똑같이 쓴다(이유를 알려 주지 않으려고).
+  static String callRequestMessage(int statusCode) {
+    switch (statusCode) {
+      case 401:
+        return '보호자 열쇠가 없거나 올바르지 않습니다';
+      case 403:
+        return '어르신의 동의가 아직 없습니다';
+      case 404:
+        return '등록되지 않은 어르신입니다';
+      case 429:
+        return '오늘 요청 횟수를 넘었습니다';
+      case 503:
+        return '지금은 확인할 수 없습니다. 잠시 뒤에 다시 해 주세요';
+      default:
+        return '전화 요청 실패 ($statusCode)';
+    }
   }
 
   // ------------------------------------------------------------ 공통

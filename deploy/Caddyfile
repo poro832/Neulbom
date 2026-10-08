@@ -3,10 +3,11 @@
 # 인증서는 Caddy가 Let's Encrypt에서 알아서 받고 갱신한다. 그러려면
 # 보안그룹에 80번이 열려 있어야 한다(발급 확인이 80으로 온다).
 nuelbom.duckdns.org {
-	# 인터넷에 여는 건 전화망 사업자가 부르는 네 경로뿐이다.
-	# /v1/calls/request는 인증이 없어서, 열면 누구나 어르신께 전화를 걸게
-	# 할 수 있다. 보호자 앱이 쓰려면 인증을 붙인 뒤 여기에 더한다.
-	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status
+	# 인터넷에 여는 건 전화망 사업자가 부르는 네 경로와, 열쇠를 요구하는
+	# /v1/calls/request다. 그 주소는 열쇠 없이는 401이고(tests/test_deploy.py가
+	# 검사한다) 열쇠가 있어도 그 보호자의 동의한 어르신께만, 하루 상한까지만 건다.
+	# 열쇠를 발급하기 전에는 서버의 Caddy에 이 줄을 반영하지 않는다(배포 순서).
+	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status /v1/calls/request
 	handle @clawops {
 		reverse_proxy 127.0.0.1:8000
 	}

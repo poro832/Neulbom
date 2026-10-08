@@ -53,6 +53,8 @@ class CallRecord:
     # 이 기록이 만들어진 시각(monotonic). 벽시계를 쓰면 시스템 시간이 뒤로
     # 조정될 때 활성 판정이 뒤집힌다.
     created_at: float = 0.0
+    # 수동 요청이면 누른 보호자의 번호. 스케줄러 통화는 None이다.
+    requested_by: int | None = None
 
 
 class CallStore(Protocol):
@@ -63,15 +65,25 @@ class CallStore(Protocol):
         """사업자 식별자로 통화를 찾는다. 웹훅은 이 식별자만 들고 온다."""
         ...
 
-    def create(self, elder_id: int, trigger_type: str) -> CallRecord: ...
+    def create(
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
+    ) -> CallRecord: ...
     def find_active_or_create(
-        self, elder_id: int, trigger_type: str
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
     ) -> tuple[CallRecord, bool]:
         """활성 통화를 찾거나, 없으면 만든다 — 검사와 생성을 한 덩어리로.
 
         FastAPI가 sync 라우트를 스레드풀에서 돌리므로, 이 둘을 따로 부르면
         두 스레드가 모두 find_active를 통과한 뒤에야 create가 불려 전화가
         두 번 걸릴 수 있다. 두 번째 값은 새로 만들었으면 True다.
+        """
+        ...
+
+    def count_requested_since(self, elder_id: int, since: float) -> int:
+        """since(유닉스 시각) 이후 이 어르신께 **수동 요청으로 만든** 통화 수.
+
+        실패한 통화도 센다. 열쇠가 새거나 앱이 오작동해도 어르신이 하루 종일
+        전화를 받지 않게 하는 상한의 근거라서, 끝난 모양은 상관없다.
         """
         ...
 
@@ -121,12 +133,17 @@ class InMemoryCallStore:
         phones: dict[int, str],
         clock: Callable[[], float] = time.monotonic,
         max_active_seconds: float = MAX_ACTIVE_SECONDS,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._phones = phones
         self._calls: dict[int, CallRecord] = {}
         self._ids = itertools.count(1)
         self._clock = clock
         self._max_active_seconds = max_active_seconds
+        # 하루 단위로 세는 수동 요청은 벽시계가 기준이다(clock은 monotonic이라
+        # 날짜를 모른다).
+        self._wall_clock = wall_clock
+        self._requests: list[tuple[int, float]] = []
         # 만료로 통화를 접을 때 알릴 곳들. 리스트인 이유는 한 저장소에 두
         # lifecycle이 걸리는 조립(테스트가 그렇다)에서 마지막 하나만 남기면
         # 나머지 쪽 토큰이 조용히 살아남기 때문이다.
@@ -163,19 +180,28 @@ class InMemoryCallStore:
                 return call
         return None
 
-    def create(self, elder_id: int, trigger_type: str) -> CallRecord:
+    def create(
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
+    ) -> CallRecord:
         call = CallRecord(
             call_id=next(self._ids),
             elder_id=elder_id,
             trigger_type=trigger_type,
             status="scheduled",
             created_at=self._clock(),
+            requested_by=requested_by,
         )
         self._calls[call.call_id] = call
+        if trigger_type == "requested":
+            self._requests.append((elder_id, self._wall_clock()))
         return call
 
+    def count_requested_since(self, elder_id: int, since: float) -> int:
+        with self._lock:
+            return sum(1 for eid, at in self._requests if eid == elder_id and at >= since)
+
     def find_active_or_create(
-        self, elder_id: int, trigger_type: str
+        self, elder_id: int, trigger_type: str, requested_by: int | None = None
     ) -> tuple[CallRecord, bool]:
         # 락 없이 find_active와 create를 따로 부르면, 두 스레드가 모두
         # "없다"를 보고 동시에 만들어 실제 전화가 두 번 걸릴 수 있다.
@@ -184,7 +210,7 @@ class InMemoryCallStore:
             active = self.find_active(elder_id)
             if active is not None:
                 return active, False
-            return self.create(elder_id, trigger_type), True
+            return self.create(elder_id, trigger_type, requested_by), True
 
     def _expire_stale(self, elder_id: int) -> None:
         """끝을 확인하지 못한 채 너무 오래된 활성 기록을 정리한다.
