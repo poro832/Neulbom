@@ -391,3 +391,26 @@ def _expect_disconnect():
     from starlette.websockets import WebSocketDisconnect
 
     return pytest.raises(WebSocketDisconnect)
+
+
+def test_the_ai_speaks_first_when_the_stream_starts(tmp_path):
+    """어르신이 "여보세요"를 하기 전에 인사가 먼저 나간다."""
+
+    class Greeter:
+        def greet(self, sample_rate):
+            return b"\x03\x04" * 400
+
+        def respond(self, audio, sample_rate):
+            return b""
+
+    client, _ = make_client(tmp_path, responder=Greeter())
+    received = []
+    with client.websocket_connect("/v1/stream") as socket:
+        socket.send_text(json.dumps(start_event("tok-good")))
+        # 어르신이 아무 말도 보내기 전에 인사(표식, 오디오, 표식)가 온다.
+        for _ in range(3):
+            received.append(json.loads(socket.receive_text()))
+        socket.send_text(json.dumps({"event": "stop"}))
+
+    assert [m.get("event") for m in received] == ["mark", "media", "mark"]
+    assert received[0]["mark"]["name"] == "turn1-begin"

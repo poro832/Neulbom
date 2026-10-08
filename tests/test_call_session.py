@@ -485,3 +485,53 @@ def test_jitter_does_not_hide_a_real_duplicate_or_a_real_loss(tmp_path):
     assert session.stream_duration_ms == 80
     assert session.filled_gap_ms == 20
     assert wav_duration_ms(session.finish(tmp_path)) == 80
+
+
+# ------------------------------------------------------------ 먼저 건네는 인사
+
+
+class GreetingResponder(FakeResponder):
+    def __init__(self, greeting: bytes = b"\x20\x00") -> None:
+        super().__init__()
+        self.greeting = greeting
+        self.greeted_at: list[int] = []
+
+    def greet(self, sample_rate: int) -> bytes:
+        self.greeted_at.append(sample_rate)
+        return self.greeting
+
+
+def test_start_sends_the_greeting_wrapped_in_marks():
+    """인사도 일반 응답과 같은 표식으로 감싼다 — AI 발화 구간이 지표의 분모에서 빠진다."""
+    session = CallSession("call-1", SAMPLE_RATE, GreetingResponder())
+
+    out = session.start()
+
+    assert [type(m) for m in out] == [MarkMessage, AudioMessage, MarkMessage]
+    assert out[0].name == "turn1-begin" and out[2].name == "turn1-end"
+
+
+def test_the_next_reply_continues_the_turn_numbering():
+    session = CallSession("call-1", SAMPLE_RATE, GreetingResponder())
+    session.start()
+
+    out = session.push_audio(pcm16(("speech", 500), ("silence", 1200)), 0)
+
+    marks = [m.name for m in out if isinstance(m, MarkMessage)]
+    assert marks == ["turn2-begin", "turn2-end"]
+
+
+def test_start_is_silent_for_a_responder_without_a_greeting():
+    assert CallSession("call-1", SAMPLE_RATE, FakeResponder()).start() == []
+
+
+def test_start_survives_a_greeting_failure():
+    class Broken(FakeResponder):
+        def greet(self, sample_rate):
+            raise RuntimeError("TTS가 죽었다")
+
+    assert CallSession("call-1", SAMPLE_RATE, Broken()).start() == []
+
+
+def test_an_empty_greeting_sends_nothing():
+    assert CallSession("call-1", SAMPLE_RATE, GreetingResponder(b"")).start() == []

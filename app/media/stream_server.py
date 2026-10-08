@@ -181,6 +181,9 @@ def add_stream_route(
                         await websocket.close(code=_POLICY_VIOLATION)
                         return
                     _started(session, on_call_start)
+                    # 어르신이 "여보세요"를 하기 전에 AI가 먼저 인사한다.
+                    for outgoing in session.start():
+                        await _send(websocket, outgoing)
                 elif session is None:
                     # start 전에 온 것은 시각도 세션도 없이 해석할 수 없다.
                     continue

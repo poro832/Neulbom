@@ -42,6 +42,13 @@ MAX_RETRIES = 2
 
 RETRY_PROMPT = "죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?"
 
+# 전화를 받으면 AI가 먼저 건네는 말. 어르신의 "여보세요"를 기다려 인식하지 않는다 —
+# 0.6초짜리 짧은 소리라 전화 음질에서 잘 안 읽히고(2026-10-08 실통화), 그러면 첫
+# 마디부터 "잘 못 들었어요"가 나가 통화가 어색하게 시작한다. 같은 문장이라 TTS
+# 캐시가 걸려 글자 수 한도(Prosody Free 월 1만 자)도 첫 통화 한 번만 쓴다.
+# 열린 질문으로 끝내는 이유: 어르신이 말을 이어 가게 해 발화 비율이 재어진다.
+GREETING = "안녕하세요, 어르신. 늘봄에서 안부 전화 드렸어요. 오늘 하루는 어떻게 보내고 계세요?"
+
 
 @dataclass(frozen=True)
 class Turn:
@@ -78,6 +85,7 @@ class ConversationResponder:
         voice: VoiceSynthesizer,
         max_retries: int = MAX_RETRIES,
         retry_prompt: str = RETRY_PROMPT,
+        greeting: str = GREETING,
     ) -> None:
         # 주입한 협력자는 공개한다 — 조립부가 무엇을 끼웠는지 확인할 수
         # 있어야 TTS 벤더를 바꿔도 조립부만 손대면 된다는 것을 테스트로
@@ -87,8 +95,20 @@ class ConversationResponder:
         self.voice = voice
         self._max_retries = max_retries
         self._retry_prompt = retry_prompt
+        self._greeting = greeting
         self.history: list[Turn] = []
         self._consecutive_failures = 0
+
+    def greet(self, sample_rate: int) -> bytes:
+        """통화가 연결되면 어르신보다 먼저 건네는 인사.
+
+        들려주지 못했으면 기록에 넣지 않는다 — 넣으면 모델이 어르신이 듣지도
+        못한 인사를 한 줄 알고 첫 대답에서 다시 인사하거나 엉뚱하게 이어받는다.
+        """
+        audio_out = self._speak(self._greeting, sample_rate)
+        if audio_out:
+            self.history.append(Turn("ai", self._greeting))
+        return audio_out
 
     def respond(self, audio: np.ndarray, sample_rate: int) -> bytes:
         try:

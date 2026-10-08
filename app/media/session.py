@@ -116,6 +116,34 @@ class CallSession:
     def call_id(self) -> str:
         return self._call_id
 
+    def start(self) -> list[Outgoing]:
+        """스트림이 붙은 직후, 어르신보다 먼저 건넬 말이 있으면 내보낸다.
+
+        Responder에 `greet`가 없으면(고정 응답 등) 아무것도 하지 않는다. 인사도
+        일반 응답과 같은 표식으로 감싸 AI 발화 구간으로 잡힌다 — 그래야 지표의
+        분모에서 AI 말이 빠지고, 첫 응답 지연이 인사가 끝난 시각부터 재어진다.
+        """
+        greet = getattr(self._responder, "greet", None)
+        if greet is None:
+            return []
+        try:
+            audio = greet(self._sample_rate)
+        except Exception:
+            # 인사 하나 실패했다고 통화를 끊지 않는다. 어르신이 말하면 정상 흐름이다.
+            logger.exception("인사 생성 실패 — 통화는 유지한다 call_id=%s", self._call_id)
+            return []
+        return self._marked(audio)
+
+    def _marked(self, audio: bytes) -> list[Outgoing]:
+        if not audio:
+            return []
+        self._turn_index += 1
+        begin_mark = f"turn{self._turn_index}-begin"
+        end_mark = f"turn{self._turn_index}-end"
+        # 오디오 앞뒤로 표식을 건다. 플랫폼이 순서대로 재생하므로
+        # begin이 돌아온 시점이 재생 시작, end가 돌아온 시점이 종료다.
+        return [MarkMessage(begin_mark), AudioMessage(audio), MarkMessage(end_mark)]
+
     def push_audio(self, pcm: bytes, timestamp_ms: int) -> list[Outgoing]:
         """PCM16 LE 한 덩이를 그 시작 시각과 함께 밀어 넣는다.
 
@@ -259,15 +287,7 @@ class CallSession:
             logger.exception("응답 생성 실패 — 통화는 유지한다 call_id=%s", self._call_id)
             return outgoing
 
-        if reply:
-            self._turn_index += 1
-            begin_mark = f"turn{self._turn_index}-begin"
-            end_mark = f"turn{self._turn_index}-end"
-            # 오디오 앞뒤로 표식을 건다. 플랫폼이 순서대로 재생하므로
-            # begin이 돌아온 시점이 재생 시작, end가 돌아온 시점이 종료다.
-            outgoing.append(MarkMessage(begin_mark))
-            outgoing.append(AudioMessage(reply))
-            outgoing.append(MarkMessage(end_mark))
+        outgoing.extend(self._marked(reply))
         return outgoing
 
     def on_mark(self, name: str) -> None:

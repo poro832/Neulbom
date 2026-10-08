@@ -270,3 +270,45 @@ def test_too_short_sounds_do_not_use_up_the_retries():
         assert responder.respond(audio, 8000) == b""
     # 진짜로 못 알아들은 첫 턴에는 되묻는다.
     assert responder.respond(audio, 8000) == b"\x01\x00"
+
+
+# ------------------------------------------------------------ 먼저 건네는 인사
+
+
+def test_the_greeting_is_spoken_without_waiting_for_the_elder():
+    """"여보세요"는 짧아서 인식이 약하다. 인사를 어르신의 첫마디에 걸지 않는다."""
+    responder, stt, _, voice = make(greeting="안녕하세요, 늘봄이에요.")
+
+    audio = responder.greet(8000)
+
+    assert voice.spoken == ["안녕하세요, 늘봄이에요."]
+    assert audio == "안녕하세요, 늘봄이에요.".encode()
+    assert stt.calls == 0
+
+
+def test_the_model_knows_it_already_greeted():
+    """인사를 기록에 넣지 않으면 모델이 첫 대답에서 또 인사한다."""
+    responder, _, chat, _ = make(greeting="안녕하세요.", chat=FakeChat("네, 좋네요"))
+
+    responder.greet(8000)
+    responder.respond(AUDIO, 8000)
+
+    assert chat.seen[0][0].speaker == "ai"
+    assert chat.seen[0][0].text == "안녕하세요."
+
+
+def test_a_greeting_that_could_not_be_spoken_is_not_remembered():
+    responder, _, chat, _ = make(greeting="안녕하세요.", voice=FakeVoice(fail=True))
+
+    assert responder.greet(8000) == b""
+    responder.respond(AUDIO, 8000)
+
+    assert all(turn.speaker != "ai" for turn in chat.seen[0])
+
+
+def test_there_is_a_default_greeting_that_asks_an_open_question():
+    responder, _, _, voice = make()
+
+    responder.greet(8000)
+
+    assert voice.spoken and "늘봄" in voice.spoken[0]

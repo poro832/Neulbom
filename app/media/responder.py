@@ -19,6 +19,9 @@ class Responder(Protocol):
         """한 턴의 발화를 받아 재생할 PCM16 LE 바이트를 돌려준다.
 
         빈 바이트는 "들려줄 것이 없음"을 뜻하며 오류가 아니다.
+
+        선택 사항: `greet(sample_rate) -> bytes`가 있으면 CallSession.start가
+        스트림이 붙자마자 호출해 어르신보다 먼저 말한다. 없으면 기다린다.
         """
         ...
 
