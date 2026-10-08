@@ -1,15 +1,18 @@
 """GuardianKeyStore 규약 — 구현마다 같은 테스트를 돌린다.
 
 다른 저장소 규약 파일과 같은 이유다: 두 구현이 갈라지면 개발할 땐 폐기가
-먹는데 서버에서는 안 먹는 식으로 약속만 조용히 깨진다. Postgres 쪽은
-Task 2에서 붙는다.
+먹는데 서버에서는 안 먹는 식으로 약속만 조용히 깨진다.
 """
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app.api.guardian_auth import AmbiguousPrefix, InMemoryGuardianKeyStore, generate_key
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 class Clock:
@@ -20,12 +23,39 @@ class Clock:
         return self.now
 
 
-@pytest.fixture(params=["memory"])
-def make_store(request):
-    def build(clock=None):
-        return InMemoryGuardianKeyStore(wall_clock=clock or Clock())
+def _memory(clock=None):
+    return InMemoryGuardianKeyStore(wall_clock=clock or Clock())
 
-    return build
+
+def _postgres(clock=None):
+    from app.api.db import assert_local, connect
+    from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
+
+    assert_local()
+    pool = connect(DATABASE_URL)
+    with pool.connection() as conn:
+        for guardian_id in (1, 2, 3):
+            conn.execute(
+                "INSERT INTO guardians (guardian_id, name, email, password_hash, phone_number) "
+                "VALUES (%s, 'g', %s, 'not-a-login', '000') ON CONFLICT (guardian_id) DO NOTHING",
+                (guardian_id, f"g{guardian_id}@example.invalid"),
+            )
+    store = PostgresGuardianKeyStore(pool=pool, clock=clock or Clock())
+    store.reset_for_tests()
+    return store
+
+
+@pytest.fixture(
+    params=[
+        "memory",
+        pytest.param(
+            "postgres",
+            marks=pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다"),
+        ),
+    ]
+)
+def make_store(request):
+    return _memory if request.param == "memory" else _postgres
 
 
 @pytest.fixture
