@@ -19,18 +19,23 @@ from app.telephony.client import ClawOpsTelephony, FakeTelephony
 
 import httpx
 
+from tests.auth_helpers import auth_kit
+
 
 def make_client():
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
+    kit = auth_kit()
     app = build_app(
         store=store,
         telephony=telephony,
         registry=InMemoryCallRegistry(),
         public_base_url="https://api.example.com",
         stream_base_url="wss://api.example.com",
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    return TestClient(app), store, telephony
+    return TestClient(app, headers=kit.headers), store, telephony
 
 
 # ------------------------------------------------------------ 발신할 때 넘긴다

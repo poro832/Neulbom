@@ -36,9 +36,12 @@ from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
+from app.api.calls import DEFAULT_MANUAL_CALLS_PER_DAY
 from app.api.db import check, connect, database_url
 from app.archiver import RecordingArchiver, archiver_from_env
 from app.api.dialer import answer_url_for, place_scheduled_call, status_callback_url_for
+from app.api.elder_directory import ElderDirectory, InMemoryElderDirectory
+from app.api.guardian_auth import GuardianAuth, InMemoryGuardianKeyStore, KeyAuth
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
@@ -406,6 +409,9 @@ def build_server(
     roster: Roster | None = None,
     archiver: RecordingArchiver | None = None,
     transcripts: TranscriptStore | None = None,
+    guardian_auth: GuardianAuth | None = None,
+    elders: ElderDirectory | None = None,
+    manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -422,6 +428,9 @@ def build_server(
         public_base_url=public_base_url,
         stream_base_url=stream_base_url,
         lifecycle=lifecycle,
+        guardian_auth=guardian_auth,
+        elders=elders,
+        manual_calls_per_day=manual_calls_per_day,
     )
 
     # 워커 조립은 app이 만들어진 뒤여야 한다 — add_event_handler는 app이
@@ -673,10 +682,30 @@ def transcripts_for(pool) -> TranscriptStore:
     return PostgresTranscriptStore(pool=pool)
 
 
+def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
+    """풀이 있으면 DB의 열쇠와 어르신 표를, 없으면 아무도 통과하지 못하는 빈 저장소를.
+
+    메모리 모드에는 열쇠를 만들 방법이 없으므로(관리 도구가 DB를 쓴다) 수동 요청은
+    전부 401이다. 열려 있는 것보다 막혀 있는 쪽이 안전하다.
+    """
+    if pool is None:
+        logger.warning(
+            "보호자 열쇠 저장소가 메모리다 — 열쇠가 하나도 없어 수동 전화 요청은 모두"
+            " 401이다(DATABASE_URL이 있어야 한다)"
+        )
+        return KeyAuth(InMemoryGuardianKeyStore()), InMemoryElderDirectory()
+
+    from app.api.postgres_elder_directory import PostgresElderDirectory
+    from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
+
+    return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
+
+
 log_startup_readiness()
 
 _store, _outcomes, _pool = stores_from_env()
 _transcripts = transcripts_for(_pool)
+_guardian_auth, _elders = guardian_auth_for(_pool)
 
 app = build_server(
     store=_store,
@@ -688,6 +717,9 @@ app = build_server(
     roster=roster_for(_pool),
     archiver=archiver_from_env(RECORDINGS_DIR, transcripts=_transcripts),
     transcripts=_transcripts,
+    guardian_auth=_guardian_auth,
+    elders=_elders,
+    manual_calls_per_day=_int_from_env("MANUAL_CALLS_PER_DAY", DEFAULT_MANUAL_CALLS_PER_DAY),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

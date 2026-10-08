@@ -21,6 +21,7 @@ from app.api.outcome_store import InMemoryOutcomeStore
 from app.api.store import InMemoryCallStore
 from app.main import build_server, stores_from_env
 from app.telephony.client import FakeTelephony
+from tests.auth_helpers import auth_kit
 from tests.test_server_wiring import _Beep, run_stream
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -112,6 +113,7 @@ def test_a_whole_call_runs_on_postgres_and_survives_the_stores(tmp_path, monkeyp
     # 앞선 테스트가 남긴 행을 치우고 어르신 12를 심는다.
     outcomes.reset_for_tests()
 
+    kit = auth_kit()
     try:
         app = build_server(
             store=store,
@@ -121,8 +123,10 @@ def test_a_whole_call_runs_on_postgres_and_survives_the_stores(tmp_path, monkeyp
             stream_base_url="wss://api.example.com",
             responder_factory=_Beep,
             recordings_dir=tmp_path,
+            guardian_auth=kit.auth,
+            elders=kit.directory,
         )
-        client = TestClient(app)
+        client = TestClient(app, headers=kit.headers)
 
         call_id = client.post(
             "/v1/calls/request", json={"elder_id": 12}
@@ -177,3 +181,29 @@ def test_the_worker_and_the_archiver_share_one_transcript_store():
         if getattr(h, "__self__", None).__class__.__name__ == "RecordingArchiver"
     ]
     assert archivers and archivers[0].transcripts is main._transcripts
+
+
+def test_the_assembled_app_refuses_manual_requests_without_a_database():
+    """메모리 모드에는 열쇠가 없다. 열려 있는 것보다 막혀 있는 쪽이 안전하다."""
+    import app.main as main
+
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/v1/calls/request", json={"elder_id": 1}, headers={"Authorization": "Bearer nlb_x"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_guardian_auth_for_a_missing_pool_warns(caplog):
+    import logging
+
+    from app.main import guardian_auth_for
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        auth, directory = guardian_auth_for(None)
+
+    assert "401" in caplog.text
+    assert auth.authenticate("Bearer anything") is None
+    assert directory.get(1) is None

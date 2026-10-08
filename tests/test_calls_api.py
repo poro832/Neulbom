@@ -17,20 +17,24 @@ from app.api.lifecycle import CallLifecycle
 from app.api.store import InMemoryCallStore
 from app.media.stream_server import InMemoryCallRegistry
 from app.telephony.client import FakeTelephony
+from tests.auth_helpers import auth_kit
 
 
 def make_client(telephony=None, store=None):
     store = store or InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = telephony or FakeTelephony()
     registry = InMemoryCallRegistry()
+    kit = auth_kit()
     app = build_app(
         store=store,
         telephony=telephony,
         registry=registry,
         public_base_url="https://api.example.com",
         stream_base_url="wss://api.example.com",
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    return TestClient(app), store, telephony, registry
+    return TestClient(app, headers=kit.headers), store, telephony, registry
 
 
 def test_request_places_a_call():
@@ -150,14 +154,17 @@ def test_post_dial_failure_does_not_leave_a_stuck_call():
     store = AttachSidFailsOnceStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
     registry = InMemoryCallRegistry()
+    kit = auth_kit()
     app = build_app(
         store=store,
         telephony=telephony,
         registry=registry,
         public_base_url="https://api.example.com",
         stream_base_url="wss://api.example.com",
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    client = TestClient(app)
+    client = TestClient(app, headers=kit.headers)
 
     response = client.post("/v1/calls/request", json={"elder_id": 12})
     assert response.status_code == 502
@@ -357,6 +364,7 @@ def make_lifecycle(store):
     """
     registry = InMemoryCallRegistry()
     lifecycle = CallLifecycle(store, registry)
+    kit = auth_kit()
     app = build_app(
         store=store,
         telephony=FakeTelephony(),
@@ -364,8 +372,10 @@ def make_lifecycle(store):
         public_base_url="https://api.example.com",
         stream_base_url="wss://api.example.com",
         lifecycle=lifecycle,
+        guardian_auth=kit.auth,
+        elders=kit.directory,
     )
-    return TestClient(app), lifecycle
+    return TestClient(app, headers=kit.headers), lifecycle
 
 
 def test_a_store_failure_at_the_end_still_revokes_the_token():
