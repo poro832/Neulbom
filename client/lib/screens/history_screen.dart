@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../theme/app_theme.dart';
 
+const Color eBg = Color(0xFFFBF6ED);
+const Color eCard = Color(0xFFFFFDF8);
+const Color eInk = Color(0xFF3B2F26);
+const Color eInkSoft = Color(0xFF93816D);
+const Color eLine = Color(0xFFEADFC9);
+const Color eAccent = Color(0xFFD97B4F);
+const Color eAccentSoft = Color(0xFFFBE4D3);
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -12,42 +18,34 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  /// 오늘 자정. 표본 통화 시각을 여기서부터 정각으로 잡는다.
-  /// `DateTime.now()`에서 빼면 화면을 연 시각의 분/초가 그대로 묻어나
-  /// 09:00 정기 통화가 03:38처럼 찍힌다.
-  static final DateTime _midnight = DateUtils.dateOnly(DateTime.now());
-
-  static DateTime _at({int daysAgo = 0, required int hour}) =>
-      _midnight.subtract(Duration(days: daysAgo)).add(Duration(hours: hour));
-
   final List<Map<String, dynamic>> _callHistory = [
     {
       'name': '아들',
-      'time': _at(hour: 9),
+      'time': DateTime.now().subtract(const Duration(hours: 2)),
       'duration': '00:15:32',
       'type': 'incoming',
     },
     {
       'name': '딸',
-      'time': _at(hour: 8),
+      'time': DateTime.now().subtract(const Duration(hours: 5)),
       'duration': '00:08:45',
       'type': 'incoming',
     },
     {
       'name': '며느리',
-      'time': _at(daysAgo: 1, hour: 15),
+      'time': DateTime.now().subtract(const Duration(days: 1)),
       'duration': '00:22:10',
       'type': 'outgoing',
     },
     {
       'name': '가족의사',
-      'time': _at(daysAgo: 1, hour: 9),
+      'time': DateTime.now().subtract(const Duration(days: 1, hours: 3)),
       'duration': '00:05:30',
       'type': 'incoming',
     },
     {
       'name': '복지관',
-      'time': _at(daysAgo: 2, hour: 14),
+      'time': DateTime.now().subtract(const Duration(days: 2)),
       'duration': '00:10:15',
       'type': 'incoming',
     },
@@ -60,6 +58,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       appBar: AppBar(
         backgroundColor: eBg,
         elevation: 0,
+        automaticallyImplyLeading: false,
         title: Text(
           '통화 기록',
           style: GoogleFonts.notoSerifKr(

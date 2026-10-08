@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../../services/api_service.dart';
-import '../../theme/app_theme.dart';
+import '../main.dart';
+import '../services/nulbom_api.dart';
 
 /// "곧 전화가 갑니다" 대기 화면 (전화망 설계 5장).
 ///
@@ -17,9 +17,13 @@ class CallingScreen extends StatefulWidget {
   // 화면 어딘가에 나온다고 믿고 값을 맞추려 든다.
   final int elderId;
 
+  /// 팀원 화면(`main_screen`)이 넘겨 주는 이름. 이 화면은 표시하지 않는다.
+  final String? callerName;
+
   const CallingScreen({
     super.key,
     this.elderId = 1,
+    this.callerName,
   });
 
   @override
@@ -51,7 +55,7 @@ class _CallingScreenState extends State<CallingScreen>
 
   Future<void> _request() async {
     try {
-      await ApiService.requestCall(elderId: widget.elderId);
+      await NulbomApi.requestCall(elderId: widget.elderId);
       // 409(이미 진행 중)도 성공으로 다룬다. 어르신 입장에서는
       // "전화가 오고 있다"로 똑같다.
       if (mounted) setState(() => _phase = _Phase.waiting);

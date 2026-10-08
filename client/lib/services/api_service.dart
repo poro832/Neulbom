@@ -1,249 +1,192 @@
 import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
-import '../models/call_summary.dart';
-
-/// 서버와 말을 맞추는 유일한 지점.
-///
-/// 설계 5장 JSON 계약을 그대로 따른다. 이전 프로젝트의 `/api/call-history`,
-/// `/api/elders`, `/api/conversation`은 계약이 달라 여기서 쓰지 않는다.
-///
-/// **fixture 모드** — 백엔드가 아직 없어도 화면을 만들 수 있도록 표본 데이터를
-/// 돌려준다. 설계 2장의 "프론트는 계약에 맞춘 fixture로 개발한다"가 이것이다.
-/// 실서버를 붙일 때는 아래처럼 끈다.
-///
-///   flutter run --dart-define=USE_FIXTURES=false \
-///               --dart-define=API_BASE_URL=https://api.example.com
-
-/// 전화 요청 결과. 409는 오류가 아니라 "이미 그 통화가 진행 중"이다.
-class CallRequestResult {
-  final int callId;
-  final bool alreadyInProgress;
-
-  const CallRequestResult({
-    required this.callId,
-    required this.alreadyInProgress,
-  });
-}
-
 class ApiService {
-  static const String baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000',
-  );
+  // Android 에뮬레이터에서 PC 서버 접속: 10.0.2.2
+  // 실기기에서: 172.20.10.2
+  static const String baseUrl = 'http://10.0.2.2:8080';
 
-  /// 보호자 개인 열쇠. 빌드할 때 `--dart-define=GUARDIAN_KEY=nlb_...`로 넣는다.
-  ///
-  /// 시연 단계의 방식이다. 앱 파일에 열쇠가 들어가므로 앱 파일을 남에게 주면
-  /// 열쇠도 간다 — 피해는 그 보호자의 어르신께 하루 상한 이하로 한정되고, 서버에서
-  /// 폐기하면 끝난다. 로그인 단계에서 이 상수는 사라진다.
-  static const String guardianKey = String.fromEnvironment('GUARDIAN_KEY');
-
-  static const bool useFixtures = bool.fromEnvironment(
-    'USE_FIXTURES',
-    defaultValue: true,
-  );
-
-  static const Duration _timeout = Duration(seconds: 10);
-
-  // ------------------------------------------------------------ 보호자
-
-  /// 보호자 홈이 필요한 것을 한 번에 가져온다.
-  static Future<GuardianOverview> fetchGuardianOverview({
-    int elderId = 1,
-  }) async {
-    if (useFixtures) return _fixtureOverview();
-
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/v1/elders/$elderId/overview'),
-          headers: const {'Content-Type': 'application/json'},
-        )
-        .timeout(_timeout);
-
-    if (response.statusCode != 200) {
-      throw Exception('안부 기록 조회 실패 (${response.statusCode})');
-    }
-
-    final json =
-        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-    return GuardianOverview(
-      elderName: json['elder_name'] as String,
-      latest: json['latest'] == null
-          ? null
-          : CallAnalysis.fromJson(json['latest'] as Map<String, dynamic>),
-      trend: (json['trend'] as List<dynamic>)
-          .map((point) => point as int?)
-          .toList(),
-      recentCalls: (json['recent_calls'] as List<dynamic>)
-          .map((call) => CallRecord.fromJson(call as Map<String, dynamic>))
-          .toList(),
-    );
-  }
-
-  // ------------------------------------------------------------ 어르신
-
-  /// 앱 채널 대화. 전화 채널과 달리 음성이 없어 지표가 일부만 나온다.
-  static Future<String> chat(String message) async {
-    if (useFixtures) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      return '그러셨군요. 오늘은 어떤 하루를 보내셨어요?';
-    }
-
-    final response = await http
-        .post(
-          Uri.parse('$baseUrl/v1/chat'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({'message': message}),
-        )
-        .timeout(_timeout);
-
-    if (response.statusCode != 200) {
-      throw Exception('대화 실패 (${response.statusCode})');
-    }
-    final json =
-        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-    return json['reply'] as String;
-  }
-
-  /// AI에게 전화를 걸어 달라고 요청한다.
-  ///
-  /// 앱은 통화를 하지 않는다. 마이크도 소켓도 쓰지 않는다 — 버튼은 신호일 뿐이고
-  /// 대화는 어르신의 전화기로 걸려 오는 진짜 전화에서 일어난다.
-  static Future<CallRequestResult> requestCall({int elderId = 1}) async {
-    if (useFixtures) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      return const CallRequestResult(callId: 1042, alreadyInProgress: false);
-    }
-
-    final response = await http
-        .post(
-          Uri.parse('$baseUrl/v1/calls/request'),
-          headers: {
-            'Content-Type': 'application/json',
-            if (guardianKey.isNotEmpty) 'Authorization': 'Bearer $guardianKey',
-          },
-          body: jsonEncode({'elder_id': elderId}),
-        )
-        .timeout(_timeout);
-
-    if (response.statusCode == 202 || response.statusCode == 409) {
-      final json =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      return CallRequestResult(
-        callId: json['call_id'] as int,
-        // 두 번 누른 것은 오류가 아니다. 그 통화의 대기 화면으로 보낸다.
-        alreadyInProgress: response.statusCode == 409,
+  // 통화 내역 불러오기 (최근 10개)
+  static Future<List<dynamic>> getCallHistory() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/call-history/recent'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('요청 시간 초과'),
       );
-    }
-    throw Exception(callRequestMessage(response.statusCode));
-  }
 
-  /// 전화 요청이 거절된 이유를 보호자가 알아볼 말로 바꾼다.
-  /// 서버는 401을 열쇠의 없음, 틀림, 폐기에 똑같이 쓴다(이유를 알려 주지 않으려고).
-  static String callRequestMessage(int statusCode) {
-    switch (statusCode) {
-      case 401:
-        return '보호자 열쇠가 없거나 올바르지 않습니다';
-      case 403:
-        return '어르신의 동의가 아직 없습니다';
-      case 404:
-        return '등록되지 않은 어르신입니다';
-      case 429:
-        return '오늘 요청 횟수를 넘었습니다';
-      case 503:
-        return '지금은 확인할 수 없습니다. 잠시 뒤에 다시 해 주세요';
-      default:
-        return '전화 요청 실패 ($statusCode)';
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('통화 내역 불러오기 실패: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('API 에러: $e');
+      rethrow;
     }
   }
 
-  // ------------------------------------------------------------ 공통
+  // 통화 기록 저장
+  static Future<void> saveCallHistory({
+    required String callerName,
+    required String callerType,
+    required int duration,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/call-history'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'callerName': callerName,
+          'callerType': callerType,
+          'duration': duration,
+          'status': 'COMPLETED',
+          'timestamp': DateTime.now().toIso8601String(),
+        }),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('요청 시간 초과'),
+      );
 
+      if (response.statusCode != 201 && response.statusCode != 200) {
+        throw Exception('통화 기록 저장 실패: ${response.statusCode}');
+      }
+      print('통화 기록 저장 완료');
+    } catch (e) {
+      print('API 에러: $e');
+      rethrow;
+    }
+  }
+
+  // FCM 토큰 등록
   static Future<void> registerFcmToken(String token) async {
-    if (useFixtures) return;
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/fcm/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'token': token}),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('요청 시간 초과'),
+      );
 
-    await http
-        .post(
-          Uri.parse('$baseUrl/v1/devices/fcm-token'),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({'token': token}),
-        )
-        .timeout(_timeout);
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception('FCM 토큰 등록 실패: ${response.statusCode}');
+      }
+      print('FCM 토큰 등록 완료: $token');
+    } catch (e) {
+      print('API 에러: $e');
+    }
   }
 
-  // ------------------------------------------------------------ fixture
+  // Mock AI 응답 데이터
+  static const Map<String, String> _mockResponses = {
+    '안녕': '안녕하세요! 저도 반갑습니다. 오늘은 어떤 하루를 보내셨나요?',
+    '안녕하세요': '안녕하세요! 저도 반갑습니다. 오늘은 어떤 하루를 보내셨나요?',
+    '하루': '네, 저도 궁금해요. 오늘 재미있었던 일이 있으신가요?',
+    '건강': '건강하신 게 가장 중요합니다. 잠은 잘 주무셨나요?',
+    '밥': '오늘 밥은 맛있게 드셨나요? 영양 있는 식사가 중요해요.',
+    '산책': '산책은 건강에 정말 좋습니다. 날씨는 어떠신가요?',
+    'family': '가족이 있어서 참 좋으시겠어요. 자주 연락하세요.',
+    '손주': '손주분들이 있으면 얼마나 즐거우시겠어요!',
+  };
 
-  /// 설계 5장 형식 그대로. 서버가 붙으면 이 값이 실측으로 바뀔 뿐
-  /// 화면 코드는 바뀌지 않는다.
-  static Future<GuardianOverview> _fixtureOverview() async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    final now = DateTime.now();
+  // AI 대화 (Mock + 실제 API 지원)
+  static Future<String> chat(String message) async {
+    // Mock 응답 확인
+    for (var key in _mockResponses.keys) {
+      if (message.contains(key)) {
+        // 0.5~1초 딜레이로 자연스러움
+        await Future.delayed(
+          Duration(milliseconds: 500 + DateTime.now().millisecond % 500),
+        );
+        return _mockResponses[key]!;
+      }
+    }
 
-    // 정기 안부 전화는 매일 09시다(설계 3장). 화면을 언제 열어도 통화 시각이
-    // 09:00으로 찍히도록, 이미 지나간 가장 최근 09시를 기준으로 잡는다.
-    final nineToday = DateTime(now.year, now.month, now.day, 9);
-    final lastCallAt = nineToday.isAfter(now)
-        ? nineToday.subtract(const Duration(days: 1))
-        : nineToday;
+    // 기본 Mock 응답
+    final defaultResponses = [
+      '그렇군요. 자세히 말씀해주실 수 있을까요?',
+      '정말 그러시군요. 어떤 기분이 드세요?',
+      '알겠습니다. 더 이야기해주시겠어요?',
+      '그런 일도 있으셨군요. 대단하신데요?',
+      '좋은 이야기네요. 앞으로도 잘 될 거예요.',
+    ];
 
-    return GuardianOverview(
-      elderName: '박정숙 어르신',
-      latest: CallAnalysis(
-        metrics: const CallMetrics(
-          speechRatio: 0.31,
-          silenceRatio: 0.52,
-          turnCount: 9,
-          negativeWordCount: 4,
-          avgResponseDelayMs: 2840,
-          noAnswerRecent7: 2,
-        ),
-        riskScore: 68,
-        riskLevel: 'watch',
-        baselineDelta: const BaselineDelta(
-          speechRatio: -0.19,
-          avgResponseDelayMs: 1340,
-        ),
-        summary: '평소보다 말수가 줄고 대답이 늦어지셨어요. '
-            '식사는 하셨다고 하셨지만 무릎이 아프다는 말씀이 여러 번 나왔어요.',
-        degraded: false,
-      ),
-      trend: const [
-        18, 22, 20, 25, null, 31, 28,
-        34, 30, null, 41, 47, 55, 68,
-      ],
-      recentCalls: [
-        CallRecord(
-          callId: 1042,
-          status: 'completed',
-          startedAt: lastCallAt,
-          durationSeconds: 214,
-          riskLevel: 'watch',
-          riskScore: 68,
-        ),
-        CallRecord(
-          callId: 1040,
-          status: 'completed',
-          startedAt: lastCallAt.subtract(const Duration(days: 1)),
-          durationSeconds: 252,
-          riskLevel: 'watch',
-          riskScore: 55,
-        ),
-        CallRecord(
-          callId: 1038,
-          status: 'no_answer',
-          startedAt: lastCallAt.subtract(const Duration(days: 2)),
-        ),
-        CallRecord(
-          callId: 1036,
-          status: 'completed',
-          startedAt: lastCallAt.subtract(const Duration(days: 3)),
-          durationSeconds: 301,
-          riskLevel: 'normal',
-          riskScore: 22,
-        ),
-      ],
+    await Future.delayed(
+      Duration(milliseconds: 500 + DateTime.now().millisecond % 500),
     );
+    return defaultResponses[message.length % defaultResponses.length];
+
+    // 실제 API 연동 (백엔드 준비 후)
+    /*
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/conversation'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'message': message}),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw Exception('요청 시간 초과'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['response'] ?? '응답을 받을 수 없습니다.';
+      }
+      throw Exception('AI 대화 실패: ${response.statusCode}');
+    } catch (e) {
+      print('API 에러: $e');
+      rethrow;
+    }
+    */
+  }
+
+  // TTS (텍스트 → 음성) - 향후 구현
+  static Future<String> textToSpeech(String text) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/tts'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'text': text}),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('요청 시간 초과'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['audioUrl'] ?? '';
+      }
+      throw Exception('TTS 변환 실패: ${response.statusCode}');
+    } catch (e) {
+      print('API 에러: $e');
+      rethrow;
+    }
+  }
+
+  // 어르신 정보 조회
+  static Future<Map<String, dynamic>> getElderInfo(String elderId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/elders/$elderId'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('요청 시간 초과'),
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      throw Exception('어르신 정보 조회 실패: ${response.statusCode}');
+    } catch (e) {
+      print('API 에러: $e');
+      rethrow;
+    }
   }
 }
