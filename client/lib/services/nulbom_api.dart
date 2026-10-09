@@ -46,7 +46,7 @@ class NulbomApi {
   /// 시연 단계의 방식이다. 앱 파일에 열쇠가 들어가므로 앱 파일을 남에게 주면
   /// 열쇠도 간다 — 피해는 그 보호자의 어르신께 하루 상한 이하로 한정되고, 서버에서
   /// 폐기하면 끝난다. 로그인 단계에서 이 상수는 사라진다.
-  static const String guardianKey = String.fromEnvironment('GUARDIAN_KEY');
+  static String guardianKey = const String.fromEnvironment('GUARDIAN_KEY');
 
   static const Duration _timeout = Duration(seconds: 10);
 

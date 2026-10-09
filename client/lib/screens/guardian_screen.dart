@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'elderly_list_screen.dart';
+import '../models/nulbom_models.dart';
+import '../services/nulbom_api.dart';
 import 'health_alerts_screen.dart';
 import 'conversation_history_screen.dart';
 import 'elderly_detail_screen.dart';
@@ -28,52 +30,125 @@ class GuardianScreen extends StatefulWidget {
 }
 
 class _GuardianScreenState extends State<GuardianScreen> {
-  // Mock 어르신 데이터
-  final List<Map<String, dynamic>> _elders = [
-    {
-      'id': 1,
-      'name': '김할머니',
-      'age': 78,
-      'hasTalked': true,
-      'status': '정상',
-      'lastTalk': '오늘 14:30',
-      'weekCalls': 6,
-      'weekEmotion': 3.8,
-      'alertCount': 2,
-      'emotionData': [3.8, 3.2, 3.5, 3.8, 3.6, 3.9, 4.1],
-    },
-    {
-      'id': 2,
-      'name': '이할아버지',
-      'age': 82,
-      'hasTalked': false,
-      'status': '주의',
-      'lastTalk': '어제 16:45',
-      'weekCalls': 4,
-      'weekEmotion': 3.2,
-      'alertCount': 1,
-      'emotionData': [3.2, 3.0, 3.2, 3.1, 3.4, 3.3, 3.2],
-    },
-  ];
-
+  // 서버에서 읽어 기존 화면이 쓰던 맵 모양으로 바꿔 둔다.
+  List<Map<String, dynamic>> _elders = [];
   Map<String, dynamic> _selectedElder = {};
+  List<Map<String, dynamic>> _alerts = [];
   Timer? _dateRefreshTimer;
-
-  // Mock 알림 데이터
-  final List<Map<String, dynamic>> _alerts = [
-    {'type': '우울의심', 'elder': '김할머니', 'time': '오늘 14:30', 'severity': 'high'},
-    {'type': '미응답', 'elder': '이할아버지', 'time': '어제 09:00', 'severity': 'medium'},
-    {'type': '정상완료', 'elder': '김할머니', 'time': '어제 15:20', 'severity': 'low'},
-  ];
+  bool _loading = true;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
-    _selectedElder = _elders.first;
+    _load();
     _dateRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
   }
+
+  static const _weekdayShort = ['월', '화', '수', '목', '금', '토', '일'];
+
+  static String _status(double? score) {
+    if (score == null) return '기록 없음';
+    if (score >= 60) return '경보';
+    if (score >= 30) return '주의';
+    return '정상';
+  }
+
+  static String _when(DateTime? time) {
+    if (time == null) return '-';
+    final now = DateTime.now();
+    final hm = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(time.year, time.month, time.day);
+    final diff = today.difference(day).inDays;
+    if (diff == 0) return '오늘 $hm';
+    if (diff == 1) return '어제 $hm';
+    return '${time.month}월 ${time.day}일 $hm';
+  }
+
+  Map<String, dynamic> _elderToMap(ElderSummary e) {
+    final last = e.lastCallAt;
+    final now = DateTime.now();
+    final talkedToday = last != null &&
+        e.lastStatus == 'completed' &&
+        last.year == now.year &&
+        last.month == now.month &&
+        last.day == now.day;
+    return {
+      'id': e.elderId,
+      'name': e.name,
+      'hasTalked': talkedToday,
+      'status': _status(e.weekAvgScore),
+      'lastTalk': _when(last),
+      'weekCalls': e.weekCalls,
+      'weekScore': e.weekAvgScore,
+      'alertCount': e.weekAlerts,
+      // 일별 점수는 어르신을 고를 때 서버에서 읽는다. 통화 없는 날은 0으로 그린다.
+      'dayScores': List<double>.filled(7, 0.0),
+    };
+  }
+
+  Map<String, dynamic> _alertToMap(AlertItem a) {
+    return {
+      'type': a.type == 'no_answer' ? '미응답' : '평소와 다름',
+      'elder': a.elderName,
+      'time': _when(a.createdAt),
+      'severity': a.severity == 'critical'
+          ? 'high'
+          : a.severity == 'warning'
+              ? 'medium'
+              : 'low',
+      'message': a.message,
+    };
+  }
+
+  Future<void> _load() async {
+    try {
+      final elders = (await NulbomApi.guardianElders()).map(_elderToMap).toList();
+      final alerts = (await NulbomApi.guardianAlerts()).map(_alertToMap).toList();
+      if (!mounted) return;
+      setState(() {
+        _elders = elders;
+        _alerts = alerts;
+        _selectedElder = elders.isEmpty ? {} : elders.first;
+        _loading = false;
+        _loadError = null;
+      });
+      if (elders.isNotEmpty) await _loadWeekly(elders.first);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = error is ApiException
+            ? error.message
+            : '데이터를 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
+      });
+    }
+  }
+
+  Future<void> _loadWeekly(Map<String, dynamic> elder) async {
+    try {
+      final w = await NulbomApi.weekly(elder['id'] as int);
+      if (!mounted) return;
+      setState(() {
+        elder['dayScores'] = [for (final d in w.days) d.avgScore ?? 0.0];
+        elder['weekScore'] = w.avgScore;
+        elder['weekCalls'] = w.totalCalls;
+      });
+    } catch (_) {
+      // 주간 그래프만 못 읽은 것이다. 목록과 알림은 그대로 보여 준다.
+    }
+  }
+
+  void _select(Map<String, dynamic> elder) {
+    setState(() => _selectedElder = elder);
+    _loadWeekly(elder);
+  }
+
+  static String _scoreText(Object? score) =>
+      score == null ? '-' : '${(score as double).round()}점';
 
   @override
   void dispose() {
@@ -93,6 +168,43 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: eBg,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_loadError != null || _elders.isEmpty) {
+      return Scaffold(
+        backgroundColor: eBg,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _loadError ?? '관리 중인 어르신이 아직 없어요.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(fontSize: 18, color: eInkSoft),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: () {
+                    setState(() {
+                      _loading = true;
+                      _loadError = null;
+                    });
+                    _load();
+                  },
+                  child: const Text('다시 불러오기'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: eBg,
       body: SafeArea(
@@ -199,9 +311,8 @@ class _GuardianScreenState extends State<GuardianScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: _buildStatCard(
-                        title: '평균 감정',
-                        value:
-                            '${(_selectedElder['weekEmotion'] as double).toStringAsFixed(1)}/5.0',
+                        title: '평소와 다른 정도',
+                        value: _scoreText(_selectedElder['weekScore']),
                         subtitle: '',
                         color: const Color(0xFF4CAF50),
                       ),
@@ -212,7 +323,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
                 // 감정 추이 그래프
                 Text(
-                  '이번 주 감정 추이',
+                  '이번 주 평소와 다른 정도',
                   style: GoogleFonts.notoSerifKr(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
@@ -221,7 +332,12 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 ),
                 const SizedBox(height: 12),
                 _buildEmotionChart(
-                  _selectedElder['emotionData'] as List<double>,
+                  _selectedElder['dayScores'] as List<double>,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '낮을수록 평소와 같아요. 30점부터 주의, 60점부터 경보로 알려 드려요.',
+                  style: GoogleFonts.notoSansKr(fontSize: 12, color: eInkSoft),
                 ),
                 const SizedBox(height: 32),
 
@@ -329,7 +445,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
               ),
               minimumSize: WidgetStatePropertyAll(Size(tileWidth, 0)),
             ),
-            onPressed: () => setState(() => _selectedElder = elder),
+            onPressed: () => _select(elder),
             child: _buildElderMenuTile(elder, tileWidth),
           ),
       ],
@@ -453,7 +569,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   ),
                 ),
                 Text(
-                  '${elder['age']}세',
+                  '이번 주 ${elder['weekCalls']}회 통화',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.notoSansKr(
@@ -610,7 +726,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
     );
   }
 
-  Widget _buildEmotionChart(List<double> emotionData) {
+  Widget _buildEmotionChart(List<double> dayScores) {
+    // 낮을수록 평소와 같다: 30 미만 초록, 30~60 노랑, 60 이상 빨강.
+    Color colorFor(double score) {
+      if (score >= 60) return const Color(0xFFE56F67);
+      if (score >= 30) return const Color(0xFFE6B84B);
+      return const Color(0xFF68B98A);
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: eCard,
@@ -622,17 +745,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
       child: BarChart(
         BarChartData(
           alignment: BarChartAlignment.spaceAround,
-          maxY: 5,
+          maxY: 100,
           barTouchData: BarTouchData(
             enabled: true,
             touchTooltipData: BarTouchTooltipData(
               getTooltipItem: (group, groupIndex, rod, rodIndex) {
                 return BarTooltipItem(
-                  '${rod.toY.toStringAsFixed(1)}점',
-                  const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  '${rod.toY.round()}점',
+                  const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                 );
               },
             ),
@@ -644,8 +764,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
             leftTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
+                reservedSize: 28,
                 getTitlesWidget: (value, meta) {
-                  if (value != 0 && value != 2 && value != 4 && value != 5) {
+                  if (value != 0 && value != 30 && value != 60 && value != 100) {
                     return const SizedBox.shrink();
                   }
                   return SideTitleWidget(
@@ -681,30 +802,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
           ),
           gridData: FlGridData(show: true, drawVerticalLine: false),
           borderData: FlBorderData(show: false),
-          barGroups: List.generate(emotionData.length, (index) {
-            final score = emotionData[index].clamp(0.0, 5.0);
-            final scoreColor = score <= 1
-                ? Color.lerp(
-                    const Color(0xFFE56F67),
-                    const Color(0xFFE6B84B),
-                    score,
-                  )!
-                : Color.lerp(
-                    const Color(0xFFE6B84B),
-                    const Color(0xFF68B98A),
-                    (score - 1.0) / 4.0,
-                  )!;
-
+          barGroups: List.generate(dayScores.length, (index) {
+            final score = dayScores[index].clamp(0.0, 100.0);
             return BarChartGroupData(
               x: index,
               barRods: [
                 BarChartRodData(
                   toY: score,
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [const Color(0xFFF09A91), scoreColor],
-                  ),
+                  color: colorFor(score),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(4),
                     topRight: Radius.circular(4),
@@ -729,7 +834,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
     return GestureDetector(
       onTap: () {
-        final tabIndex = alert['type'] == '우울의심' ? 1 : 2;
+        final tabIndex = alert['type'] == '평소와 다름' ? 1 : 2;
         Navigator.push(
           context,
           MaterialPageRoute(
