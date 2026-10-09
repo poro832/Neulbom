@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../services/nulbom_api.dart';
 import 'conversation_detail_page.dart';
 
 const Color eBg = Color(0xFFFBF6ED);
@@ -27,6 +28,203 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
   String _selectedDate = _todayKey();
   String _reportPeriod = 'daily';
   DateTime _periodDate = DateTime.now();
+
+  // 지금 보는 기간(일·주·월)의 실제 통계. 서버의 주간 통계에서 만든다.
+  int _statCalls = 0;
+  double? _statScore;
+  bool _statsLoading = true;
+  String? _statsError;
+  int _statsRequest = 0; // 늦게 온 응답이 최근 요청을 덮어쓰지 않게 한다
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    final request = ++_statsRequest;
+    setState(() {
+      _statsLoading = true;
+      _statsError = null;
+    });
+    try {
+      final scored = <String, double>{}; // 날짜 -> 평균 점수 (점수가 있는 날만)
+      var calls = 0;
+      void add(Iterable<dynamic> weekDays, bool Function(String date) keep) {
+        for (final d in weekDays) {
+          final date = d.date as String;
+          if (!keep(date)) continue;
+          calls += d.calls as int;
+          final score = d.avgScore as double?;
+          if (score != null) scored[date] = score;
+        }
+      }
+
+      if (_reportPeriod == 'daily') {
+        final week = await NulbomApi.weekly(widget.elderlyId, weekStart: _selectedDate);
+        add(week.days, (date) => date == _selectedDate);
+      } else if (_reportPeriod == 'weekly') {
+        final week = await NulbomApi.weekly(widget.elderlyId, weekStart: _dateKey(_periodDate));
+        add(week.days, (_) => true);
+      } else {
+        // 서버에는 주간 통계만 있다. 그 달에 걸친 주들을 이어 읽고 그 달의 날만 합친다.
+        final first = DateTime(_periodDate.year, _periodDate.month, 1);
+        final last = DateTime(_periodDate.year, _periodDate.month + 1, 0);
+        final prefix = '${first.year}-${first.month.toString().padLeft(2, '0')}-';
+        var cursor = _weekStart(first);
+        while (!cursor.isAfter(last)) {
+          final week = await NulbomApi.weekly(widget.elderlyId, weekStart: _dateKey(cursor));
+          add(week.days, (date) => date.startsWith(prefix));
+          cursor = cursor.add(const Duration(days: 7));
+        }
+      }
+      if (!mounted || request != _statsRequest) return;
+      final values = scored.values.toList();
+      setState(() {
+        _statCalls = calls;
+        _statScore = values.isEmpty ? null : values.reduce((a, b) => a + b) / values.length;
+        _statsLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || request != _statsRequest) return;
+      setState(() {
+        _statsLoading = false;
+        _statsError = error is ApiException
+            ? error.message
+            : '통계를 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
+      });
+    }
+  }
+
+  /// 낮을수록 평소와 같다: 30점부터 주의, 60점부터 경보.
+  String get _statusLabel {
+    final score = _statScore;
+    if (score == null) return '기록 없음';
+    if (score >= 60) return '경보';
+    if (score >= 30) return '주의';
+    return '정상';
+  }
+
+  Color get _statusColor {
+    switch (_statusLabel) {
+      case '경보':
+        return const Color(0xFFE56F67);
+      case '주의':
+        return const Color(0xFFFFA726);
+      case '정상':
+        return const Color(0xFF4CAF50);
+      default:
+        return eInkSoft;
+    }
+  }
+
+  Widget _buildRealStatRow(String callsSubtitle) {
+    final loading = _statsLoading;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (loading) const LinearProgressIndicator(),
+        if (_statsError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _statsError!,
+              style: const TextStyle(fontSize: 13, color: Color(0xFFC0553F)),
+            ),
+          ),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                title: '평소와 다른 정도',
+                value: loading || _statScore == null ? '-' : '${_statScore!.round()}점',
+                subtitle: '낮을수록 평소와 같아요',
+                color: _statusColor,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildStatCard(
+                title: '통화 횟수',
+                value: loading ? '-' : '$_statCalls회',
+                subtitle: callsSubtitle,
+                color: eAccent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildStatCard(
+                title: '상태',
+                value: loading ? '-' : _statusLabel,
+                subtitle: '30점부터 주의, 60점부터 경보',
+                color: _statusColor,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String _periodSummaryText(String periodLabel) {
+    if (_statsLoading) return '통계를 불러오는 중이에요.';
+    if (_statCalls == 0) return '$periodLabel에는 ${widget.elderlyName}님과 나눈 통화 기록이 없어요.';
+    final score = _statScore;
+    final scoreText = score == null
+        ? '점수를 낼 수 있는 통화가 없었어요'
+        : '평소와 다른 정도는 평균 ${score.round()}점($_statusLabel)이에요';
+    return '$periodLabel에는 ${widget.elderlyName}님과 $_statCalls번 통화했고, $scoreText.';
+  }
+
+  Widget _buildStatusAnalysis() {
+    final label = _statusLabel;
+    final color = _statusColor;
+    final String lines;
+    switch (label) {
+      case '정상':
+        lines = '• 평소와 비슷한 말수와 대답 속도예요\n• 특별히 달라진 점이 없어요';
+      case '주의':
+        lines = '• 평소보다 말수가 줄었거나 대답이 느려졌어요\n• 안부를 한 번 확인해 보세요';
+      case '경보':
+        lines = '• 평소와 많이 달랐어요\n• 가능하면 직접 연락해 보세요';
+      default:
+        lines = '• 이날은 점수를 낸 통화가 없어요';
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        border: Border.all(color: color.withOpacity(0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                label == '정상' ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
+                color: color,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(lines, style: const TextStyle(fontSize: 14, color: eInkSoft, height: 1.6)),
+        ],
+      ),
+    );
+  }
 
   static String _todayKey() => _dateKey(DateTime.now());
 
@@ -530,7 +728,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     final isSelected = _reportPeriod == period;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _reportPeriod = period),
+        onTap: () {
+          setState(() => _reportPeriod = period);
+          _loadStats();
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           decoration: BoxDecoration(
@@ -589,40 +790,12 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                     : await _showMonthPicker(_periodDate);
                 if (picked != null) {
                   setState(() => _periodDate = picked);
+                  _loadStats();
                 }
               },
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard(
-                    title: '우울 수치',
-                    value: isWeekly ? '2.8/10' : '2.6/10',
-                    subtitle: '정상',
-                    color: const Color(0xFF4CAF50),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildStatCard(
-                    title: '대화 횟수',
-                    value: isWeekly ? '12회' : '48회',
-                    subtitle: isWeekly ? '주간 합계' : '월간 합계',
-                    color: eAccent,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildStatCard(
-                    title: '건강상태',
-                    value: '정상',
-                    subtitle: '이상 없음',
-                    color: const Color(0xFF4CAF50),
-                  ),
-                ),
-              ],
-            ),
+            _buildRealStatRow(isWeekly ? '주간 합계' : '월간 합계'),
             const SizedBox(height: 24),
             Text(
               isWeekly ? '주간 분석 요약' : '월간 분석 요약',
@@ -642,9 +815,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                isWeekly
-                    ? '$rangeLabel 기간 동안 ${widget.elderlyName}님은 꾸준히 대화에 참여했고, 활동량과 감정 상태가 안정적으로 유지되었습니다.'
-                    : '$monthLabel ${widget.elderlyName}님은 규칙적인 대화와 활동을 이어갔으며 전반적인 건강 상태가 양호합니다.',
+                _periodSummaryText(isWeekly ? rangeLabel : monthLabel),
                 style: const TextStyle(fontSize: 14, color: eInk, height: 1.8),
               ),
             ),
@@ -700,6 +871,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                   );
                   if (picked != null) {
                     setState(() => _selectedDate = _dateKey(picked));
+                    _loadStats();
                   }
                 },
               ),
@@ -707,7 +879,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
               // 통계 제목
               Text(
-                '오늘의 통계',
+                '이날의 통계',
                 style: GoogleFonts.notoSerifKr(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -717,36 +889,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               const SizedBox(height: 12),
 
               // 통계 그리드
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildStatCard(
-                      title: '우울 수치',
-                      value: data['depressionIndex'],
-                      subtitle: data['depressionStatus'],
-                      color: const Color(0xFF4CAF50),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildStatCard(
-                      title: '대화 횟수',
-                      value: data['conversationCount'],
-                      subtitle: data['conversationStatus'],
-                      color: eAccent,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildStatCard(
-                      title: '건강상태',
-                      value: data['healthStatus'],
-                      subtitle: data['healthDetail'],
-                      color: const Color(0xFF4CAF50),
-                    ),
-                  ),
-                ],
-              ),
+              _buildRealStatRow('그날 합계'),
               const SizedBox(height: 24),
 
               // 전체 대화 요약
@@ -865,60 +1008,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              Container(
-                decoration: BoxDecoration(
-                  color: data['depressionStatus'] == '정상'
-                      ? const Color(0xFF4CAF50).withOpacity(0.1)
-                      : const Color(0xFFFFA726).withOpacity(0.1),
-                  border: Border.all(
-                    color: data['depressionStatus'] == '정상'
-                        ? const Color(0xFF4CAF50).withOpacity(0.3)
-                        : const Color(0xFFFFA726).withOpacity(0.3),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          data['depressionStatus'] == '정상'
-                              ? Icons.check_circle_outline_rounded
-                              : Icons.warning_amber_rounded,
-                          color: data['depressionStatus'] == '정상'
-                              ? const Color(0xFF4CAF50)
-                              : const Color(0xFFFFA726),
-                          size: 24,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          data['depressionStatus'] == '정상' ? '정상 상태' : '주의 필요',
-                          style: GoogleFonts.notoSansKr(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: data['depressionStatus'] == '정상'
-                                ? const Color(0xFF4CAF50)
-                                : const Color(0xFFFFA726),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      data['depressionStatus'] == '정상'
-                          ? '• 대화 활동이 활발함\n• 수면 시간이 충분함\n• 특이사항 없음'
-                          : '• 우울 수치 증가\n• 활동량 감소 주의\n• 보호자 연락 권장',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: eInkSoft,
-                        height: 1.6,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildStatusAnalysis(),
             ],
           ),
         ),
