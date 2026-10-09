@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../models/nulbom_models.dart';
+import '../services/nulbom_api.dart';
+
 const Color eBg = Color(0xFFFBF6ED);
 const Color eCard = Color(0xFFFFFDF8);
 const Color eInk = Color(0xFF3B2F26);
@@ -17,41 +20,94 @@ class EmergencyScreen extends StatefulWidget {
 }
 
 class _EmergencyScreenState extends State<EmergencyScreen> {
-  final List<Map<String, String>> contacts = [
-    {
-      'name': '김보호 (딸)',
-      'relation': '보호자',
-      'number': '010-1234-5678',
-    },
-    {
-      'name': '이효준 (아들)',
-      'relation': '보호자',
-      'number': '010-2345-6789',
-    },
-    {
-      'name': '박은숙 (며느리)',
-      'relation': '보호자',
-      'number': '010-3456-7890',
-    },
-  ];
+  // 보호자(서버가 DB에서 채운다)와 어르신이 추가한 연락처를 한 목록으로 보여 준다.
+  // 'id'가 있는 것만 어르신이 추가한 연락처라 길게 눌러 지울 수 있다.
+  List<Map<String, String>> contacts = [];
+  bool _loading = true;
+  String? _loadError;
 
-  final List<Map<String, String>> otherContacts = [
-    {
-      'name': '은평구청',
-      'relation': '복지담당',
-      'number': '02-351-4114',
-    },
-    {
-      'name': '김영희 요양보호사',
-      'relation': '돌봄 담당',
-      'number': '010-9876-5432',
-    },
-    {
-      'name': '서울의료원',
-      'relation': '병원',
-      'number': '02-2276-8114',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final mine = await NulbomApi.myContacts();
+      if (!mounted) return;
+      setState(() {
+        contacts = [
+          for (final g in mine.guardians)
+            {'name': g.name, 'relation': g.relation, 'number': g.phone, 'id': ''},
+          for (final c in mine.contacts)
+            {
+              'name': c.name,
+              'relation': c.relation,
+              'number': c.phone,
+              'id': '${c.contactId}',
+            },
+        ];
+        _loading = false;
+        _loadError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = error is ApiException
+            ? error.message
+            : '연락처를 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
+      });
+    }
+  }
+
+  Future<void> _addContact(BuildContext dialogContext, String name, String relation,
+      String number) async {
+    try {
+      await NulbomApi.addContact(name: name, relation: relation, phone: number);
+      if (!mounted) return;
+      Navigator.pop(dialogContext);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$name 연락처가 추가되었습니다.'), duration: const Duration(seconds: 2)),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '추가하지 못했어요.'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDelete(Map<String, String> contact) async {
+    final id = int.tryParse(contact['id'] ?? '');
+    if (id == null) return; // 보호자는 지울 수 없다
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${contact['name']} 연락처를 지울까요?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('아니요')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('지우기')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await NulbomApi.deleteContact(id);
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error is ApiException ? error.message : '지우지 못했어요.')),
+      );
+    }
+  }
 
   void _handleEmergencyCall(BuildContext context, String name, String number) {
     showDialog(
@@ -164,25 +220,17 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               if (nameController.text.isNotEmpty &&
                   relationController.text.isNotEmpty &&
                   numberController.text.isNotEmpty) {
-                setState(() {
-                  contacts.add({
-                    'name': nameController.text,
-                    'relation': relationController.text,
-                    'number': numberController.text,
-                  });
-                });
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('${nameController.text} 연락처가 추가되었습니다.'),
-                    duration: const Duration(seconds: 2),
-                  ),
+                _addContact(
+                  context,
+                  nameController.text.trim(),
+                  relationController.text.trim(),
+                  numberController.text.trim(),
                 );
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('모든 항목을 입력해주세요.'),
-                    duration: const Duration(seconds: 2),
+                    duration: Duration(seconds: 2),
                   ),
                 );
               }
@@ -319,6 +367,21 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                 ],
               ),
               const SizedBox(height: 12),
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_loadError != null)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(_loadError!, style: const TextStyle(fontSize: 18, color: eInkSoft)),
+                )
+              else if (contacts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('등록된 연락처가 없어요.', style: TextStyle(fontSize: 18, color: eInkSoft)),
+                ),
               ...List.generate(
                 contacts.length,
                 (index) {
@@ -331,57 +394,18 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
 
                   return Column(
                     children: [
-                      _buildContactButton(
-                        context,
-                        contacts[index]['name']!,
-                        contacts[index]['relation']!,
-                        contacts[index]['number']!,
-                        bgColor,
-                        iconColor,
+                      GestureDetector(
+                        onLongPress: () => _confirmDelete(contacts[index]),
+                        child: _buildContactButton(
+                          context,
+                          contacts[index]['name']!,
+                          contacts[index]['relation']!,
+                          contacts[index]['number']!,
+                          bgColor,
+                          iconColor,
+                        ),
                       ),
                       if (index < contacts.length - 1)
-                        const SizedBox(height: 10),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 30),
-
-              // 기타 연락처
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  '기타 연락처',
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: eInk,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              ...List.generate(
-                otherContacts.length,
-                (index) {
-                  final colors = [
-                    (const Color(0xFFF0E8D5), const Color(0xFF8B6F47)),
-                    (const Color(0xFFFFEDD5), const Color(0xFFE65100)),
-                    (const Color(0xFFE0F2F1), const Color(0xFF00695C)),
-                  ];
-                  final (bgColor, iconColor) = colors[index % colors.length];
-
-                  return Column(
-                    children: [
-                      _buildContactButton(
-                        context,
-                        otherContacts[index]['name']!,
-                        otherContacts[index]['relation']!,
-                        otherContacts[index]['number']!,
-                        bgColor,
-                        iconColor,
-                      ),
-                      if (index < otherContacts.length - 1)
                         const SizedBox(height: 10),
                     ],
                   );
