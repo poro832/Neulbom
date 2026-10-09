@@ -57,6 +57,12 @@ class PairRequest(BaseModel):
     phone: str = Field(min_length=7, max_length=20)
 
 
+class ContactRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
+    relation: str = Field(default="", max_length=20)
+    phone: str = Field(pattern=r"^[0-9+\- ]{5,20}$")
+
+
 def add_app_routes(app: FastAPI, data: AppData) -> None:
     def guarded(fn):
         """저장소 오류는 401도 200도 아니다 — 503으로 닫는다."""
@@ -197,3 +203,71 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 for r in records
             ]
         }
+
+    # ------------------------------------------------ 어르신 조회·연락처
+
+    @app.get("/v1/me/calls")
+    @guarded
+    def my_calls(
+        limit: int = Query(default=30, ge=1, le=100),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        elder_id = elder_id_of(authorization)
+        lines = data.reports.call_lines(elder_id, limit)
+        return {
+            "calls": [
+                {
+                    "call_id": line.call_id,
+                    "started_at": iso_kst(line.started_at),
+                    "duration_s": line.duration_s,
+                    "status": line.status,
+                }
+                for line in lines
+            ]
+        }
+
+    @app.get("/v1/me/contacts")
+    @guarded
+    def my_contacts(authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        access = data.elders.get(elder_id)
+        profile = None if access is None else data.elders.guardian_profile(access.guardian_id)
+        return {
+            "guardians": []
+            if profile is None
+            else [{"name": profile.name, "relation": "보호자", "phone": profile.phone}],
+            "contacts": [
+                {"contact_id": c.contact_id, "name": c.name, "relation": c.relation, "phone": c.phone}
+                for c in data.contacts.list(elder_id)
+            ],
+        }
+
+    @app.post("/v1/me/contacts", status_code=201)
+    @guarded
+    def add_contact(body: ContactRequest, authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        try:
+            contact = data.contacts.add(
+                elder_id, name=body.name, relation=body.relation, phone=body.phone
+            )
+        except TooManyContacts:
+            raise HTTPException(status_code=400, detail="연락처는 20개까지 둘 수 있습니다")
+        # 전화번호는 로그에 남기지 않는다.
+        logger.info("연락처를 추가했다 elder_id=%s contact_id=%s", elder_id, contact.contact_id)
+        return {
+            "contact_id": contact.contact_id,
+            "name": contact.name,
+            "relation": contact.relation,
+            "phone": contact.phone,
+        }
+
+    @app.delete("/v1/me/contacts/{contact_id}")
+    @guarded
+    def delete_contact(
+        contact_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        elder_id = elder_id_of(authorization)
+        if not data.contacts.remove(elder_id, contact_id):
+            raise HTTPException(status_code=404, detail="없는 연락처입니다")
+        return Response(status_code=204)

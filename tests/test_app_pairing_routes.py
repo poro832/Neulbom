@@ -57,7 +57,6 @@ def test_issuing_never_logs_the_code(caplog):
 # ------------------------------------------------ 폰 연결
 
 
-@pytest.mark.skip(reason="Task 10에서 /v1/me/calls가 생긴다")
 def test_the_right_code_and_phone_give_an_elder_key():
     kit = make_app_kit()
     code = kit.new_pairing(12)
@@ -137,7 +136,6 @@ def test_an_expired_code_is_refused():
     assert kit.client.post(PAIR, json={"code": code, "phone": "070-1111-2222"}).status_code == 401
 
 
-@pytest.mark.skip(reason="Task 10에서 /v1/me/calls가 생긴다")
 def test_connecting_again_revokes_the_previous_phones_key():
     kit = make_app_kit()
     first = kit.client.post(PAIR, json={"code": kit.new_pairing(12), "phone": "070-1111-2222"}).json()["elder_key"]
