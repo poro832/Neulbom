@@ -11,6 +11,8 @@ class ElderSummary {
   final int weekCalls;
   final double? weekAvgScore;
   final int weekAlerts;
+  final String status; // active | pending | unconsented
+  final String? phone; // 승인 대기일 때만 온다
 
   const ElderSummary({
     required this.elderId,
@@ -20,6 +22,8 @@ class ElderSummary {
     required this.weekCalls,
     required this.weekAvgScore,
     required this.weekAlerts,
+    this.status = 'active',
+    this.phone,
   });
 
   factory ElderSummary.fromJson(Map<String, dynamic> json) => ElderSummary(
@@ -30,6 +34,8 @@ class ElderSummary {
         weekCalls: json['week_calls'] as int,
         weekAvgScore: _asDouble(json['week_avg_score']),
         weekAlerts: json['week_alerts'] as int,
+        status: (json['status'] as String?) ?? 'active',
+        phone: json['phone'] as String?,
       );
 }
 
@@ -194,4 +200,37 @@ class PairingCode {
         code: json['code'] as String,
         expiresAt: _asTime(json['expires_at'])!,
       );
+}
+
+class SignupResult {
+  final String elderKey;
+  final String status;
+
+  const SignupResult({required this.elderKey, required this.status});
+
+  factory SignupResult.fromJson(Map<String, dynamic> json) => SignupResult(
+        elderKey: json['elder_key'] as String,
+        status: json['status'] as String,
+      );
+}
+
+class MyStatus {
+  final String status; // pending | active | unconsented
+  final String name;
+
+  const MyStatus({required this.status, required this.name});
+
+  factory MyStatus.fromJson(Map<String, dynamic> json) => MyStatus(
+        status: json['status'] as String,
+        name: json['name'] as String,
+      );
+}
+
+class InviteCode {
+  final String code; // 앞자리 0이 있을 수 있어 문자열이다
+
+  const InviteCode({required this.code});
+
+  factory InviteCode.fromJson(Map<String, dynamic> json) =>
+      InviteCode(code: json['code'] as String);
 }
