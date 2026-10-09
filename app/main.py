@@ -72,7 +72,7 @@ from app.media.stream_server import (
     add_stream_route,
     default_responder,
 )
-from app.media.call_summary import CallSummarizer
+from app.media.call_summary import CallSummarizer, summarizer_from_env
 from app.post_call import analyze_session
 from app.post_call_content import ConversationRecorder
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
@@ -769,6 +769,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         return data, AlertRules(alerts=alerts, elders=elders)
 
     from app.api.postgres_alerts import PostgresAlertStore
+    from app.api.postgres_call_content import PostgresCallContent
     from app.api.postgres_contacts import PostgresContactStore
     from app.api.postgres_elder_keys import PostgresElderKeyStore
     from app.api.postgres_invites import PostgresInviteStore
@@ -787,6 +788,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         reports=PostgresReports(pool=pool),
         alerts=alerts,
         invites=PostgresInviteStore(pool=pool),
+        content=PostgresCallContent(pool=pool),
     )
     return data, AlertRules(alerts=alerts, elders=elders)
 
@@ -806,13 +808,17 @@ app = build_server(
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
     roster=roster_for(_pool),
-    archiver=archiver_from_env(RECORDINGS_DIR, transcripts=_transcripts),
+    archiver=archiver_from_env(
+        RECORDINGS_DIR, transcripts=_transcripts, call_content=_app_data.content
+    ),
     transcripts=_transcripts,
     guardian_auth=_guardian_auth,
     elders=_elders,
     manual_calls_per_day=_int_from_env("MANUAL_CALLS_PER_DAY", DEFAULT_MANUAL_CALLS_PER_DAY),
     app_data=_app_data,
     alert_rules=_alert_rules,
+    call_content=_app_data.content,
+    summarizer=summarizer_from_env(),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.
