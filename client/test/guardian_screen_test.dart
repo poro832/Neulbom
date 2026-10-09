@@ -100,4 +100,124 @@ void main() {
     expect(find.text('열쇠가 필요합니다'), findsOneWidget);
     expect(find.text('다시 불러오기'), findsOneWidget);
   });
+
+  Map<String, dynamic> elderJson(int id, String name, {String status = 'active', String? phone}) => {
+        'elder_id': id,
+        'name': name,
+        'last_call_at': null,
+        'last_status': null,
+        'week_calls': 0,
+        'week_avg_score': null,
+        'week_alerts': 0,
+        'status': status,
+        'phone': phone,
+      };
+
+  Map<String, dynamic> weeklyJson() => {
+        'week_start': '2026-10-04',
+        'days': [
+          for (var i = 4; i <= 10; i++)
+            {'date': '2026-10-${i.toString().padLeft(2, '0')}', 'calls': 0, 'avg_score': null},
+        ],
+        'total_calls': 0,
+        'avg_score': null,
+      };
+
+  testWidgets('승인 대기 어르신이 카드로 뜨고 승인하면 목록을 다시 읽는다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    var approved = false;
+    final posts = <String>[];
+    NulbomApi.client = MockClient((request) async {
+      final path = request.url.path;
+      if (request.method == 'POST') {
+        posts.add(path);
+        approved = true;
+        return json({'status': 'active'});
+      }
+      if (path == '/v1/guardian/elders') {
+        return json({
+          'week_start': '2026-10-04',
+          'elders': [
+            elderJson(12, '어르신 12'),
+            approved
+                ? elderJson(20, '새 어르신')
+                : elderJson(20, '새 어르신', status: 'pending', phone: '010-9999-1111'),
+          ],
+        });
+      }
+      if (path.endsWith('/weekly')) return json(weeklyJson());
+      if (path == '/v1/guardian/alerts') return json({'alerts': []});
+      return json({'detail': 'x'}, 404);
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: GuardianScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('승인 대기'), findsOneWidget);
+    expect(find.text('010-9999-1111'), findsOneWidget);
+
+    await tester.tap(find.text('승인'));
+    await tester.pumpAndSettle();
+
+    expect(posts, ['/v1/elders/20/approve']);
+    expect(find.text('승인 대기'), findsNothing);
+    expect(find.text('010-9999-1111'), findsNothing);
+  });
+
+  testWidgets('거절하면 거절 요청이 나가고 카드가 사라진다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    var rejected = false;
+    final posts = <String>[];
+    NulbomApi.client = MockClient((request) async {
+      final path = request.url.path;
+      if (request.method == 'POST') {
+        posts.add(path);
+        rejected = true;
+        return json({'status': 'rejected'});
+      }
+      if (path == '/v1/guardian/elders') {
+        return json({
+          'week_start': '2026-10-04',
+          'elders': [
+            elderJson(12, '어르신 12'),
+            if (!rejected) elderJson(20, '새 어르신', status: 'pending', phone: '010-9999-1111'),
+          ],
+        });
+      }
+      if (path.endsWith('/weekly')) return json(weeklyJson());
+      if (path == '/v1/guardian/alerts') return json({'alerts': []});
+      return json({'detail': 'x'}, 404);
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: GuardianScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('거절'));
+    await tester.pumpAndSettle();
+
+    expect(posts, ['/v1/elders/20/reject']);
+    expect(find.text('승인 대기'), findsNothing);
+  });
+
+  testWidgets('활성 어르신이 없고 승인 대기만 있어도 카드를 보여 준다', (tester) async {
+    NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/elders') {
+        return json({
+          'week_start': '2026-10-04',
+          'elders': [elderJson(20, '새 어르신', status: 'pending', phone: '010-9999-1111')],
+        });
+      }
+      return json({'alerts': []});
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: GuardianScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('승인 대기'), findsOneWidget);
+    expect(find.text('새 어르신'), findsOneWidget);
+    expect(find.text('010-9999-1111'), findsOneWidget);
+  });
 }
