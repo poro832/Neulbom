@@ -31,7 +31,12 @@ class PostgresReports:
                     WHERE c.elder_id = e.elder_id AND c.status = 'completed'
                       AND c.created_at >= to_timestamp(%(lo)s) AND c.created_at < to_timestamp(%(hi)s)),
                   (SELECT count(*) FROM alerts a
-                    WHERE a.elder_id = e.elder_id AND a.created_at >= to_timestamp(%(lo)s))
+                    WHERE a.elder_id = e.elder_id AND a.created_at >= to_timestamp(%(lo)s)),
+                  CASE WHEN e.consent_at IS NOT NULL THEN 'active'
+                       WHEN e.agreed_at IS NOT NULL THEN 'pending'
+                       ELSE 'unconsented' END,
+                  CASE WHEN e.consent_at IS NULL AND e.agreed_at IS NOT NULL
+                       THEN e.phone_number END
                 FROM elders e WHERE e.guardian_id = %(g)s ORDER BY e.elder_id
                 """,
                 {"lo": lo, "hi": hi, "g": guardian_id},

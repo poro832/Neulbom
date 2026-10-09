@@ -42,6 +42,9 @@ class ElderSummary:
     week_calls: int
     week_avg_score: float | None
     week_alerts: int
+    status: str = "active"
+    # 승인 대기일 때만 채운다. 보호자가 번호를 보고 승인한다.
+    phone: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,8 @@ class InMemoryReports:
                     week_calls=len(week),
                     week_avg_score=_mean([c["score"] for c in week if c["score"] is not None]),
                     week_alerts=self._alerts.count_since(ref.elder_id, lo),
+                    status=ref.status,
+                    phone=ref.phone,
                 )
             )
         return out

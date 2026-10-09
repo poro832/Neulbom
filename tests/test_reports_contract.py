@@ -203,3 +203,44 @@ def test_call_lines_respect_the_limit_and_the_elder(world):
     lines = world.reports.call_lines(12, 3)
 
     assert [l.call_id for l in lines] == [5, 4, 3]
+
+
+# ------------------------------------------------ 상태와 대기 번호
+
+
+def test_summaries_carry_a_status_and_no_phone_for_non_pending_elders(world):
+    summaries = world.reports.elder_summaries(1, SUNDAY)
+
+    assert summaries and all(s.status in ("active", "unconsented") for s in summaries)
+    assert all(s.phone is None for s in summaries)
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_postgres_summaries_show_a_pending_elders_phone_and_hide_others():
+    world = _postgres()
+    pool = world.reports._pool
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO elders (elder_id, guardian_id, name, phone_number, agreed_at) "
+            "VALUES (20, 1, '대기 어르신', '010-9999-1111', now())"
+        )
+
+    by_id = {s.elder_id: s for s in world.reports.elder_summaries(1, SUNDAY)}
+
+    assert by_id[20].status == "pending" and by_id[20].phone == "010-9999-1111"
+    assert by_id[12].status == "active" and by_id[12].phone is None  # 시드는 동의가 있다
+
+
+def test_in_memory_summaries_show_a_pending_elders_phone():
+    directory = InMemoryElderDirectory(
+        {12: ElderAccess(1, True, "어르신 12")}, phones={12: "070-0000-0012"}
+    )
+    pending = directory.create_pending(
+        guardian_id=1, name="대기 어르신", phone="010-9999-1111", max_pending=5
+    )
+    reports = InMemoryReports(directory, InMemoryAlertStore())
+
+    by_id = {s.elder_id: s for s in reports.elder_summaries(1, SUNDAY)}
+
+    assert by_id[pending].status == "pending" and by_id[pending].phone == "010-9999-1111"
+    assert by_id[12].status == "active" and by_id[12].phone is None
