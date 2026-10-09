@@ -21,10 +21,35 @@ def caddy_allowlist() -> set[str]:
 
 
 def app_routes(tmp_path) -> set[str]:
-    from tests.test_server_wiring import make_server
+    import re
 
-    client, _, _ = make_server(tmp_path)
-    return {getattr(route, "path", "") for route in client.app.routes}
+    from fastapi.testclient import TestClient
+
+    from app.api.alerts import InMemoryAlertStore
+    from app.main import app_data_for, build_server
+    from app.api.elder_directory import InMemoryElderDirectory
+    from app.api.guardian_auth import InMemoryGuardianKeyStore, KeyAuth
+    from app.api.store import InMemoryCallStore
+    from app.telephony.client import FakeTelephony
+    from tests.test_server_wiring import _Beep
+
+    directory = InMemoryElderDirectory()
+    auth = KeyAuth(InMemoryGuardianKeyStore())
+    data, rules = app_data_for(None, guardian_auth=auth, elders=directory)
+    server = build_server(
+        store=InMemoryCallStore(phones={12: "070-1111-2222"}),
+        telephony=FakeTelephony(),
+        public_base_url="https://api.example.com",
+        stream_base_url="wss://api.example.com",
+        responder_factory=_Beep,
+        recordings_dir=tmp_path,
+        guardian_auth=auth,
+        elders=directory,
+        app_data=data,
+        alert_rules=rules,
+    )
+    paths = {getattr(route, "path", "") for route in TestClient(server).app.routes}
+    return {re.sub(r"\{[^}]+\}", "*", path) for path in paths}
 
 
 def test_every_path_caddy_opens_exists_in_the_app(tmp_path):
@@ -92,3 +117,35 @@ def test_the_duckdns_example_carries_no_token():
             assert line == "DDNS_TOKEN="
             return
     raise AssertionError("DDNS_TOKEN 줄이 없다")
+
+
+APP_PATHS = {
+    "/v1/pair",
+    "/v1/elders/*/pairing-code",
+    "/v1/elders/*/weekly",
+    "/v1/guardian/elders",
+    "/v1/guardian/alerts",
+    "/v1/me/calls",
+    "/v1/me/contacts",
+    "/v1/me/contacts/*",
+}
+
+
+def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
+    """열린 문마다 자물쇠가 실제로 있는지 검사한다. 이 검사가 빠지면 누구나 어르신 데이터를
+    읽거나 연락처를 바꿀 수 있다."""
+    from fastapi.testclient import TestClient
+
+    import app.main as main
+
+    assert APP_PATHS <= caddy_allowlist()
+
+    client = TestClient(main.app)
+    for path in ("/v1/guardian/elders", "/v1/guardian/alerts", "/v1/elders/1/weekly",
+                 "/v1/me/calls", "/v1/me/contacts"):
+        assert client.get(path).status_code == 401, path
+    assert client.post("/v1/elders/1/pairing-code").status_code == 401
+    assert client.post("/v1/me/contacts", json={"name": "가", "phone": "111-1111"}).status_code == 401
+    assert client.delete("/v1/me/contacts/1").status_code == 401
+    # 열쇠가 필요 없는 /v1/pair는 코드와 번호가 맞아야 한다
+    assert client.post("/v1/pair", json={"code": "123456", "phone": "070-1111-2222"}).status_code == 401

@@ -207,3 +207,18 @@ def test_guardian_auth_for_a_missing_pool_warns(caplog):
     assert "401" in caplog.text
     assert auth.authenticate("Bearer anything") is None
     assert directory.get(1) is None
+
+
+def test_the_assembled_app_has_the_app_routes_but_every_one_is_closed_without_a_database():
+    """메모리 모드에는 열쇠도 연결 코드도 없다. 열려 있는 것보다 막혀 있는 쪽이 안전하다."""
+    import app.main as main
+
+    client = TestClient(main.app)
+
+    assert client.get("/v1/guardian/elders").status_code == 401
+    assert client.get("/v1/guardian/alerts").status_code == 401
+    assert client.get("/v1/elders/1/weekly").status_code == 401
+    assert client.post("/v1/elders/1/pairing-code").status_code == 401
+    assert client.get("/v1/me/calls").status_code == 401
+    assert client.get("/v1/me/contacts").status_code == 401
+    assert client.post("/v1/pair", json={"code": "123456", "phone": "070-1111-2222"}).status_code == 401

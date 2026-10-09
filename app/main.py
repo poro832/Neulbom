@@ -36,6 +36,13 @@ from app.analysis.call_analysis import CallAnalysis
 from app.analysis.metrics_calculator import CALCULATOR_VERSION, assess_risk
 from app.analysis.outcome import CallOutcome
 from app.api import calls
+from app.api.alert_rules import AlertRules
+from app.api.alerts import InMemoryAlertStore
+from app.api.app_data import AppData, add_app_routes
+from app.api.contacts import InMemoryContactStore
+from app.api.elder_auth import ElderKeyAuth, InMemoryElderKeyStore
+from app.api.pairing import InMemoryPairingStore
+from app.api.reports import InMemoryReports
 from app.api.calls import DEFAULT_MANUAL_CALLS_PER_DAY
 from app.api.db import check, connect, database_url
 from app.archiver import RecordingArchiver, archiver_from_env
@@ -285,6 +292,7 @@ def build_risk_sink(
     outcomes: OutcomeStore,
     *,
     transcription_enabled: bool = False,
+    alert_rules: AlertRules | None = None,
 ) -> AnalysisSink:
     """지표를 위험 점수로 환산해 남긴다 (설계 4.5).
 
@@ -381,6 +389,14 @@ def build_risk_sink(
                 transcription_enabled,
                 analysis.degraded,
             )
+            if alert_rules is not None and risk is not None:
+                # 알림 실패가 판정 기록을 되돌리지 않는다. 위에서 이미 기록했다.
+                try:
+                    alert_rules.on_risk(
+                        call_id=call_id, elder_id=elder_id, risk_level=risk.risk_level
+                    )
+                except Exception:
+                    logger.exception("알림 생성 실패 call_id=%s", call_id)
         except Exception:
             # 통화 종료 자체는 이 except가 없어도 지켜진다 — _end_of_call의
             # finally가 lifecycle.stream_finished를 무조건 부르고,
@@ -409,6 +425,8 @@ def build_server(
     roster: Roster | None = None,
     archiver: RecordingArchiver | None = None,
     transcripts: TranscriptStore | None = None,
+    app_data: AppData | None = None,
+    alert_rules: AlertRules | None = None,
     guardian_auth: GuardianAuth | None = None,
     elders: ElderDirectory | None = None,
     manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
@@ -419,7 +437,11 @@ def build_server(
     outcomes = outcomes if outcomes is not None else InMemoryOutcomeStore()
 
     registry = registry if registry is not None else InMemoryCallRegistry()
-    lifecycle = CallLifecycle(store, registry)
+    lifecycle = CallLifecycle(
+        store,
+        registry,
+        on_no_answer=None if alert_rules is None else alert_rules.on_no_answer,
+    )
 
     app = calls.build_app(
         store=store,
@@ -433,11 +455,17 @@ def build_server(
         manual_calls_per_day=manual_calls_per_day,
     )
 
+    if app_data is not None:
+        add_app_routes(app, app_data)
+
     # 워커 조립은 app이 만들어진 뒤여야 한다 — add_event_handler는 app이
     # 있어야 부를 수 있다.
     transcriber = transcriber if transcriber is not None else transcriber_from_env()
     sink = sink if sink is not None else build_risk_sink(
-        store, outcomes, transcription_enabled=transcriber is not None
+        store,
+        outcomes,
+        transcription_enabled=transcriber is not None,
+        alert_rules=alert_rules,
     )
 
     worker: TranscriptionWorker | None = None
@@ -701,11 +729,54 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
     return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
 
 
+def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
+    """풀이 있으면 DB 저장소를, 없으면 빈 메모리 저장소를 묶는다.
+
+    메모리 모드에는 열쇠도 연결 코드도 만들 방법이 없어 보호자·어르신 주소가 전부 401이다.
+    열려 있는 것보다 막혀 있는 쪽이 안전하다.
+    """
+    if pool is None:
+        alerts = InMemoryAlertStore()
+        elder_keys = InMemoryElderKeyStore()
+        data = AppData(
+            guardian_auth=guardian_auth,
+            elder_auth=ElderKeyAuth(elder_keys),
+            elders=elders,
+            pairings=InMemoryPairingStore(),
+            elder_keys=elder_keys,
+            contacts=InMemoryContactStore(),
+            reports=InMemoryReports(elders, alerts),
+            alerts=alerts,
+        )
+        return data, AlertRules(alerts=alerts, elders=elders)
+
+    from app.api.postgres_alerts import PostgresAlertStore
+    from app.api.postgres_contacts import PostgresContactStore
+    from app.api.postgres_elder_keys import PostgresElderKeyStore
+    from app.api.postgres_pairing import PostgresPairingStore
+    from app.api.postgres_reports import PostgresReports
+
+    alerts = PostgresAlertStore(pool=pool)
+    elder_keys = PostgresElderKeyStore(pool=pool)
+    data = AppData(
+        guardian_auth=guardian_auth,
+        elder_auth=ElderKeyAuth(elder_keys),
+        elders=elders,
+        pairings=PostgresPairingStore(pool=pool),
+        elder_keys=elder_keys,
+        contacts=PostgresContactStore(pool=pool),
+        reports=PostgresReports(pool=pool),
+        alerts=alerts,
+    )
+    return data, AlertRules(alerts=alerts, elders=elders)
+
+
 log_startup_readiness()
 
 _store, _outcomes, _pool = stores_from_env()
 _transcripts = transcripts_for(_pool)
 _guardian_auth, _elders = guardian_auth_for(_pool)
+_app_data, _alert_rules = app_data_for(_pool, guardian_auth=_guardian_auth, elders=_elders)
 
 app = build_server(
     store=_store,
@@ -720,6 +791,8 @@ app = build_server(
     guardian_auth=_guardian_auth,
     elders=_elders,
     manual_calls_per_day=_int_from_env("MANUAL_CALLS_PER_DAY", DEFAULT_MANUAL_CALLS_PER_DAY),
+    app_data=_app_data,
+    alert_rules=_alert_rules,
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

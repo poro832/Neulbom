@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import 'connection_code_section.dart';
 import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
@@ -230,29 +231,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                   ),
                                 ],
                               ),
-                              if (_showConnectionCode) ...[
-                                const SizedBox(height: 10),
-                                Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: eAccent.withOpacity(0.08),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: eAccent.withOpacity(0.25),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    '보호자 연결 코드: '
-                                    '${_guardianInfo['connectionCode'] ?? '-'}',
-                                    style: GoogleFonts.notoSansKr(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: eAccent,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              if (_showConnectionCode)
+                                const ConnectionCodeSection(),
                             ],
                           ),
                         ),
