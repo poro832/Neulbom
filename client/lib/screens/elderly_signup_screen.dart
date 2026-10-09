@@ -258,7 +258,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
                 contentPadding: EdgeInsets.zero,
                 activeColor: eAccent,
                 title: Text(
-                  '늘봄 AI가 안부 전화를 거는 데 동의합니다.',
+                  '늘봄 AI가 안부 전화를 거는 데 동의하고, 통화 내용이 보호자에게 요약과 원문으로 공유되는 것에 동의합니다.',
                   style: GoogleFonts.notoSansKr(fontSize: 14, color: eInk),
                 ),
               ),
