@@ -126,3 +126,74 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         access = data.elders.get(elder_id)
         logger.info("어르신 폰을 연결했다 elder_id=%s key=%s", elder_id, new.key_prefix)
         return {"elder_key": new.key, "elder_name": "" if access is None else access.name}
+
+    # ------------------------------------------------ 보호자 조회
+
+    @app.get("/v1/guardian/elders")
+    @guarded
+    def guardian_elders(authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        week = kst_week_start(data.wall_clock())
+        summaries = data.reports.elder_summaries(guardian_id, week)
+        return {
+            "week_start": week.isoformat(),
+            "elders": [
+                {
+                    "elder_id": s.elder_id,
+                    "name": s.name,
+                    "last_call_at": None if s.last_call_at is None else iso_kst(s.last_call_at),
+                    "last_status": s.last_status,
+                    "week_calls": s.week_calls,
+                    "week_avg_score": s.week_avg_score,
+                    "week_alerts": s.week_alerts,
+                }
+                for s in summaries
+            ],
+        }
+
+    @app.get("/v1/elders/{elder_id}/weekly")
+    @guarded
+    def elder_weekly(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        week_start: date | None = Query(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        week = (
+            kst_week_start(data.wall_clock())
+            if week_start is None
+            else sunday_on_or_before(week_start)
+        )
+        days = data.reports.weekly(elder_id, week)
+        scored = [d.avg_score for d in days if d.avg_score is not None]
+        return {
+            "week_start": week.isoformat(),
+            "days": [{"date": d.date, "calls": d.calls, "avg_score": d.avg_score} for d in days],
+            "total_calls": sum(d.calls for d in days),
+            "avg_score": None if not scored else sum(scored) / len(scored),
+        }
+
+    @app.get("/v1/guardian/alerts")
+    @guarded
+    def guardian_alerts(
+        limit: int = Query(default=20, ge=1, le=100),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        names = {ref.elder_id: ref.name for ref in data.elders.elders_of(guardian_id)}
+        records = data.alerts.recent_for_guardian(guardian_id, limit)
+        return {
+            "alerts": [
+                {
+                    "alert_id": r.alert_id,
+                    "elder_id": r.elder_id,
+                    "elder_name": names.get(r.elder_id, ""),
+                    "type": r.alert_type,
+                    "severity": r.severity,
+                    "message": r.message,
+                    "created_at": iso_kst(r.created_at),
+                }
+                for r in records
+            ]
+        }
