@@ -14,6 +14,7 @@ from app.api.contacts import InMemoryContactStore
 from app.api.elder_auth import ElderKeyAuth, InMemoryElderKeyStore, generate_elder_key
 from app.api.elder_directory import ElderAccess, GuardianProfile, InMemoryElderDirectory
 from app.api.guardian_auth import InMemoryGuardianKeyStore, KeyAuth, generate_key
+from app.api.invites import InMemoryInviteStore
 from app.api.pairing import InMemoryPairingStore, hash_code, new_code
 from app.api.reports import InMemoryReports
 from app.scheduler import KST
@@ -45,6 +46,15 @@ class AppKit:
         new = generate_elder_key()
         self.data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
         return {"Authorization": f"Bearer {new.key}"}
+
+
+    def issue_invite(self, guardian_id: int = 1) -> str:
+        """보호자 개인 코드를 직접 심는다. 발급 주소는 따로 시험한다."""
+        from app.api.invites import hash_invite_code, new_invite_code
+
+        code = new_invite_code()
+        self.data.invites.issue(guardian_id, hash_invite_code(code))
+        return code
 
     def new_pairing(self, elder_id: int = 12) -> str:
         code = new_code()
@@ -78,6 +88,7 @@ def make_app_kit(now: float | None = None) -> AppKit:
         contacts=InMemoryContactStore(),
         reports=reports,
         alerts=alerts,
+        invites=InMemoryInviteStore(),
         wall_clock=clock,
     )
     elder_store = InMemoryElderKeyStore(wall_clock=clock)

@@ -11,7 +11,7 @@ import functools
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
@@ -21,9 +21,17 @@ from app.api.alerts import AlertStore
 from app.api.calls import MAX_ELDER_ID
 from app.api.contacts import ContactStore, TooManyContacts
 from app.api.elder_auth import ElderAuth, ElderKeyStore, elder_key_label, generate_elder_key
-from app.api.elder_directory import ElderDirectory, digits_of
+from app.api.elder_directory import (
+    STATUS_PENDING,
+    ElderDirectory,
+    PendingLimit,
+    PhoneTaken,
+    digits_of,
+)
 from app.api.guardian_auth import GuardianAuth, attempt_label
+from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.pairing import PairingStore, hash_code, new_code
+from app.api.rate_limit import FailureLimiter
 from app.api.reports import Reports, kst_week_start, sunday_on_or_before
 from app.scheduler import KST
 
@@ -33,6 +41,15 @@ NEED_KEY = "열쇠가 필요합니다"
 NO_ELDER = "등록되지 않은 어르신입니다"
 BAD_PAIR = "연결 코드를 확인해 주세요"
 UNAVAILABLE = "인증을 확인할 수 없습니다"
+BAD_SIGNUP = "가입 코드를 확인해 주세요"
+PHONE_TAKEN = "이미 등록된 번호예요"
+NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어요"
+TRY_LATER = "잠시 뒤에 다시 해 주세요"
+WAITING = "보호자 승인을 기다리고 있어요"
+NOT_PENDING = "승인 대기 중인 어르신이 아니에요"
+
+# 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
+MAX_PENDING_PER_GUARDIAN = 5
 
 
 @dataclass
@@ -45,11 +62,20 @@ class AppData:
     contacts: ContactStore
     reports: Reports
     alerts: AlertStore
+    invites: InviteStore
     wall_clock: Callable[[], float] = time.time
+    signup_limiter: FailureLimiter = field(default_factory=FailureLimiter)
 
 
 def iso_kst(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, KST).isoformat(timespec="seconds")
+
+
+class SignupRequest(BaseModel):
+    code: str = Field(pattern=r"^[0-9]{8}$")
+    name: str = Field(min_length=1, max_length=30)
+    phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
+    agreed: bool
 
 
 class PairRequest(BaseModel):
@@ -91,6 +117,14 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if elder_id is None:
             logger.warning("어르신 열쇠 인증 실패 key=%s", elder_key_label(authorization))
             raise HTTPException(status_code=401, detail=NEED_KEY)
+        return elder_id
+
+    def ready_elder_id_of(authorization: str | None) -> int:
+        """어르신 열쇠 + 승인 대기가 아닐 것. 대기 중이면 403."""
+        elder_id = elder_id_of(authorization)
+        access = data.elders.get(elder_id)
+        if access is not None and access.status == STATUS_PENDING:
+            raise HTTPException(status_code=403, detail=WAITING)
         return elder_id
 
     def owned_elder(guardian_id: int, elder_id: int):
@@ -152,6 +186,8 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                     "week_calls": s.week_calls,
                     "week_avg_score": s.week_avg_score,
                     "week_alerts": s.week_alerts,
+                    "status": s.status,
+                    "phone": s.phone,
                 }
                 for s in summaries
             ],
@@ -212,7 +248,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         limit: int = Query(default=30, ge=1, le=100),
         authorization: str | None = Header(default=None),
     ) -> dict:
-        elder_id = elder_id_of(authorization)
+        elder_id = ready_elder_id_of(authorization)
         lines = data.reports.call_lines(elder_id, limit)
         return {
             "calls": [
@@ -229,7 +265,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.get("/v1/me/contacts")
     @guarded
     def my_contacts(authorization: str | None = Header(default=None)) -> dict:
-        elder_id = elder_id_of(authorization)
+        elder_id = ready_elder_id_of(authorization)
         access = data.elders.get(elder_id)
         profile = None if access is None else data.elders.guardian_profile(access.guardian_id)
         return {
@@ -245,7 +281,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/me/contacts", status_code=201)
     @guarded
     def add_contact(body: ContactRequest, authorization: str | None = Header(default=None)) -> dict:
-        elder_id = elder_id_of(authorization)
+        elder_id = ready_elder_id_of(authorization)
         try:
             contact = data.contacts.add(
                 elder_id, name=body.name, relation=body.relation, phone=body.phone
@@ -267,7 +303,87 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         contact_id: int = Path(ge=1, le=MAX_ELDER_ID),
         authorization: str | None = Header(default=None),
     ) -> Response:
-        elder_id = elder_id_of(authorization)
+        elder_id = ready_elder_id_of(authorization)
         if not data.contacts.remove(elder_id, contact_id):
             raise HTTPException(status_code=404, detail="없는 연락처입니다")
         return Response(status_code=204)
+
+    # ------------------------------------------------ 보호자 코드로 어르신 가입
+
+    @app.post("/v1/guardian/invite")
+    @guarded
+    def issue_invite(authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        code = new_invite_code()
+        data.invites.issue(guardian_id, hash_invite_code(code))
+        # 코드 원문은 응답에만 있다. 로그에는 발급 사실만 남긴다.
+        logger.info("보호자 개인 코드를 발급했다 guardian_id=%s", guardian_id)
+        return {"code": code}
+
+    @app.post("/v1/signup")
+    @guarded
+    def signup(body: SignupRequest) -> dict:
+        if not body.agreed:
+            raise HTTPException(status_code=400, detail=NEEDS_AGREEMENT)
+        if data.signup_limiter.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        guardian_id = data.invites.find_guardian(hash_invite_code(body.code))
+        if guardian_id is None:
+            # 코드를 찍어 보는 시도만 센다. 맞는 코드의 정상 가입은 한도에 걸리지 않는다.
+            data.signup_limiter.record_failure()
+            logger.warning("가입 실패")
+            raise HTTPException(status_code=401, detail=BAD_SIGNUP)
+        try:
+            elder_id = data.elders.create_pending(
+                guardian_id=guardian_id,
+                name=body.name.strip(),
+                phone=body.phone.strip(),
+                max_pending=MAX_PENDING_PER_GUARDIAN,
+            )
+        except PhoneTaken:
+            raise HTTPException(status_code=409, detail=PHONE_TAKEN)
+        except PendingLimit:
+            # 사유를 알려 주지 않는다 — 없는 코드와 같은 응답이다.
+            raise HTTPException(status_code=401, detail=BAD_SIGNUP)
+        new = generate_elder_key()
+        data.elder_keys.replace(
+            elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash
+        )
+        logger.info("승인 대기로 가입했다 elder_id=%s guardian_id=%s key=%s", elder_id, guardian_id, new.key_prefix)
+        return {"elder_key": new.key, "status": STATUS_PENDING}
+
+    @app.post("/v1/elders/{elder_id}/approve")
+    @guarded
+    def approve_elder(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        if not data.elders.approve(elder_id, guardian_id):
+            raise HTTPException(status_code=409, detail=NOT_PENDING)
+        logger.info("가입을 승인했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
+        return {"status": "active"}
+
+    @app.post("/v1/elders/{elder_id}/reject")
+    @guarded
+    def reject_elder(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        if not data.elders.reject(elder_id, guardian_id):
+            raise HTTPException(status_code=409, detail=NOT_PENDING)
+        logger.info("가입을 거절했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
+        return {"status": "rejected"}
+
+    @app.get("/v1/me/status")
+    @guarded
+    def my_status(authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        access = data.elders.get(elder_id)
+        if access is None:
+            # 거절돼 지워진 어르신의 열쇠다.
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        return {"status": access.status, "name": access.name}

@@ -7,7 +7,9 @@ nuelbom.duckdns.org {
 	# 앱용 주소들이다. 열쇠 없이는 401이고(tests/test_deploy.py가 검사한다) 어르신 데이터는
 	# 그 열쇠의 주인 것만 읽힌다. 서버에 마이그레이션과 코드가 반영되기 전에는 서버의 Caddy에
 	# 이 줄을 반영하지 않는다(배포 순서).
-	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status /v1/calls/request /v1/pair /v1/elders/*/pairing-code /v1/elders/*/weekly /v1/guardian/elders /v1/guardian/alerts /v1/me/calls /v1/me/contacts /v1/me/contacts/*
+	# 가입 주소(/v1/signup)는 보호자 코드가 맞아야 하고, 가입해도 보호자가 승인하기 전에는
+	# 전화가 나가지 않는다(동의 칸은 승인에서만 채워진다).
+	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status /v1/calls/request /v1/pair /v1/elders/*/pairing-code /v1/elders/*/weekly /v1/guardian/elders /v1/guardian/alerts /v1/me/calls /v1/me/contacts /v1/me/contacts/* /v1/signup /v1/guardian/invite /v1/elders/*/approve /v1/elders/*/reject /v1/me/status
 	handle @clawops {
 		reverse_proxy 127.0.0.1:8000
 	}
