@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 
-from app.api.elder_directory import ElderAccess
+from app.api.elder_directory import ElderAccess, ElderRef, GuardianProfile, digits_of
 
 
 class PostgresElderDirectory:
@@ -14,10 +14,39 @@ class PostgresElderDirectory:
     def get(self, elder_id: int) -> ElderAccess | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT guardian_id, consent_at IS NOT NULL FROM elders WHERE elder_id = %s",
+                "SELECT guardian_id, consent_at IS NOT NULL, name FROM elders WHERE elder_id = %s",
                 (elder_id,),
             ).fetchone()
-        return None if row is None else ElderAccess(guardian_id=row[0], consenting=row[1])
+        return None if row is None else ElderAccess(guardian_id=row[0], consenting=row[1], name=row[2])
+
+    def find_by_phone(self, phone: str) -> int | None:
+        wanted = digits_of(phone)
+        if not wanted:
+            return None
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT elder_id FROM elders "
+                "WHERE regexp_replace(phone_number, '[^0-9]', '', 'g') = %s "
+                "ORDER BY elder_id LIMIT 1",
+                (wanted,),
+            ).fetchone()
+        return None if row is None else row[0]
+
+    def elders_of(self, guardian_id: int) -> list[ElderRef]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT elder_id, name FROM elders WHERE guardian_id = %s ORDER BY elder_id",
+                (guardian_id,),
+            ).fetchall()
+        return [ElderRef(elder_id=row[0], name=row[1]) for row in rows]
+
+    def guardian_profile(self, guardian_id: int) -> GuardianProfile | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT name, phone_number FROM guardians WHERE guardian_id = %s",
+                (guardian_id,),
+            ).fetchone()
+        return None if row is None else GuardianProfile(name=row[0], phone=row[1])
 
     def guardian_exists(self, guardian_id: int) -> bool:
         with self._pool.connection() as conn:

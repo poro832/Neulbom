@@ -6,14 +6,19 @@ import os
 
 import pytest
 
-from app.api.elder_directory import ElderAccess, InMemoryElderDirectory
+from app.api.elder_directory import ElderAccess, GuardianProfile, InMemoryElderDirectory
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def _memory():
     return InMemoryElderDirectory(
-        {12: ElderAccess(guardian_id=1, consenting=False), 13: ElderAccess(guardian_id=1, consenting=True)}
+        {
+            12: ElderAccess(guardian_id=1, consenting=False, name="어르신 12"),
+            13: ElderAccess(guardian_id=1, consenting=True, name="어르신 13"),
+        },
+        phones={12: "070-0000-0012", 13: "070-0000-0013"},
+        guardians={1: GuardianProfile(name="임시", phone="000")},
     )
 
 
@@ -60,8 +65,8 @@ def test_an_unknown_elder_is_none(directory):
 
 
 def test_it_reports_the_guardian_and_whether_consent_was_given(directory):
-    assert directory.get(12) == ElderAccess(guardian_id=1, consenting=False)
-    assert directory.get(13) == ElderAccess(guardian_id=1, consenting=True)
+    assert directory.get(12) == ElderAccess(guardian_id=1, consenting=False, name="어르신 12")
+    assert directory.get(13) == ElderAccess(guardian_id=1, consenting=True, name="어르신 13")
 
 
 def test_a_new_guardian_gets_a_fresh_id_even_when_id_1_was_inserted_by_hand(directory):
@@ -81,7 +86,7 @@ def test_assigning_an_elder_moves_it_and_keeps_its_consent(directory):
 
     assert directory.assign_elder(13, guardian) is True
 
-    assert directory.get(13) == ElderAccess(guardian_id=guardian, consenting=True)
+    assert directory.get(13) == ElderAccess(guardian_id=guardian, consenting=True, name="어르신 13")
     assert directory.get(12).guardian_id == 1
 
 
@@ -90,3 +95,26 @@ def test_assigning_to_a_missing_guardian_or_elder_fails(directory):
     guardian = directory.add_guardian("시연 보호자", "010-1111-2222")
     assert directory.assign_elder(4242, guardian) is False
     assert directory.get(13).guardian_id == 1
+
+
+def test_an_elder_is_found_by_the_digits_of_the_phone_number(directory):
+    assert directory.find_by_phone("07000000012") == 12
+    assert directory.find_by_phone("070-0000-0012") == 12
+    assert directory.find_by_phone("070 0000 0012") == 12
+    assert directory.find_by_phone("07099999999") is None
+    assert directory.find_by_phone("") is None
+
+
+def test_elders_of_lists_only_that_guardians_elders_in_id_order(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert [(e.elder_id, e.name) for e in directory.elders_of(1)] == [(12, "어르신 12"), (13, "어르신 13")]
+    assert directory.elders_of(other) == []
+    assert directory.elders_of(99999) == []
+
+
+def test_a_guardian_profile_has_name_and_phone(directory):
+    assert directory.guardian_profile(1) == GuardianProfile(name="임시", phone="000")
+    created = directory.add_guardian("홍길동", "010-1111-2222")
+    assert directory.guardian_profile(created) == GuardianProfile(name="홍길동", phone="010-1111-2222")
+    assert directory.guardian_profile(99999) is None
