@@ -18,7 +18,11 @@ String dateKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 /// 요청한 날이 속한 주(일~토)의 7일을 돌려준다. 하루에 한 통, 평균 점수 40.
-http.Client serverWithOneCallPerDay({List<String>? weekStarts}) => MockClient((request) async {
+http.Client serverWithOneCallPerDay({List<String>? weekStarts, Map<String, dynamic>? calls}) =>
+    MockClient((request) async {
+      if (request.url.path == '/v1/elders/20/calls') {
+        return json(calls ?? {'share_agreed': true, 'calls': []});
+      }
       if (request.url.path != '/v1/elders/20/weekly') return json({'detail': 'x'}, 404);
       final asked = DateTime.parse(request.url.queryParameters['week_start']!);
       weekStarts?.add(request.url.queryParameters['week_start']!);
@@ -124,6 +128,50 @@ void main() {
 
     await open(tester);
 
-    expect(find.text('열쇠가 필요합니다'), findsOneWidget);
+    expect(find.text('열쇠가 필요합니다'), findsWidgets);
+  });
+
+  testWidgets('최근 통화 요약: 가짜 대화 대신 서버의 요약을 보여 준다', (tester) async {
+    NulbomApi.client = serverWithOneCallPerDay(calls: {
+      'share_agreed': true,
+      'calls': [
+        {
+          'call_id': 7,
+          'started_at': '2026-10-09T09:00:00+09:00',
+          'duration_s': 95,
+          'status': 'completed',
+          'summary': '점심을 드셨어요.',
+          'has_turns': true,
+        },
+      ],
+    });
+
+    await open(tester);
+
+    expect(find.text('최근 통화 요약'), findsOneWidget);
+    expect(find.text('점심을 드셨어요.'), findsOneWidget);
+    expect(find.text('전체 통화 보기'), findsOneWidget);
+    expect(find.textContaining('날씨가 정말 좋네요'), findsNothing); // 옛 예시 대화
+    expect(find.text('시간별 대화 기록'), findsNothing);
+    expect(find.text('오늘의 대화 요약'), findsNothing);
+  });
+
+  testWidgets('어르신이 동의하기 전에는 최근 통화 요약 자리에 안내만 보인다', (tester) async {
+    NulbomApi.client = serverWithOneCallPerDay(calls: {'share_agreed': false, 'calls': []});
+
+    await open(tester);
+
+    expect(find.text('어르신이 동의한 뒤에 볼 수 있어요.'), findsOneWidget);
+  });
+
+  testWidgets('전체 통화 보기를 누르면 통화 목록 화면이 열린다', (tester) async {
+    NulbomApi.client = serverWithOneCallPerDay();
+
+    await open(tester);
+    await tester.ensureVisible(find.text('전체 통화 보기'));
+    await tester.tap(find.text('전체 통화 보기'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('홍길동님 통화'), findsOneWidget);
   });
 }
