@@ -75,8 +75,9 @@ class PostgresCallStore:
         max_active_seconds: float = MAX_ACTIVE_SECONDS,
     ) -> None:
         self._pool = pool
-        # 어르신 명부는 아직 환경 변수에서 온다. elders 테이블이 채워지면
-        # 여기가 그 조회로 바뀐다 — 지금은 메모리 구현과 같은 자리에 둔다.
+        # 발신 번호는 elders 테이블에서 읽는다(find_elder). 이 사전은 테스트가
+        # reset_for_tests로 시드 행을 만들 때만 쓴다 — 운영에서 ELDER_PHONES가 바뀌어도
+        # DB가 기준이고, DB를 맞추는 도구는 python -m app.seed_elders다.
         self._phones = phones
         self._clock = clock
         self._max_active_seconds = max_active_seconds
@@ -85,7 +86,11 @@ class PostgresCallStore:
     # ------------------------------------------------------------ 조회
 
     def find_elder(self, elder_id: int) -> str | None:
-        return self._phones.get(elder_id)
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT phone_number FROM elders WHERE elder_id = %s", (elder_id,)
+            ).fetchone()
+        return None if row is None else row[0]
 
     def get(self, call_id: int) -> CallRecord:
         with self._pool.connection() as conn:
