@@ -18,6 +18,7 @@ class AuthService {
     required String name,
     required String phone,
     required String connectionCode,
+    required bool agreed,
   }) async {
     try {
       if (phone.length < 10) {
@@ -25,7 +26,12 @@ class AuthService {
       }
 
       // 서버가 코드와 전화번호를 확인하고 이 폰 전용 열쇠를 준다(성공하면 폰에 저장된다).
-      await NulbomApi.pair(code: connectionCode.trim(), phone: phone.trim());
+      await NulbomApi.signup(
+        code: connectionCode.trim(),
+        name: name.trim(),
+        phone: phone.trim(),
+        agreed: agreed,
+      );
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_userTypeKey, 'elderly');

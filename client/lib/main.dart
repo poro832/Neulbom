@@ -7,7 +7,7 @@ import 'services/fcm_service.dart';
 import 'services/auth_service.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/elderly_login_screen.dart';
-import 'screens/elderly_home_page.dart';
+import 'screens/elderly_gate.dart';
 import 'screens/guardian_home_page.dart';
 
 // 어르신 앱 색상
@@ -61,7 +61,7 @@ class _ElderCareAppState extends State<ElderCareApp> {
 
     if (isLoggedIn && userType != null) {
       if (userType == 'elderly') {
-        return const ElderlyHomePage();
+        return const ElderlyGate();
       } else if (userType == 'guardian') {
         return const GuardianHomePage();
       }
