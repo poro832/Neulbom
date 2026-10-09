@@ -267,3 +267,35 @@ def test_building_with_auth_but_no_directory_is_a_configuration_error():
             stream_base_url="wss://x",
             guardian_auth=kit.auth,
         )
+
+
+# ------------------------------------------------ 발신이 거절되면 횟수를 쓰지 않는다
+
+
+def test_dials_the_carrier_refuses_do_not_use_up_the_day():
+    """2026-10-09: 재구독 직후 발신이 400으로 거절됐는데, 그 요청들이 하루 3번을 다 써서
+    번호가 살아난 뒤에도 429로 막혔다."""
+    kit = auth_kit()
+    clock = WallClock(kst(2026, 10, 8, 9, 0, 0))
+    store = InMemoryCallStore(phones={12: "070-1111-2222"}, wall_clock=clock)
+    telephony = FakeTelephony(fail_with=RuntimeError("400 Bad Request"))
+    app = build_app(
+        store=store,
+        telephony=telephony,
+        registry=InMemoryCallRegistry(),
+        public_base_url="https://api.example.com",
+        stream_base_url="wss://api.example.com",
+        guardian_auth=kit.auth,
+        elders=kit.directory,
+        manual_calls_per_day=3,
+        wall_clock=clock,
+    )
+    client = TestClient(app, headers=kit.headers)
+
+    codes = [client.post(URL, json={"elder_id": 12}).status_code for _ in range(5)]
+
+    assert codes == [502] * 5
+
+    telephony._fail_with = None  # 번호가 다시 살아났다
+
+    assert client.post(URL, json={"elder_id": 12}).status_code == 202

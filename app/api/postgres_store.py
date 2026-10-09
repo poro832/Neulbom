@@ -162,6 +162,7 @@ class PostgresCallStore:
             row = conn.execute(
                 "SELECT count(*) FROM calls "
                 "WHERE elder_id = %s AND trigger_type = 'requested' "
+                "  AND provider_call_sid IS NOT NULL "
                 "  AND created_at >= to_timestamp(%s)",
                 (elder_id, since),
             ).fetchone()

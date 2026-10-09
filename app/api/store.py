@@ -80,10 +80,13 @@ class CallStore(Protocol):
         ...
 
     def count_requested_since(self, elder_id: int, since: float) -> int:
-        """since(유닉스 시각) 이후 이 어르신께 **수동 요청으로 만든** 통화 수.
+        """since(유닉스 시각) 이후 이 어르신께 **실제로 걸린 수동 요청** 통화 수.
 
-        실패한 통화도 센다. 열쇠가 새거나 앱이 오작동해도 어르신이 하루 종일
-        전화를 받지 않게 하는 상한의 근거라서, 끝난 모양은 상관없다.
+        끝난 모양(완료, 미응답, 실패)은 상관없다. 열쇠가 새거나 앱이 오작동해도
+        어르신이 하루 종일 전화를 받지 않게 하는 상한이라서다. 다만 **사업자가
+        발신을 받아 식별자를 붙인 통화만** 센다. 발신 자체가 거절되면(번호 만료,
+        사업자 장애) 전화기는 한 번도 울리지 않았고, 그 요청이 상한을 깎으면
+        우리 쪽 문제로 보호자가 하루 종일 못 쓰게 된다(2026-10-09).
         """
         ...
 
@@ -143,7 +146,7 @@ class InMemoryCallStore:
         # 하루 단위로 세는 수동 요청은 벽시계가 기준이다(clock은 monotonic이라
         # 날짜를 모른다).
         self._wall_clock = wall_clock
-        self._requests: list[tuple[int, float]] = []
+        self._requests: list[tuple[int, float, int]] = []
         # 만료로 통화를 접을 때 알릴 곳들. 리스트인 이유는 한 저장소에 두
         # lifecycle이 걸리는 조립(테스트가 그렇다)에서 마지막 하나만 남기면
         # 나머지 쪽 토큰이 조용히 살아남기 때문이다.
@@ -193,12 +196,19 @@ class InMemoryCallStore:
         )
         self._calls[call.call_id] = call
         if trigger_type == "requested":
-            self._requests.append((elder_id, self._wall_clock()))
+            self._requests.append((elder_id, self._wall_clock(), call.call_id))
         return call
 
     def count_requested_since(self, elder_id: int, since: float) -> int:
         with self._lock:
-            return sum(1 for eid, at in self._requests if eid == elder_id and at >= since)
+            # 사업자가 발신을 받아 식별자를 붙인 통화만 센다.
+            return sum(
+                1
+                for eid, at, call_id in self._requests
+                if eid == elder_id
+                and at >= since
+                and self._calls[call_id].provider_call_sid is not None
+            )
 
     def find_active_or_create(
         self, elder_id: int, trigger_type: str, requested_by: int | None = None

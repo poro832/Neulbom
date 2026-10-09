@@ -92,7 +92,13 @@ class ClawOpsTelephony:
             data=data,
             timeout=self._timeout,
         )
-        response.raise_for_status()
+        if response.is_error:
+            # raise_for_status만 쓰면 "400 Bad Request"만 남아 원인(발신번호 회수,
+            # 계정 문제 등)을 사업자 콘솔까지 가서 찾아야 한다(2026-10-09).
+            raise RuntimeError(
+                "ClawOps가 발신을 거절했다: "
+                f"status={response.status_code} body={_truncate(response.text)}"
+            )
 
         # 경로·인증 헤더는 공식 문서(2026-10-06)와 맞는다. 응답 필드는 처음에
         # call_id로 추측했는데 실제는 callId였다 — 전화는 이미 나간 뒤에 이

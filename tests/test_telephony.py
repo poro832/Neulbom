@@ -103,3 +103,20 @@ def test_numbers_are_sent_as_digits_only(monkeypatch):
     assert sent["data"]["From"] == "07000000000"
     assert sent["url"].endswith("/v1/accounts/AC1/calls")
     assert sent["headers"]["Authorization"] == "Bearer key"
+
+
+def test_a_carrier_refusal_carries_its_reason(monkeypatch):
+    """2026-10-09: 400 Bad Request만 남아서 원인이 발신번호라는 것을 번호 목록까지
+    조회해서야 알았다. 사업자가 보낸 거절 사유를 예외와 로그에 남긴다."""
+    response = _fake_response(
+        status_code=400,
+        text='{"error":{"code":"InvalidFrom","message":"From number not owned by account"}}',
+    )
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _clawops().place_call(to="070-1", answer_url="https://x")
+
+    message = str(excinfo.value)
+    assert "400" in message
+    assert "From number not owned by account" in message

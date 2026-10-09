@@ -384,6 +384,7 @@ def test_requested_calls_are_counted_since_a_time(make_store):
     clock = _WallClock()
     store = make_store(clock=clock)
     call, _ = store.find_active_or_create(ELDER, "requested")
+    store.attach_sid(call.call_id, "CA-placed")
     store.mark_failed(call.call_id)
 
     assert store.count_requested_since(ELDER, clock.now - 10) == 1
@@ -409,7 +410,8 @@ def test_another_elders_requests_are_not_counted(make_store):
 def test_a_second_press_during_a_call_is_not_counted_twice(make_store):
     clock = _WallClock()
     store = make_store(clock=clock)
-    store.find_active_or_create(ELDER, "requested")
+    first, _ = store.find_active_or_create(ELDER, "requested")
+    store.attach_sid(first.call_id, "CA-placed")
     again, created = store.find_active_or_create(ELDER, "requested")
 
     assert created is False
@@ -429,3 +431,14 @@ def test_a_scheduled_call_has_no_requester(store):
     call, _ = store.find_active_or_create(ELDER, "scheduled")
 
     assert store.get(call.call_id).requested_by is None
+
+
+def test_a_dial_the_carrier_refused_is_not_counted(make_store):
+    """사업자가 발신을 거절하면 전화기가 한 번도 울리지 않았다. 그 요청이 하루 상한을
+    깎으면 번호 장애 같은 우리 쪽 문제로 보호자가 하루 종일 못 쓰게 된다."""
+    clock = _WallClock()
+    store = make_store(clock=clock)
+    call, _ = store.find_active_or_create(ELDER, "requested")
+    store.mark_failed(call.call_id)  # 사업자 식별자가 붙지 않았다
+
+    assert store.count_requested_since(ELDER, clock.now - 10) == 0
