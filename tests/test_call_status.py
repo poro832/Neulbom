@@ -247,3 +247,69 @@ def test_values_are_truncated_and_newlines_removed():
 
     assert "…" in line
     assert "\n" not in line and "\r" not in line
+
+
+# ------------------------------------------------------------ 안 받음 알림 훅
+
+
+def _client_with_hook(hook):
+    from app.api.lifecycle import CallLifecycle
+
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    registry = InMemoryCallRegistry()
+    kit = auth_kit()
+    app = build_app(
+        store=store,
+        telephony=FakeTelephony(),
+        registry=registry,
+        public_base_url="https://api.example.com",
+        stream_base_url="wss://api.example.com",
+        lifecycle=CallLifecycle(store, registry, on_no_answer=hook),
+        guardian_auth=kit.auth,
+        elders=kit.directory,
+    )
+    return TestClient(app, headers=kit.headers), store
+
+
+def _place(client, store):
+    created = client.post("/v1/calls/request", json={"elder_id": 12}).json()
+    call = store.get(created["call_id"])
+    return call.call_id, call.provider_call_sid
+
+
+def test_no_answer_calls_the_alert_hook_once_with_the_finished_call():
+    seen = []
+    client, store = _client_with_hook(seen.append)
+    call_id, sid = _place(client, store)
+
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+
+    assert [c.call_id for c in seen][:1] == [call_id]
+    assert seen[0].status == "no_answer" and seen[0].trigger_type == "requested"
+    assert len(seen) == 1  # 재전송은 이미 끝난 통화라 다시 부르지 않는다
+
+
+def test_the_hook_is_not_called_for_a_call_that_was_answered():
+    seen = []
+    client, store = _client_with_hook(seen.append)
+    call_id, sid = _place(client, store)
+    store.mark_answered(call_id)
+
+    client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+
+    assert seen == []
+
+
+def test_a_failing_hook_does_not_stop_the_call_from_being_closed():
+    def broken(call):
+        raise RuntimeError("알림 저장소 고장")
+
+    client, store = _client_with_hook(broken)
+    call_id, sid = _place(client, store)
+
+    response = client.post("/v1/call-status", data={"CallId": sid, "CallStatus": "no-answer"})
+
+    assert response.status_code == 204
+    assert store.get(call_id).status == "no_answer"
+    assert store.find_active(12) is None

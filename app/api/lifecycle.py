@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import secrets
 import threading
+from collections.abc import Callable
 
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
@@ -40,9 +41,17 @@ NON_TERMINAL_STREAM_EVENTS = frozenset(
 
 
 class CallLifecycle:
-    def __init__(self, store: CallStore, registry: CallRegistry) -> None:
+    def __init__(
+        self,
+        store: CallStore,
+        registry: CallRegistry,
+        on_no_answer: Callable[[CallRecord], None] | None = None,
+    ) -> None:
         self._store = store
         self._registry = registry
+        # 안 받음으로 접었을 때 알릴 곳(알림 생성). 훅이 터져도 통화 종료는 계속된다.
+        self._on_no_answer = on_no_answer
+        self._notified: set[int] = set()
         # 사업자 CallId → 그 통화의 1회용 토큰. VoiceML을 만들 때 심는다.
         self._tokens: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -145,6 +154,26 @@ class CallLifecycle:
         # 뜻이다 — 실패가 아니라 미응답이다. 지표는 이 둘을 다르게 센다.
         self._store.mark_no_answer(call.call_id)
         self._revoke(sid)
+        self._notify_no_answer(call.call_id)
+
+    def _notify_no_answer(self, call_id: int) -> None:
+        """방금 no_answer로 접힌 통화에만 알린다. 이미 끝난 통화의 재전송에는 부르지 않는다."""
+        if self._on_no_answer is None:
+            return
+        try:
+            after = self._store.get(call_id)
+            if after.status == "no_answer" and self._claim_notification(call_id):
+                self._on_no_answer(after)
+        except Exception:
+            logger.exception("안 받음 알림 훅 실패 call_id=%s", call_id)
+
+    def _claim_notification(self, call_id: int) -> bool:
+        """같은 통화에 훅을 한 번만 부르기 위한 표시. 알림 저장소의 중복 방지와는 별개의 첫 방어선이다."""
+        with self._lock:
+            if call_id in self._notified:
+                return False
+            self._notified.add(call_id)
+            return True
 
     def _expired(self, call: CallRecord) -> None:
         """바닥 시간이 통화를 접었다 — 토큰도 같이 접는다.

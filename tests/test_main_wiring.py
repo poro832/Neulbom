@@ -415,3 +415,70 @@ def test_startup_check_never_raises_or_builds_a_responder(monkeypatch):
     set_env(monkeypatch, {})
 
     log_startup_readiness()  # 키가 하나도 없어도 서버는 떠야 한다
+
+
+# ------------------------------------------------ 위험 판정 → 알림
+
+
+def _sink_world():
+    from app.api.alert_rules import AlertRules
+    from app.api.alerts import InMemoryAlertStore
+    from app.api.elder_directory import ElderAccess, InMemoryElderDirectory
+    from app.api.store import InMemoryCallStore
+
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    call, _ = store.find_active_or_create(12, "scheduled")
+    alerts = InMemoryAlertStore()
+    directory = InMemoryElderDirectory({12: ElderAccess(1, True, "어르신 12")})
+    return store, call, alerts, AlertRules(alerts=alerts, elders=directory)
+
+
+def _quiet_analysis():
+    from app.analysis.call_analysis import CallAnalysis
+    from app.analysis.metrics_calculator import CallMetrics
+
+    # 기준선이 없을 때 말수 0, 응답 지연 9초, 부정 표현 5개면 35+25+20=80점 → alert 단계다.
+    return CallAnalysis(
+        metrics=CallMetrics(
+            speech_ratio=0.0,
+            silence_ratio=1.0,
+            turn_count=1,
+            negative_word_count=5,
+            avg_response_delay_ms=9000,
+        ),
+        clipped_ms=0,
+        filled_gap_ms=0,
+        call_duration_ms=10_000,
+    )
+
+
+def test_a_risky_judgement_raises_an_alert_and_a_failing_alert_does_not_block_the_record():
+    from app.api.outcome_store import InMemoryOutcomeStore
+    from app.main import build_risk_sink
+
+    store, call, alerts, rules = _sink_world()
+    outcomes = InMemoryOutcomeStore()
+    sink = build_risk_sink(store, outcomes, alert_rules=rules)
+
+    sink(call.call_id, _quiet_analysis())
+
+    assert outcomes.recent(12, 5)[0].call_id == call.call_id
+    risen = [a for a in alerts.recent_for_guardian(1, 10) if a.alert_type == "risk_rise"]
+    assert len(risen) == 1 and risen[0].call_id == call.call_id
+
+
+def test_an_alert_rule_failure_leaves_the_judgement_recorded():
+    from app.api.outcome_store import InMemoryOutcomeStore
+    from app.main import build_risk_sink
+
+    class BrokenRules:
+        def on_risk(self, **kwargs):
+            raise RuntimeError("알림 고장")
+
+    store, call, _, _ = _sink_world()
+    outcomes = InMemoryOutcomeStore()
+    sink = build_risk_sink(store, outcomes, alert_rules=BrokenRules())
+
+    sink(call.call_id, _quiet_analysis())
+
+    assert [o.call_id for o in outcomes.recent(12, 5)] == [call.call_id]
