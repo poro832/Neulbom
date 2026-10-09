@@ -8,7 +8,7 @@ import logging
 
 import numpy as np
 
-from app.media.conversation import ConversationResponder
+from app.media.conversation import RETRY_PROMPTS, ConversationResponder
 
 AUDIO = np.zeros(160, dtype=np.float32)
 
@@ -98,31 +98,44 @@ def test_an_empty_transcript_does_not_reach_the_model():
     responder.respond(AUDIO, 8000)
 
     assert chat.seen == []
-    assert voice.spoken == ["죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?"]
+    assert voice.spoken == [RETRY_PROMPTS[0]]
 
 
-def test_it_stops_asking_again_after_repeated_failures():
-    """같은 되묻기를 반복하면 어르신은 대화가 고장났다고 느낀다.
-
-    연속 실패가 이어지면 되묻기를 멈춘다 — 아무 말도 안 하는 편이 같은
-    문장을 세 번 듣는 것보다 낫다.
-    """
+def test_each_failed_turn_gets_a_different_line():
+    """같은 문장을 되풀이하면 어르신은 기계가 고장 난 줄 안다(2026-10-06 실통화에서
+    '연속 5회 못 알아들었다'까지 갔다). 매번 다른 말로, 두 번째부터는 실제로 도움이
+    되는 안내(전화기를 입 가까이)를 한다."""
     responder, _, _, voice = make(stt=FakeStt("", "", ""))
 
-    said = [responder.respond(AUDIO, 8000) for _ in range(3)]
+    for _ in range(3):
+        responder.respond(AUDIO, 8000)
 
-    assert voice.spoken.count("죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?") == 2
-    assert said[2] == b""
+    assert voice.spoken == list(RETRY_PROMPTS)
+    assert len(set(RETRY_PROMPTS)) == len(RETRY_PROMPTS) == 3
+    assert "가까이" in RETRY_PROMPTS[1]
+
+
+def test_after_the_last_line_it_waits_quietly():
+    """마지막 안내는 '기다리겠다'는 말이다. 그 뒤로도 못 알아들으면 더는 말하지 않고,
+    어르신이 다시 말을 걸면 그때 정상 흐름으로 돌아온다."""
+    responder, _, _, voice = make(stt=FakeStt("", "", "", "", ""))
+
+    said = [responder.respond(AUDIO, 8000) for _ in range(5)]
+
+    assert len(voice.spoken) == 3
+    assert said[3] == b"" and said[4] == b""
+    assert "기다" in RETRY_PROMPTS[-1]
 
 
 def test_a_successful_turn_resets_the_failure_count():
-    responder, _, _, voice = make(stt=FakeStt("", "안녕하세요", "", ""))
+    responder, _, _, voice = make(stt=FakeStt("", "", "안녕하세요", ""))
 
     for _ in range(4):
         responder.respond(AUDIO, 8000)
 
-    # 되묻기 1회 → 성공 → 다시 2회까지 되묻을 수 있다.
-    assert voice.spoken.count("죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?") == 3
+    # 실패(1단계) -> 실패(2단계) -> 성공 -> 다시 처음 단계부터 시작한다.
+    assert voice.spoken[:2] == [RETRY_PROMPTS[0], RETRY_PROMPTS[1]]
+    assert voice.spoken[-1] == RETRY_PROMPTS[0]
 
 
 # --------------------------------------------------------- 실패 처리
@@ -312,3 +325,34 @@ def test_there_is_a_default_greeting_that_asks_an_open_question():
     responder.greet(8000)
 
     assert voice.spoken and "늘봄" in voice.spoken[0]
+
+
+# ------------------------------------------------------------ 단계별 시간
+
+
+class _Ticker:
+    """호출할 때마다 정해 둔 만큼 흐르는 시계."""
+
+    def __init__(self, *steps):
+        self.now = 0.0
+        self.steps = list(steps)
+
+    def __call__(self):
+        if self.steps:
+            self.now += self.steps.pop(0)
+        return self.now
+
+
+def test_each_stage_of_a_turn_is_timed_in_the_log(caplog):
+    """말이 끝나고 AI가 입을 열기까지 어디서 걸리는지 모르면 줄일 곳을 못 찾는다.
+    인식, 생성, 합성을 따로 남긴다(내용은 남기지 않는다)."""
+    ticker = _Ticker(0, 1.2, 0.9, 2.1)
+    responder, _, _, _ = make(clock=ticker)
+
+    with caplog.at_level(logging.INFO, logger="app.media.conversation"):
+        responder.respond(AUDIO, 8000)
+
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "인식=1200ms" in message
+    assert "생성=900ms" in message
+    assert "합성=2100ms" in message
