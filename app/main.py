@@ -591,7 +591,7 @@ def transcriber_from_env() -> ClovaLongSpeech | None:
     """배치 전사를 켠다. 기본은 꺼짐이고 명시적으로 켜야 한다.
 
     "키가 있으면 자동으로 켠다"로 하면, 단문 인식과 같은 키를 쓰므로 이미
-    키가 있는 지금 조용히 켜지고 실질 만점이 60에서 80으로 바뀐다. 그런
+    키가 있는 지금 조용히 켜지고 실효 만점이 80에서 100으로 바뀐다. 그런
     변화가 소리 없이 일어나면 안 된다(설계 7장).
     """
     if os.getenv("BATCH_TRANSCRIPTION", "").strip().lower() not in ("1", "true", "on"):
@@ -606,7 +606,7 @@ def transcriber_from_env() -> ClovaLongSpeech | None:
         )
         return None
 
-    logger.info("배치 전사를 켠다 — 이 시점부터 실질 만점이 60에서 80으로 바뀐다")
+    logger.info("배치 전사를 켠다 — 이 시점부터 실효 만점이 80에서 100으로 바뀐다")
     return ClovaLongSpeech(invoke_url=invoke_url, secret_key=secret)
 
 

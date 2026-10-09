@@ -240,8 +240,8 @@ def test_the_chosen_tts_vendor_is_logged(monkeypatch, caplog):
 
 # --------------------------------------------- 배치 전사 켜고 끄기 (transcriber_from_env)
 #
-# 점수의 만점을 60에서 80으로 바꾸는 유일한 함수다. 조용히 꺼진 채로 돌면
-# 부정 표현 축은 계속 죽어 있고, 그달 모든 점수가 만점 60으로 나오는데
+# 점수의 만점을 80에서 100으로 바꾸는 유일한 함수다. 조용히 꺼진 채로 돌면
+# 부정 표현 축은 계속 죽어 있고, 그달 모든 점수가 만점 80으로 나오는데
 # 데이터는 정확해 보여서 아무도 몇 주 동안 눈치채지 못한다(설계 11장).
 
 LONG_SPEECH_KEYS = {
@@ -294,7 +294,7 @@ def test_batch_transcription_on_without_keys_returns_none_and_warns(monkeypatch,
 def test_batch_transcription_on_with_keys_returns_the_adapter_and_logs_the_score_change(
     monkeypatch, caplog
 ):
-    """만점이 60에서 80으로 바뀌는 유일한 순간이다. 로그가 없으면 나중에
+    """만점이 80에서 100으로 바뀌는 유일한 순간이다. 로그가 없으면 나중에
     "왜 이달 점수가 전부 낮지?"를 풀 방법이 없다(설계 7장).
     """
     monkeypatch.setenv("BATCH_TRANSCRIPTION", "on")
@@ -306,7 +306,7 @@ def test_batch_transcription_on_with_keys_returns_the_adapter_and_logs_the_score
 
     assert isinstance(result, ClovaLongSpeech)
     message = " ".join(record.getMessage() for record in caplog.records)
-    assert "60" in message and "80" in message
+    assert "80" in message and "100" in message
 
 
 def test_short_recognition_uses_its_own_secret_when_given(monkeypatch):
