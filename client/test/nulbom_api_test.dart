@@ -121,4 +121,75 @@ void main() {
 
     expect(code.code, '000123');
   });
+
+  test('가입: 본문을 보내고 어르신 열쇠를 폰에 저장한다', () async {
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'elder_key': 'nle_new', 'status': 'pending'});
+    });
+
+    final result = await NulbomApi.signup(
+      code: '00001234',
+      name: '홍길동',
+      phone: '010-9999-1111',
+      agreed: true,
+    );
+
+    expect(result.status, 'pending');
+    expect(await NulbomApi.elderKey(), 'nle_new');
+    expect(seen.url.path, '/v1/signup');
+    expect(jsonDecode(seen.body), {
+      'code': '00001234',
+      'name': '홍길동',
+      'phone': '010-9999-1111',
+      'agreed': true,
+    });
+  });
+
+  test('가입이 거절되면 서버 문장을 보여 주고 열쇠를 저장하지 않는다', () async {
+    NulbomApi.client =
+        MockClient((request) async => json({'detail': '가입 코드를 확인해 주세요'}, 401));
+
+    await expectLater(
+      NulbomApi.signup(code: '12345678', name: '가', phone: '010-1234-5678', agreed: true),
+      throwsA(isA<ApiException>().having((e) => e.message, 'message', '가입 코드를 확인해 주세요')),
+    );
+    expect(await NulbomApi.elderKey(), isNull);
+  });
+
+  test('내 상태는 저장된 어르신 열쇠로 읽는다', () async {
+    SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved'});
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'status': 'pending', 'name': '홍길동'});
+    });
+
+    final me = await NulbomApi.myStatus();
+
+    expect(me.status, 'pending');
+    expect(seen.headers['Authorization'], 'Bearer nle_saved');
+    expect(seen.url.path, '/v1/me/status');
+  });
+
+  test('보호자: 개인 코드 발급, 승인, 거절', () async {
+    final calls = <String>[];
+    NulbomApi.client = MockClient((request) async {
+      calls.add('${request.method} ${request.url.path}');
+      if (request.url.path == '/v1/guardian/invite') return json({'code': '00001234'});
+      return json({'status': 'ok'});
+    });
+
+    final code = await NulbomApi.issueInvite(key: 'nlb_test');
+    await NulbomApi.approveElder(20, key: 'nlb_test');
+    await NulbomApi.rejectElder(21, key: 'nlb_test');
+
+    expect(code.code, '00001234');
+    expect(calls, [
+      'POST /v1/guardian/invite',
+      'POST /v1/elders/20/approve',
+      'POST /v1/elders/21/reject',
+    ]);
+  });
 }

@@ -32,6 +32,7 @@ class GuardianScreen extends StatefulWidget {
 class _GuardianScreenState extends State<GuardianScreen> {
   // 서버에서 읽어 기존 화면이 쓰던 맵 모양으로 바꿔 둔다.
   List<Map<String, dynamic>> _elders = [];
+  List<ElderSummary> _pending = []; // 승인 대기: 카드로 따로 보여 준다
   Map<String, dynamic> _selectedElder = {};
   List<Map<String, dynamic>> _alerts = [];
   Timer? _dateRefreshTimer;
@@ -106,11 +107,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   Future<void> _load() async {
     try {
-      final elders = (await NulbomApi.guardianElders()).map(_elderToMap).toList();
+      final all = await NulbomApi.guardianElders();
+      final pending = all.where((e) => e.status == 'pending').toList();
+      final elders = all.where((e) => e.status != 'pending').map(_elderToMap).toList();
       final alerts = (await NulbomApi.guardianAlerts()).map(_alertToMap).toList();
       if (!mounted) return;
       setState(() {
         _elders = elders;
+        _pending = pending;
         _alerts = alerts;
         _selectedElder = elders.isEmpty ? {} : elders.first;
         _loading = false;
@@ -183,6 +187,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_loadError == null) ..._pending.map(_buildPendingCard),
                 Text(
                   _loadError ?? '관리 중인 어르신이 아직 없어요.',
                   textAlign: TextAlign.center,
@@ -265,6 +270,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                ..._pending.map(_buildPendingCard),
                 ..._elders.map((elder) => _buildElderCard(context, elder)),
                 const SizedBox(height: 32),
 
@@ -398,6 +404,88 @@ class _GuardianScreenState extends State<GuardianScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _decide(ElderSummary elder, {required bool approve}) async {
+    try {
+      if (approve) {
+        await NulbomApi.approveElder(elder.elderId);
+      } else {
+        await NulbomApi.rejectElder(elder.elderId);
+      }
+      if (!mounted) return;
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '처리하지 못했어요. 잠시 뒤에 다시 해 주세요.'),
+        ),
+      );
+    }
+  }
+
+  /// 어르신이 보호자 코드로 가입했다. 이름과 번호가 내 부모님이 맞을 때만 승인한다 —
+  /// 승인하기 전에는 이 번호로 전화가 가지 않는다.
+  Widget _buildPendingCard(ElderSummary elder) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: eAccent.withOpacity(0.08),
+        border: Border.all(color: eAccent.withOpacity(0.4)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '승인 대기',
+            style: GoogleFonts.notoSansKr(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: eAccent,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            elder.name,
+            style: GoogleFonts.notoSansKr(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: eInk,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(elder.phone ?? '-', style: const TextStyle(fontSize: 15, color: eInkSoft)),
+          const SizedBox(height: 4),
+          Text(
+            '내 부모님이 맞다면 승인해 주세요. 승인하면 이 번호로 안부 전화가 시작돼요.',
+            style: GoogleFonts.notoSansKr(fontSize: 12, color: eInkSoft),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _decide(elder, approve: false),
+                  child: const Text('거절'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => _decide(elder, approve: true),
+                  style: ElevatedButton.styleFrom(backgroundColor: eAccent),
+                  child: const Text('승인', style: TextStyle(color: Colors.white)),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

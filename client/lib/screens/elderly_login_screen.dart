@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import 'elderly_signup_screen.dart';
-import 'elderly_home_page.dart';
+import 'elderly_gate.dart';
 import 'role_selection_screen.dart';
 
 const Color eBg = Color(0xFFFBF6ED);
@@ -53,7 +53,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const ElderlyHomePage()),
+        MaterialPageRoute(builder: (context) => const ElderlyGate()),
       );
     } else {
       setState(() {

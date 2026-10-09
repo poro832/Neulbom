@@ -442,3 +442,21 @@ def test_a_dial_the_carrier_refused_is_not_counted(make_store):
     store.mark_failed(call.call_id)  # 사업자 식별자가 붙지 않았다
 
     assert store.count_requested_since(ELDER, clock.now - 10) == 0
+
+
+# ------------------------------------------------ 발신 번호는 DB에서 읽는다
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_postgres_reads_the_dial_number_from_the_elders_table():
+    """새로 가입한 어르신은 환경 변수(ELDER_PHONES)에 없다. 번호의 출처가 DB여야 전화가 걸린다."""
+    store = _postgres_store()
+    with store._pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO elders (elder_id, guardian_id, name, phone_number) "
+            "VALUES (555, 1, '새 어르신', '010-5555-0000')"
+        )
+
+    assert store.find_elder(555) == "010-5555-0000"
+    assert store.find_elder(424242) is None
+    assert store.find_elder(ELDER) == "070-1111-2222"  # 시드된 어르신도 그대로

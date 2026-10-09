@@ -41,6 +41,7 @@ from app.api.alerts import InMemoryAlertStore
 from app.api.app_data import AppData, add_app_routes
 from app.api.contacts import InMemoryContactStore
 from app.api.elder_auth import ElderKeyAuth, InMemoryElderKeyStore
+from app.api.invites import InMemoryInviteStore
 from app.api.pairing import InMemoryPairingStore
 from app.api.reports import InMemoryReports
 from app.api.calls import DEFAULT_MANUAL_CALLS_PER_DAY
@@ -747,12 +748,14 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
             contacts=InMemoryContactStore(),
             reports=InMemoryReports(elders, alerts),
             alerts=alerts,
+            invites=InMemoryInviteStore(),
         )
         return data, AlertRules(alerts=alerts, elders=elders)
 
     from app.api.postgres_alerts import PostgresAlertStore
     from app.api.postgres_contacts import PostgresContactStore
     from app.api.postgres_elder_keys import PostgresElderKeyStore
+    from app.api.postgres_invites import PostgresInviteStore
     from app.api.postgres_pairing import PostgresPairingStore
     from app.api.postgres_reports import PostgresReports
 
@@ -767,6 +770,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         contacts=PostgresContactStore(pool=pool),
         reports=PostgresReports(pool=pool),
         alerts=alerts,
+        invites=PostgresInviteStore(pool=pool),
     )
     return data, AlertRules(alerts=alerts, elders=elders)
 

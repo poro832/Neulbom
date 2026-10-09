@@ -83,4 +83,40 @@ void main() {
     final p = PairingCode.fromJson({'code': '000123', 'expires_at': '2026-10-09T09:00:00+09:00'});
     expect(p.code, '000123'); // 앞자리 0이 살아 있어야 한다
   });
+
+  test('어르신 요약: 상태가 없으면 활성이고, 승인 대기는 번호가 있다', () {
+    final active = ElderSummary.fromJson({
+      'elder_id': 12,
+      'name': '어르신 12',
+      'last_call_at': null,
+      'last_status': null,
+      'week_calls': 0,
+      'week_avg_score': null,
+      'week_alerts': 0,
+    });
+    expect(active.status, 'active');
+    expect(active.phone, isNull);
+
+    final pending = ElderSummary.fromJson({
+      'elder_id': 20,
+      'name': '새 어르신',
+      'last_call_at': null,
+      'last_status': null,
+      'week_calls': 0,
+      'week_avg_score': null,
+      'week_alerts': 0,
+      'status': 'pending',
+      'phone': '010-9999-1111',
+    });
+    expect(pending.status, 'pending');
+    expect(pending.phone, '010-9999-1111');
+  });
+
+  test('가입 결과, 내 상태, 개인 코드', () {
+    expect(SignupResult.fromJson({'elder_key': 'nle_x', 'status': 'pending'}).status, 'pending');
+    final me = MyStatus.fromJson({'status': 'active', 'name': '홍길동'});
+    expect(me.status, 'active');
+    expect(me.name, '홍길동');
+    expect(InviteCode.fromJson({'code': '00001234'}).code, '00001234'); // 앞자리 0이 살아 있다
+  });
 }

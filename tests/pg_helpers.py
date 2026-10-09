@@ -24,7 +24,7 @@ def seed_world(pool) -> None:
     """보호자 1·2와 어르신 12·13(보호자 1), 14(보호자 2)만 남기고 모두 비운다."""
     with pool.connection() as conn:
         conn.execute(
-            "TRUNCATE alerts, contacts, elder_keys, elder_pairings, call_metrics, "
+            "TRUNCATE alerts, contacts, elder_keys, elder_pairings, guardian_invites, call_metrics, "
             "calls, elders, guardians RESTART IDENTITY CASCADE"
         )
         for guardian_id, name in ((1, "보호자1"), (2, "보호자2")):

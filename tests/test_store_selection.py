@@ -222,3 +222,17 @@ def test_the_assembled_app_has_the_app_routes_but_every_one_is_closed_without_a_
     assert client.get("/v1/me/calls").status_code == 401
     assert client.get("/v1/me/contacts").status_code == 401
     assert client.post("/v1/pair", json={"code": "123456", "phone": "070-1111-2222"}).status_code == 401
+
+
+def test_the_assembled_app_closes_the_signup_paths_without_a_database():
+    import app.main as main
+
+    client = TestClient(main.app)
+
+    assert client.post("/v1/guardian/invite").status_code == 401
+    assert client.get("/v1/me/status").status_code == 401
+    assert client.post("/v1/elders/1/approve").status_code == 401
+    assert client.post(
+        "/v1/signup",
+        json={"code": "12345678", "name": "가", "phone": "010-1234-5678", "agreed": True},
+    ).status_code == 401

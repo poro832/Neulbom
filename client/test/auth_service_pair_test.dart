@@ -16,36 +16,40 @@ http.Response json(Object body, [int status = 200]) => http.Response(
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('어르신 가입: 서버가 코드를 받아 주면 어르신 열쇠가 폰에 저장된다', () async {
+  test('어르신 가입: 동의와 함께 서버에 가입하면 어르신 열쇠가 폰에 저장된다', () async {
     late http.Request seen;
     NulbomApi.client = MockClient((request) async {
       seen = request;
-      return json({'elder_key': 'nle_abc', 'elder_name': '어르신 12'});
+      return json({'elder_key': 'nle_abc', 'status': 'pending'});
     });
 
     final result = await AuthService.elderlySignup(
       name: '홍길동',
       phone: '010-1111-2222',
-      connectionCode: '000123',
+      connectionCode: '00001234',
+      agreed: true,
     );
 
     expect(result['success'], isTrue);
-    expect(jsonDecode(seen.body)['code'], '000123'); // 앞자리 0이 살아 있다
+    final sent = jsonDecode(seen.body) as Map<String, dynamic>;
+    expect(sent['code'], '00001234'); // 앞자리 0이 살아 있다
+    expect(sent['agreed'], isTrue);
     expect(await NulbomApi.elderKey(), 'nle_abc');
   });
 
-  test('어르신 가입: 가짜 코드 123456은 더 이상 통과하지 않는다 (서버가 거절하면 그 문장을 보여 준다)', () async {
+  test('어르신 가입: 서버가 거절하면 그 문장을 보여 주고 열쇠를 저장하지 않는다', () async {
     NulbomApi.client =
-        MockClient((request) async => json({'detail': '연결 코드를 확인해 주세요'}, 401));
+        MockClient((request) async => json({'detail': '가입 코드를 확인해 주세요'}, 401));
 
     final result = await AuthService.elderlySignup(
       name: '홍길동',
       phone: '010-1111-2222',
-      connectionCode: '123456',
+      connectionCode: '12345678',
+      agreed: true,
     );
 
     expect(result['success'], isFalse);
-    expect(result['message'], '연결 코드를 확인해 주세요');
+    expect(result['message'], '가입 코드를 확인해 주세요');
     expect(await NulbomApi.elderKey(), isNull);
   });
 

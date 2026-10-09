@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
-import 'elderly_login_screen.dart';
+import 'elderly_gate.dart';
 
 const Color eBg = Color(0xFFFBF6ED);
 const Color eCard = Color(0xFFFFFDF8);
@@ -24,6 +24,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   String? _successMessage;
+  bool _agreed = false;
 
   @override
   void dispose() {
@@ -64,10 +65,19 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
       _successMessage = null;
     });
 
+    if (!_agreed) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '안부 전화를 받는 데 동의해 주세요.';
+      });
+      return;
+    }
+
     final result = await AuthService.elderlySignup(
       name: _nameController.text,
       phone: _phoneController.text,
       connectionCode: _codeController.text,
+      agreed: _agreed,
     );
 
     setState(() {
@@ -76,7 +86,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
 
     if (result['success']) {
       setState(() {
-        _successMessage = '회원가입이 완료되었습니다!';
+        _successMessage = '가입이 완료되었어요. 보호자 승인을 기다려 주세요.';
       });
 
       await Future.delayed(const Duration(seconds: 1));
@@ -84,7 +94,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
+        MaterialPageRoute(builder: (context) => const ElderlyGate()),
       );
     } else {
       setState(() {
@@ -201,7 +211,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
 
               // 보호자 연결 코드
               Text(
-                '보호자 연결 코드',
+                '보호자 코드',
                 style: GoogleFonts.notoSansKr(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -214,7 +224,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
                 enabled: !_isLoading,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  hintText: '보호자에게 받은 연결 코드를 입력해주세요',
+                  hintText: '보호자에게 받은 8자리 코드를 입력해주세요',
                   hintStyle: const TextStyle(color: eInkSoft),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -236,8 +246,21 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                '보호자 앱에서 발급한 연결 코드를 입력하면 보호자와 연결됩니다.',
+                '보호자 앱에서 받은 코드로 가입하면 보호자가 승인한 뒤에 안부 전화가 시작돼요.',
                 style: TextStyle(fontSize: 12, color: eInkSoft, height: 1.5),
+              ),
+
+              const SizedBox(height: 16),
+              CheckboxListTile(
+                value: _agreed,
+                onChanged: _isLoading ? null : (value) => setState(() => _agreed = value ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                contentPadding: EdgeInsets.zero,
+                activeColor: eAccent,
+                title: Text(
+                  '늘봄 AI가 안부 전화를 거는 데 동의합니다.',
+                  style: GoogleFonts.notoSansKr(fontSize: 14, color: eInk),
+                ),
               ),
 
               // 에러/성공 메시지

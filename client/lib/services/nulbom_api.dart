@@ -206,6 +206,41 @@ class NulbomApi {
     await _send('DELETE', '/v1/me/contacts/$contactId', key: await _elderKeyOrThrow(key));
   }
 
+  // ------------------------------------------------------------ 보호자 코드로 가입
+
+  /// 보호자 개인 코드로 가입한다. 서버가 승인 대기 어르신을 만들고 이 폰 전용 열쇠를 준다.
+  /// 보호자가 승인하기 전에는 전화가 오지 않는다.
+  static Future<SignupResult> signup({
+    required String code,
+    required String name,
+    required String phone,
+    required bool agreed,
+  }) async {
+    final json = await _send('POST', '/v1/signup',
+        body: {'code': code, 'name': name, 'phone': phone, 'agreed': agreed});
+    final result = SignupResult.fromJson(json);
+    await saveElderKey(result.elderKey);
+    return result;
+  }
+
+  static Future<MyStatus> myStatus({String? key}) async {
+    final json = await _send('GET', '/v1/me/status', key: await _elderKeyOrThrow(key));
+    return MyStatus.fromJson(json);
+  }
+
+  static Future<InviteCode> issueInvite({String? key}) async {
+    final json = await _send('POST', '/v1/guardian/invite', key: _guardianKeyOrThrow(key));
+    return InviteCode.fromJson(json);
+  }
+
+  static Future<void> approveElder(int elderId, {String? key}) async {
+    await _send('POST', '/v1/elders/$elderId/approve', key: _guardianKeyOrThrow(key));
+  }
+
+  static Future<void> rejectElder(int elderId, {String? key}) async {
+    await _send('POST', '/v1/elders/$elderId/reject', key: _guardianKeyOrThrow(key));
+  }
+
   /// AI에게 전화를 걸어 달라고 요청한다.
   ///
   /// 앱은 통화를 하지 않는다. 마이크도 소켓도 쓰지 않는다 — 버튼은 신호일 뿐이고
