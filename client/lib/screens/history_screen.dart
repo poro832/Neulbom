@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eAccentSoft = Color(0xFFFBE4D3);
+import '../main.dart';
+import '../models/nulbom_models.dart';
+import '../services/nulbom_api.dart';
 
+/// 어르신의 늘봄 안부 전화 기록. 서버의 `GET /v1/me/calls`를 보여 준다.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
@@ -18,38 +15,40 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  final List<Map<String, dynamic>> _callHistory = [
-    {
-      'name': '아들',
-      'time': DateTime.now().subtract(const Duration(hours: 2)),
-      'duration': '00:15:32',
-      'type': 'incoming',
-    },
-    {
-      'name': '딸',
-      'time': DateTime.now().subtract(const Duration(hours: 5)),
-      'duration': '00:08:45',
-      'type': 'incoming',
-    },
-    {
-      'name': '며느리',
-      'time': DateTime.now().subtract(const Duration(days: 1)),
-      'duration': '00:22:10',
-      'type': 'outgoing',
-    },
-    {
-      'name': '가족의사',
-      'time': DateTime.now().subtract(const Duration(days: 1, hours: 3)),
-      'duration': '00:05:30',
-      'type': 'incoming',
-    },
-    {
-      'name': '복지관',
-      'time': DateTime.now().subtract(const Duration(days: 2)),
-      'duration': '00:10:15',
-      'type': 'incoming',
-    },
-  ];
+  late Future<List<AiCall>> _calls;
+
+  @override
+  void initState() {
+    super.initState();
+    _calls = NulbomApi.myCalls();
+  }
+
+  void _reload() {
+    setState(() {
+      _calls = NulbomApi.myCalls();
+    });
+  }
+
+  static String _duration(int? seconds) {
+    if (seconds == null) return '-';
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  static String _statusLabel(String status) {
+    switch (status) {
+      case 'completed':
+        return '통화했어요';
+      case 'no_answer':
+        return '받지 못했어요';
+      default:
+        return '연결되지 않았어요';
+    }
+  }
+
+  static String _errorText(Object error) =>
+      error is ApiException ? error.message : '기록을 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
 
   @override
   Widget build(BuildContext context) {
@@ -73,99 +72,96 @@ class _HistoryScreenState extends State<HistoryScreen> {
             padding: const EdgeInsets.only(right: 16),
             child: IconButton(
               icon: const Icon(Icons.refresh, size: 28, color: eInk),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('새로고침 중...')),
-                );
-              },
+              onPressed: _reload,
             ),
           ),
         ],
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _callHistory.length,
-        itemBuilder: (context, index) {
-          final call = _callHistory[index];
-          final isIncoming = call['type'] == 'incoming';
-
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: eCard,
-              border: Border.all(color: eLine, width: 1),
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: ListTile(
-              contentPadding: const EdgeInsets.all(16),
-              leading: Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isIncoming ? const Color(0xFFE5F3EA) : eAccentSoft,
-                ),
-                child: Icon(
-                  isIncoming ? Icons.call_received : Icons.call_made,
-                  color: isIncoming
-                      ? const Color(0xFF2E8F5E)
-                      : eAccent,
-                  size: 28,
-                ),
-              ),
-              title: Text(
-                call['name'],
-                style: GoogleFonts.notoSansKr(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: eInk,
-                ),
-              ),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 8),
-                  Text(
-                    DateFormat('M월 d일 H:mm').format(call['time']),
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: eInkSoft,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: eAccentSoft,
-                      borderRadius: BorderRadius.circular(100),
-                    ),
-                    child: Text(
-                      '통화 시간: ${call['duration']}',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        color: eAccent,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              trailing: IconButton(
-                icon: const Icon(Icons.call, size: 28, color: eAccent),
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('${call['name']}에게 전화 중...'),
-                    ),
-                  );
-                },
-              ),
-            ),
+      body: FutureBuilder<List<AiCall>>(
+        future: _calls,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return _message(_errorText(snapshot.error!));
+          }
+          final calls = snapshot.data!;
+          if (calls.isEmpty) {
+            return _message('아직 통화 기록이 없어요.');
+          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: calls.length,
+            itemBuilder: (context, index) => _tile(calls[index]),
           );
         },
+      ),
+    );
+  }
+
+  Widget _message(String text) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.notoSansKr(fontSize: 20, color: eInkSoft),
+        ),
+      ),
+    );
+  }
+
+  Widget _tile(AiCall call) {
+    final talked = call.status == 'completed';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: eCard,
+        border: Border.all(color: eLine, width: 1),
+        borderRadius: BorderRadius.circular(15),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        leading: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: talked ? const Color(0xFFE5F3EA) : eAccentSoft,
+          ),
+          child: Icon(
+            talked ? Icons.phone_in_talk : Icons.phone_missed,
+            color: talked ? const Color(0xFF2E8F5E) : eAccent,
+            size: 28,
+          ),
+        ),
+        title: Text(
+          '늘봄 안부 전화',
+          style: GoogleFonts.notoSansKr(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: eInk,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            Text(
+              DateFormat('M월 d일 H:mm').format(call.startedAt),
+              style: const TextStyle(fontSize: 16, color: eInkSoft),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              talked
+                  ? '${_statusLabel(call.status)} · ${_duration(call.durationS)}'
+                  : _statusLabel(call.status),
+              style: const TextStyle(fontSize: 16, color: eInkSoft),
+            ),
+          ],
+        ),
       ),
     );
   }
