@@ -118,3 +118,98 @@ def test_a_guardian_profile_has_name_and_phone(directory):
     created = directory.add_guardian("홍길동", "010-1111-2222")
     assert directory.guardian_profile(created) == GuardianProfile(name="홍길동", phone="010-1111-2222")
     assert directory.guardian_profile(99999) is None
+
+
+# ------------------------------------------------ 가입 · 승인 · 거절
+
+
+from app.api.elder_directory import PendingLimit, PhoneTaken  # noqa: E402
+
+
+def make_pending(directory, guardian_id=1, name="새 어르신", phone="010-9999-1111", max_pending=5):
+    return directory.create_pending(
+        guardian_id=guardian_id, name=name, phone=phone, max_pending=max_pending
+    )
+
+
+def test_a_signup_makes_a_pending_elder_that_is_not_consenting(directory):
+    elder_id = make_pending(directory)
+
+    access = directory.get(elder_id)
+
+    assert access.guardian_id == 1 and access.name == "새 어르신"
+    assert access.consenting is False and access.agreed is True
+    assert access.status == "pending"
+    assert directory.find_by_phone("01099991111") == elder_id
+
+
+def test_existing_elders_have_active_or_unconsented_status(directory):
+    assert directory.get(13).status == "active"        # 동의가 있다
+    assert directory.get(12).status == "unconsented"   # 운영자 등록, 동의 전
+
+
+def test_a_number_already_registered_is_refused_in_any_format(directory):
+    make_pending(directory, phone="010-9999-1111")
+
+    for phone in ("010-9999-1111", "01099991111", "010 9999 1111", "070-0000-0012", "07000000012"):
+        with pytest.raises(PhoneTaken):
+            make_pending(directory, phone=phone, name="중복")
+
+
+def test_a_guardian_cannot_hold_more_pending_elders_than_the_limit(directory):
+    make_pending(directory, phone="010-1000-0001", max_pending=2)
+    make_pending(directory, phone="010-1000-0002", max_pending=2)
+
+    with pytest.raises(PendingLimit):
+        make_pending(directory, phone="010-1000-0003", max_pending=2)
+
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+    assert make_pending(directory, guardian_id=other, phone="010-1000-0004", max_pending=2)
+
+
+def test_elders_of_shows_status_and_the_phone_only_while_pending(directory):
+    pending = make_pending(directory, phone="010-9999-1111")
+
+    by_id = {e.elder_id: e for e in directory.elders_of(1)}
+
+    assert by_id[pending].status == "pending" and by_id[pending].phone == "010-9999-1111"
+    assert by_id[13].status == "active" and by_id[13].phone is None
+    assert by_id[12].status == "unconsented" and by_id[12].phone is None
+
+
+def test_approving_makes_the_elder_active(directory):
+    elder_id = make_pending(directory)
+
+    assert directory.approve(elder_id, 1) is True
+
+    access = directory.get(elder_id)
+    assert access.consenting is True and access.status == "active"
+    assert directory.approve(elder_id, 1) is False  # 이미 활성이다
+
+
+def test_only_the_owning_guardian_can_approve_or_reject(directory):
+    elder_id = make_pending(directory)
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert directory.approve(elder_id, other) is False
+    assert directory.reject(elder_id, other) is False
+    assert directory.get(elder_id).status == "pending"
+
+
+def test_only_pending_elders_can_be_approved_or_rejected(directory):
+    assert directory.approve(13, 1) is False   # 이미 활성
+    assert directory.reject(13, 1) is False
+    assert directory.approve(12, 1) is False   # 운영자 등록(동의 전)은 앱에서 승인할 수 없다
+    assert directory.reject(12, 1) is False
+    assert directory.get(12).status == "unconsented" and directory.get(13).status == "active"
+    assert directory.approve(424242, 1) is False
+
+
+def test_rejecting_deletes_the_pending_elder_and_frees_the_number(directory):
+    elder_id = make_pending(directory, phone="010-9999-1111")
+
+    assert directory.reject(elder_id, 1) is True
+
+    assert directory.get(elder_id) is None
+    assert directory.find_by_phone("01099991111") is None
+    assert make_pending(directory, phone="010-9999-1111")  # 같은 번호로 다시 가입할 수 있다
