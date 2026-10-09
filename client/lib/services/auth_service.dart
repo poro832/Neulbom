@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'nulbom_api.dart';
+
 class AuthService {
   static const String _userTypeKey = 'user_type';
   static const String _phoneKey = 'phone';
@@ -18,15 +20,12 @@ class AuthService {
     required String connectionCode,
   }) async {
     try {
-      // 연결코드 검증
-      if (connectionCode != _validConnectionCode) {
-        return {'success': false, 'message': '유효하지 않은 연결 코드입니다.'};
-      }
-
-      // 전화번호 중복 확인 (Mock)
       if (phone.length < 10) {
         return {'success': false, 'message': '유효한 전화번호를 입력해주세요.'};
       }
+
+      // 서버가 코드와 전화번호를 확인하고 이 폰 전용 열쇠를 준다(성공하면 폰에 저장된다).
+      await NulbomApi.pair(code: connectionCode.trim(), phone: phone.trim());
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_userTypeKey, 'elderly');
@@ -40,8 +39,10 @@ class AuthService {
         'message': '회원가입 성공',
         'data': {'name': name, 'phone': phone},
       };
+    } on ApiException catch (e) {
+      return {'success': false, 'message': e.message};
     } catch (e) {
-      return {'success': false, 'message': '회원가입 실패: $e'};
+      return {'success': false, 'message': '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.'};
     }
   }
 
@@ -52,6 +53,13 @@ class AuthService {
     try {
       if (phone.length < 10) {
         return {'success': false, 'message': '유효한 전화번호를 입력해주세요.'};
+      }
+
+      if (await NulbomApi.elderKey() == null) {
+        return {
+          'success': false,
+          'message': '이 폰은 아직 연결되지 않았어요. 처음이시면 회원가입에서 보호자 연결 코드를 입력해 주세요.',
+        };
       }
 
       final prefs = await SharedPreferences.getInstance();
