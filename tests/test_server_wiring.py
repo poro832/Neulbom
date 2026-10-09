@@ -70,7 +70,9 @@ class _Beep:
         return b"\x01\x02" * 400
 
 
-def make_server(tmp_path, sink=None, outcomes=None, transcriber=None):
+def make_server(
+    tmp_path, sink=None, outcomes=None, transcriber=None, responder_factory=None, **extra
+):
     store = InMemoryCallStore(phones={12: "070-1111-2222"})
     telephony = FakeTelephony()
     kit = auth_kit()
@@ -79,13 +81,14 @@ def make_server(tmp_path, sink=None, outcomes=None, transcriber=None):
         telephony=telephony,
         public_base_url="https://api.example.com",
         stream_base_url="wss://api.example.com",
-        responder_factory=_Beep,
+        responder_factory=responder_factory or _Beep,
         recordings_dir=tmp_path,
         outcomes=outcomes,
         sink=sink,
         transcriber=transcriber,
         guardian_auth=kit.auth,
         elders=kit.directory,
+        **extra,
     )
     return TestClient(app, headers=kit.headers), store, telephony
 
@@ -578,3 +581,26 @@ def test_shutting_the_server_down_stops_the_worker(tmp_path):
 
     worker_thread.join(5.0)
     assert not worker_thread.is_alive(), "종료 훅이 워커를 멈추지 않았다"
+
+
+def test_a_finished_call_leaves_its_conversation_behind(tmp_path):
+    """통화가 끝나면 응답기의 대화가 call_turns 쪽 저장소에 남는다."""
+    from app.api.call_content import InMemoryCallContent
+    from app.media.conversation import Turn
+
+    class Talking(_Beep):
+        history = [Turn("ai", "안녕하세요"), Turn("elder", "네")]
+
+    content = InMemoryCallContent()
+    client, store, _ = make_server(
+        tmp_path, responder_factory=Talking, call_content=content
+    )
+    call_id, _, token = place_call(client, store)
+
+    run_stream(client, token)
+
+    assert [(t.speaker, t.text) for t in content.turns(call_id)] == [
+        ("ai", "안녕하세요"),
+        ("elder", "네"),
+    ]
+    assert store.get(call_id).status == "completed"

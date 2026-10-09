@@ -475,3 +475,36 @@ def test_a_failing_purge_does_not_stop_the_recording_rules(tmp_path, caplog):
 
     assert not old.exists()
     assert "전사 원문을 지우지 못했다" in caplog.text
+
+
+# ------------------------------------------------------------ 대화 기록(턴·요약) 30일
+
+
+def test_old_conversation_content_is_purged(tmp_path):
+    from app.api.call_content import InMemoryCallContent
+
+    saved_at = {"now": NOW - DEFAULT_MAX_AGE_SECONDS - HOUR}
+    content = InMemoryCallContent(clock=lambda: saved_at["now"])
+    content.save_turns(1, [("ai", "오래됨")])
+    content.save_summary(1, "오래된 요약", "m")
+    saved_at["now"] = NOW - HOUR
+    content.save_turns(2, [("ai", "최근")])
+
+    archiver(tmp_path, None, call_content=content).sweep()
+
+    assert content.turns(1) == [] and content.summaries([1]) == {}
+    assert len(content.turns(2)) == 1
+
+
+def test_a_failing_content_purge_does_not_stop_the_recording_rules(tmp_path, caplog):
+    class Broken:
+        def purge_older_than(self, cutoff):
+            raise RuntimeError("DB 끊김")
+
+    old = recording(tmp_path, "1-a.wav", age=DEFAULT_MAX_AGE_SECONDS + HOUR)
+
+    with caplog.at_level(logging.ERROR, logger="app.archiver"):
+        archiver(tmp_path, None, call_content=Broken()).sweep()
+
+    assert not old.exists()
+    assert "대화 기록을 지우지 못했다" in caplog.text
