@@ -33,6 +33,8 @@ CREATE TABLE elders (
 
     -- 동의 (설계 3.6). NULL이면 발신 대상에서 제외한다.
     consent_at   TIMESTAMPTZ,
+    -- 어르신이 가입 화면에서 동의에 체크한 시각. 보호자 승인(consent_at) 전에는 이것만 채워진다.
+    agreed_at    TIMESTAMPTZ,
 
     -- 기준선 열은 여기 두지 않는다. 판정마다 최근 14통에서 다시 계산하기
     -- 때문이다(위험 점수 설계 3.1) — 저장해 두면 그 판정을 나중에 재현할 수
@@ -268,5 +270,15 @@ CREATE INDEX contacts_elder_idx ON contacts (elder_id, contact_id);
 
 -- 웹훅이 다시 와도 한 통화에 같은 종류 알림이 둘 생기지 않게 한다.
 CREATE UNIQUE INDEX alerts_call_type_idx ON alerts (call_id, alert_type) WHERE call_id IS NOT NULL;
+
+-- 보호자 개인 코드. 지문만 저장한다. 보호자당 활성(revoked_at IS NULL) 코드는 하나뿐이다.
+CREATE TABLE guardian_invites (
+    invite_id   BIGSERIAL PRIMARY KEY,
+    guardian_id BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    code_hash   TEXT NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at  TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX guardian_invites_active_idx ON guardian_invites (guardian_id) WHERE revoked_at IS NULL;
 -- 발송 워커가 타는 인덱스
 CREATE INDEX alerts_unsent_idx ON alerts (created_at) WHERE sent_at IS NULL;
