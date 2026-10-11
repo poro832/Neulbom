@@ -335,6 +335,13 @@ class CallSession:
         """begin/end가 둘 다 돌아온 AI 발화 구간."""
         return list(self._ai_turns)
 
+    def conversation_turns(self) -> list[tuple[str, str]]:
+        """응답기가 기록한 AI/어르신 대화. 기록하지 않는 응답기(고정 응답)는 빈 목록."""
+        history = getattr(self._responder, "history", None)
+        if not history:
+            return []
+        return [(turn.speaker, turn.text) for turn in history]
+
     @property
     def unmatched_marks(self) -> int:
         """짝이 안 맞은 표식 수. 크면 degraded로 표시한다(설계 8장)."""

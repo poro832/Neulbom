@@ -535,3 +535,17 @@ def test_start_survives_a_greeting_failure():
 
 def test_an_empty_greeting_sends_nothing():
     assert CallSession("call-1", SAMPLE_RATE, GreetingResponder(b"")).start() == []
+
+
+def test_conversation_turns_come_from_the_responder_history():
+    from app.media.conversation import Turn
+
+    class Talking(FakeResponder):
+        history = [Turn("ai", "안녕하세요"), Turn("elder", "네")]
+
+    session = CallSession("1", SAMPLE_RATE, Talking())
+    assert session.conversation_turns() == [("ai", "안녕하세요"), ("elder", "네")]
+
+
+def test_a_responder_without_history_has_no_conversation():
+    assert CallSession("1", SAMPLE_RATE, FakeResponder()).conversation_turns() == []

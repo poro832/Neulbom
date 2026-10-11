@@ -35,6 +35,8 @@ CREATE TABLE elders (
     consent_at   TIMESTAMPTZ,
     -- 어르신이 가입 화면에서 동의에 체크한 시각. 보호자 승인(consent_at) 전에는 이것만 채워진다.
     agreed_at    TIMESTAMPTZ,
+    -- 통화 내용(요약·원문)이 보호자에게 공유된다는 안내에 동의한 시각. NULL이면 공유하지 않는다.
+    share_agreed_at TIMESTAMPTZ,
 
     -- 기준선 열은 여기 두지 않는다. 판정마다 최근 14통에서 다시 계산하기
     -- 때문이다(위험 점수 설계 3.1) — 저장해 두면 그 판정을 나중에 재현할 수
@@ -212,6 +214,24 @@ CREATE TABLE call_reports (
 
 COMMENT ON TABLE call_reports IS
     'LLM이 쓴 문장만 담는다. 숫자는 call_metrics에 있으며 LLM은 관여하지 않는다(설계 3.2).';
+
+-- 통화 중 AI/어르신 대화를 한 줄씩. 보호자 앱의 원문 보기가 읽는다. 30일 뒤 지운다.
+CREATE TABLE call_turns (
+    call_id    BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    seq        INT NOT NULL,
+    speaker    TEXT NOT NULL CHECK (speaker IN ('ai', 'elder')),
+    text       TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (call_id, seq)
+);
+
+-- 보호자가 원문을 열 때마다 한 행. 앱에는 보이지 않고 DB에서만 본다.
+CREATE TABLE transcript_views (
+    view_id     BIGSERIAL PRIMARY KEY,
+    call_id     BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    guardian_id BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    viewed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ============================================================
 -- 7. 알림

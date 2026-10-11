@@ -228,6 +228,26 @@ class NulbomApi {
     return MyStatus.fromJson(json);
   }
 
+  /// 어르신이 통화 내용을 보호자에게 요약·원문으로 공유하는 데 동의한다.
+  static Future<void> agreeShare({String? key}) async {
+    await _send('POST', '/v1/me/share-consent', key: await _elderKeyOrThrow(key));
+  }
+
+  /// 보호자: 어르신의 통화 목록과 요약. 어르신이 동의하기 전에는 비어 있다.
+  static Future<ElderCalls> elderCalls(int elderId, {String? key, int limit = 30}) async {
+    final json = await _send('GET', '/v1/elders/$elderId/calls?limit=$limit',
+        key: _guardianKeyOrThrow(key));
+    return ElderCalls.fromJson(json);
+  }
+
+  /// 보호자: 통화 한 건의 AI/어르신 대화 원문. 열 때마다 서버에 열람 기록이 남는다.
+  static Future<List<CallTurn>> callTurns(int callId, {String? key}) async {
+    final json = await _send('GET', '/v1/calls/$callId/turns', key: _guardianKeyOrThrow(key));
+    return (json['turns'] as List<dynamic>)
+        .map((t) => CallTurn.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
   static Future<InviteCode> issueInvite({String? key}) async {
     final json = await _send('POST', '/v1/guardian/invite', key: _guardianKeyOrThrow(key));
     return InviteCode.fromJson(json);

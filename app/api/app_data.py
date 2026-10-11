@@ -18,6 +18,7 @@ from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, Field
 
 from app.api.alerts import AlertStore
+from app.api.call_content import CallContentStore, InMemoryCallContent
 from app.api.calls import MAX_ELDER_ID
 from app.api.contacts import ContactStore, TooManyContacts
 from app.api.elder_auth import ElderAuth, ElderKeyStore, elder_key_label, generate_elder_key
@@ -47,6 +48,7 @@ NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어
 TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
 NOT_PENDING = "승인 대기 중인 어르신이 아니에요"
+NO_CALL = "없는 통화입니다"
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
@@ -65,6 +67,7 @@ class AppData:
     invites: InviteStore
     wall_clock: Callable[[], float] = time.time
     signup_limiter: FailureLimiter = field(default_factory=FailureLimiter)
+    content: CallContentStore = field(default_factory=InMemoryCallContent)
 
 
 def iso_kst(epoch: float) -> str:
@@ -345,6 +348,8 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         except PendingLimit:
             # 사유를 알려 주지 않는다 — 없는 코드와 같은 응답이다.
             raise HTTPException(status_code=401, detail=BAD_SIGNUP)
+        # 가입 동의 문구 한 줄이 전화와 통화 내용 공유를 함께 담는다.
+        data.content.agree_share(elder_id)
         new = generate_elder_key()
         data.elder_keys.replace(
             elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash
@@ -386,4 +391,72 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if access is None:
             # 거절돼 지워진 어르신의 열쇠다.
             raise HTTPException(status_code=401, detail=NEED_KEY)
-        return {"status": access.status, "name": access.name}
+        return {
+            "status": access.status,
+            "name": access.name,
+            "share_agreed": data.content.share_agreed(elder_id),
+        }
+
+    # ------------------------------------------------ 통화 요약·원문 (어르신이 공유에 동의한 경우만)
+
+    @app.post("/v1/me/share-consent")
+    @guarded
+    def share_consent(authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        data.content.agree_share(elder_id)
+        logger.info("통화 내용 공유에 동의했다 elder_id=%s", elder_id)
+        return {"share_agreed": True}
+
+    @app.get("/v1/elders/{elder_id}/calls")
+    @guarded
+    def elder_calls(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        limit: int = Query(default=30, ge=1, le=100),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        if not data.content.share_agreed(elder_id):
+            return {"share_agreed": False, "calls": []}
+        lines = data.reports.call_lines(elder_id, limit)
+        ids = [line.call_id for line in lines]
+        summaries = data.content.summaries(ids)
+        with_turns = data.content.calls_with_turns(ids)
+        return {
+            "share_agreed": True,
+            "calls": [
+                {
+                    "call_id": line.call_id,
+                    "started_at": iso_kst(line.started_at),
+                    "duration_s": line.duration_s,
+                    "status": line.status,
+                    "summary": summaries.get(line.call_id),
+                    "has_turns": line.call_id in with_turns,
+                }
+                for line in lines
+            ],
+        }
+
+    @app.get("/v1/calls/{call_id}/turns")
+    @guarded
+    def call_turns(
+        call_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        elder_id = data.content.elder_of_call(call_id)
+        access = None if elder_id is None else data.elders.get(elder_id)
+        # 없는 통화, 남의 통화, 동의 전은 모두 같은 404다 — 존재 여부를 알려 주지 않는다.
+        if (
+            access is None
+            or access.guardian_id != guardian_id
+            or not data.content.share_agreed(elder_id)
+        ):
+            raise HTTPException(status_code=404, detail=NO_CALL)
+        data.content.record_view(call_id, guardian_id)
+        # 내용은 로그에 남기지 않는다. 열람 사실만.
+        logger.info("원문을 열람했다 call_id=%s guardian_id=%s", call_id, guardian_id)
+        return {
+            "call_id": call_id,
+            "turns": [{"speaker": t.speaker, "text": t.text} for t in data.content.turns(call_id)],
+        }

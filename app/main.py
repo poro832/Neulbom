@@ -53,6 +53,7 @@ from app.api.guardian_auth import GuardianAuth, InMemoryGuardianKeyStore, KeyAut
 from app.api.lifecycle import CallLifecycle
 from app.api.outcome_store import InMemoryOutcomeStore, OutcomeStore
 from app.api.store import CallStore, InMemoryCallStore
+from app.api.call_content import CallContentStore
 from app.api.transcript_store import InMemoryTranscriptStore, TranscriptStore
 from app.media.clova_chat import DEFAULT_MODEL, ClovaChat
 from app.media.clova_long_speech import ClovaLongSpeech
@@ -71,7 +72,9 @@ from app.media.stream_server import (
     add_stream_route,
     default_responder,
 )
+from app.media.call_summary import CallSummarizer, summarizer_from_env
 from app.post_call import analyze_session
+from app.post_call_content import ConversationRecorder
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
 from app.scheduler import Roster, Scheduler
 from app.transcription import TranscriptionWorker
@@ -431,6 +434,8 @@ def build_server(
     guardian_auth: GuardianAuth | None = None,
     elders: ElderDirectory | None = None,
     manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
+    call_content: CallContentStore | None = None,
+    summarizer: CallSummarizer | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -510,12 +515,16 @@ def build_server(
         app.router.add_event_handler("startup", archiver.start)
         app.router.add_event_handler("shutdown", archiver.stop)
 
+    recorder = (
+        None if call_content is None else ConversationRecorder(call_content, summarizer)
+    )
+
     add_stream_route(
         app,
         registry=registry,
         responder_factory=responder_factory,
         recordings_dir=recordings_dir,
-        on_call_end=_end_of_call(lifecycle, sink, worker, archiver),
+        on_call_end=_end_of_call(lifecycle, sink, worker, archiver, recorder),
         on_call_start=_start_of_call(lifecycle),
     )
     return app
@@ -544,6 +553,7 @@ def _end_of_call(
     sink: AnalysisSink,
     worker: TranscriptionWorker | None = None,
     archiver: RecordingArchiver | None = None,
+    recorder: ConversationRecorder | None = None,
 ):
     """통화가 끝나는 순간 — 여기가 분석이 실제로 도는 유일한 지점이다.
 
@@ -573,6 +583,12 @@ def _end_of_call(
                     # 어르신의 통화 순서가 지켜진다(설계 6장).
                     worker.submit(call_id, analysis, wav_path)
         finally:
+            # 대화 내용을 남긴다. 실패해도 아래 상태 전이를 막으면 안 된다.
+            if recorder is not None and call_id is not None:
+                try:
+                    recorder.record(call_id, session.conversation_turns())
+                except Exception:
+                    logger.exception("대화 기록 중 예상 못 한 오류 call_id=%s", call_id)
             # 분석이 실패해도 통화는 끝나야 한다. 상태를 못 옮기면 그
             # 어르신은 다시는 전화를 요청할 수 없다(409 영구 잠금).
             if call_id is not None:
@@ -753,6 +769,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         return data, AlertRules(alerts=alerts, elders=elders)
 
     from app.api.postgres_alerts import PostgresAlertStore
+    from app.api.postgres_call_content import PostgresCallContent
     from app.api.postgres_contacts import PostgresContactStore
     from app.api.postgres_elder_keys import PostgresElderKeyStore
     from app.api.postgres_invites import PostgresInviteStore
@@ -771,6 +788,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         reports=PostgresReports(pool=pool),
         alerts=alerts,
         invites=PostgresInviteStore(pool=pool),
+        content=PostgresCallContent(pool=pool),
     )
     return data, AlertRules(alerts=alerts, elders=elders)
 
@@ -790,13 +808,17 @@ app = build_server(
     stream_base_url=os.getenv("STREAM_BASE_URL", "ws://localhost:8000"),
     responder_factory=responder_from_env,
     roster=roster_for(_pool),
-    archiver=archiver_from_env(RECORDINGS_DIR, transcripts=_transcripts),
+    archiver=archiver_from_env(
+        RECORDINGS_DIR, transcripts=_transcripts, call_content=_app_data.content
+    ),
     transcripts=_transcripts,
     guardian_auth=_guardian_auth,
     elders=_elders,
     manual_calls_per_day=_int_from_env("MANUAL_CALLS_PER_DAY", DEFAULT_MANUAL_CALLS_PER_DAY),
     app_data=_app_data,
     alert_rules=_alert_rules,
+    call_content=_app_data.content,
+    summarizer=summarizer_from_env(),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.

@@ -47,6 +47,13 @@ void main() {
     expect(called, isFalse);
   });
 
+  testWidgets('동의 문구가 통화 내용 공유를 알린다', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: ElderlySignupScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('통화 내용이 보호자에게 요약과 원문으로 공유'), findsOneWidget);
+  });
+
   testWidgets('동의하고 제출하면 가입 요청이 나가고 승인 대기 화면으로 간다', (tester) async {
     tester.view.physicalSize = const Size(1200, 4000);
     tester.view.devicePixelRatio = 1.0;

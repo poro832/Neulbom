@@ -217,13 +217,70 @@ class SignupResult {
 class MyStatus {
   final String status; // pending | active | unconsented
   final String name;
+  // 통화 내용(요약·원문)을 보호자에게 공유하는 데 동의했는가. 없으면 동의 전으로 본다.
+  final bool shareAgreed;
 
-  const MyStatus({required this.status, required this.name});
+  const MyStatus({required this.status, required this.name, this.shareAgreed = false});
 
   factory MyStatus.fromJson(Map<String, dynamic> json) => MyStatus(
         status: json['status'] as String,
         name: json['name'] as String,
+        shareAgreed: (json['share_agreed'] as bool?) ?? false,
       );
+}
+
+/// 보호자 앱의 통화 한 줄: 요약이 있으면 요약, 원문이 있으면 눌러서 볼 수 있다.
+class CallSummary {
+  final int callId;
+  final DateTime startedAt;
+  final int? durationS;
+  final String status;
+  final String? summary;
+  final bool hasTurns;
+
+  const CallSummary({
+    required this.callId,
+    required this.startedAt,
+    required this.durationS,
+    required this.status,
+    required this.summary,
+    required this.hasTurns,
+  });
+
+  factory CallSummary.fromJson(Map<String, dynamic> json) => CallSummary(
+        callId: json['call_id'] as int,
+        startedAt: _asTime(json['started_at'])!,
+        durationS: json['duration_s'] as int?,
+        status: json['status'] as String,
+        summary: json['summary'] as String?,
+        hasTurns: (json['has_turns'] as bool?) ?? false,
+      );
+}
+
+class ElderCalls {
+  final bool shareAgreed; // false면 어르신이 아직 공유에 동의하지 않았다 — calls는 비어 있다
+  final List<CallSummary> calls;
+
+  const ElderCalls({required this.shareAgreed, required this.calls});
+
+  factory ElderCalls.fromJson(Map<String, dynamic> json) => ElderCalls(
+        shareAgreed: (json['share_agreed'] as bool?) ?? false,
+        calls: (json['calls'] as List<dynamic>)
+            .map((c) => CallSummary.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class CallTurn {
+  final String speaker; // ai | elder
+  final String text;
+
+  const CallTurn({required this.speaker, required this.text});
+
+  bool get isAi => speaker == 'ai';
+
+  factory CallTurn.fromJson(Map<String, dynamic> json) =>
+      CallTurn(speaker: json['speaker'] as String, text: json['text'] as String);
 }
 
 class InviteCode {
