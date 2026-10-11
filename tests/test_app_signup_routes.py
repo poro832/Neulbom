@@ -100,7 +100,7 @@ def test_the_new_elder_can_read_only_its_status_while_pending():
 
     status = kit.client.get("/v1/me/status", headers=headers)
     assert status.status_code == 200
-    assert status.json() == {"status": "pending", "name": "홍길동"}
+    assert status.json() == {"status": "pending", "name": "홍길동", "share_agreed": True}
 
     waiting = {"detail": "보호자 승인을 기다리고 있어요"}
     for method, path, kwargs in (
@@ -318,3 +318,12 @@ def test_a_broken_invite_store_is_503_not_open():
 
     assert kit.client.post(INVITE, headers=kit.guardian_headers).status_code == 503
     assert kit.client.post(SIGNUP, json=body("12345678")).status_code == 503
+
+
+def test_signup_also_records_the_share_agreement():
+    """가입 동의 문구 한 줄이 전화와 내용 공유를 함께 담는다."""
+    kit = make_app_kit()
+    key = sign_up(kit).json()["elder_key"]
+    headers = {"Authorization": f"Bearer {key}"}
+
+    assert kit.client.get("/v1/me/status", headers=headers).json()["share_agreed"] is True

@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 from typing import Callable, Protocol
 
+from app.api.call_content import CallContentStore
 from app.api.transcript_store import TranscriptStore
 
 logger = logging.getLogger(__name__)
@@ -114,10 +115,12 @@ class RecordingArchiver:
         max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS,
         tick_seconds: float = DEFAULT_TICK_SECONDS,
         transcripts: TranscriptStore | None = None,
+        call_content: CallContentStore | None = None,
     ) -> None:
         self.directory = Path(directory)
         self.uploader = uploader
         self.transcripts = transcripts
+        self.call_content = call_content
         self._clock = clock
         self._keep_local = keep_local_seconds
         self._max_age = max_age_seconds
@@ -132,6 +135,7 @@ class RecordingArchiver:
         now = self._clock()
         # 녹음 폴더가 없어도(새 서버) 원문 30일은 지킨다. 그래서 폴더 확인보다 먼저.
         self._purge_transcripts(now)
+        self._purge_call_content(now)
 
         if not self.directory.is_dir():
             return
@@ -161,6 +165,18 @@ class RecordingArchiver:
             return
         if removed:
             logger.info("30일 지난 전사 원문 %d건을 지웠다", removed)
+
+    def _purge_call_content(self, now: float) -> None:
+        if self.call_content is None:
+            return
+        try:
+            removed = self.call_content.purge_older_than(now - self._max_age)
+        except Exception:
+            # 녹음 쪽 30일까지 멈추면 안 된다. 다음 틱에 다시 한다.
+            logger.exception("30일 지난 대화 기록을 지우지 못했다 — 다음에 다시 한다")
+            return
+        if removed:
+            logger.info("30일 지난 대화 기록 %d건을 지웠다", removed)
 
     def _handle(self, wav: Path, now: float) -> None:
         marker = wav.with_name(wav.name + MARKER_SUFFIX)
@@ -245,7 +261,9 @@ class RecordingArchiver:
 
 
 def archiver_from_env(
-    directory: Path, transcripts: TranscriptStore | None = None
+    directory: Path,
+    transcripts: TranscriptStore | None = None,
+    call_content: CallContentStore | None = None,
 ) -> RecordingArchiver:
     """RECORDINGS_BUCKET이 있으면 S3에 올리고, 없으면 로컬 30일 삭제만 한다.
 
@@ -254,7 +272,10 @@ def archiver_from_env(
     bucket = os.getenv("RECORDINGS_BUCKET", "").strip()
     if not bucket:
         return RecordingArchiver(
-            directory=directory, uploader=None, transcripts=transcripts
+            directory=directory,
+            uploader=None,
+            transcripts=transcripts,
+            call_content=call_content,
         )
 
     region = os.getenv("AWS_REGION", "").strip() or DEFAULT_REGION
@@ -262,4 +283,5 @@ def archiver_from_env(
         directory=directory,
         uploader=S3Uploader(bucket=bucket, region=region),
         transcripts=transcripts,
+        call_content=call_content,
     )

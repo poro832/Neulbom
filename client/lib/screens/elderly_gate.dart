@@ -24,6 +24,8 @@ class ElderlyGate extends StatefulWidget {
 
 class _ElderlyGateState extends State<ElderlyGate> {
   late Future<MyStatus> _status;
+  bool _agreeing = false;
+  String? _agreeError;
 
   @override
   void initState() {
@@ -35,6 +37,25 @@ class _ElderlyGateState extends State<ElderlyGate> {
     setState(() {
       _status = NulbomApi.myStatus();
     });
+  }
+
+  Future<void> _agreeShare() async {
+    setState(() {
+      _agreeing = true;
+      _agreeError = null;
+    });
+    try {
+      await NulbomApi.agreeShare();
+      if (!mounted) return;
+      setState(() => _agreeing = false);
+      _reload();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _agreeing = false;
+        _agreeError = _errorText(error);
+      });
+    }
   }
 
   Future<void> _logout() async {
@@ -69,6 +90,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
         }
         final me = snapshot.data!;
         if (me.status == 'active') {
+          if (!me.shareAgreed) return _shareConsentScreen();
           return widget.homeBuilder?.call(context) ?? const ElderlyHomePage();
         }
         return _screen(
@@ -77,6 +99,68 @@ class _ElderlyGateState extends State<ElderlyGate> {
           retryLabel: '새로고침',
         );
       },
+    );
+  }
+
+  /// 통화 내용 공유 안내가 생기기 전에 가입한 어르신은 한 번 더 동의해야 보호자에게 공유된다.
+  /// 동의하지 않아도 안부 전화는 계속 오고, 요약·원문만 보호자에게 열리지 않는다.
+  Widget _shareConsentScreen() {
+    return Scaffold(
+      backgroundColor: eBg,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.forum_outlined, size: 64, color: eAccent),
+                const SizedBox(height: 24),
+                Text(
+                  '통화 내용 공유에 동의해 주세요',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSerifKr(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: eInk,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '안부 전화에서 나눈 이야기가 보호자에게 요약과 원문으로 공유돼요.\n동의하지 않으셔도 안부 전화는 계속 와요.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(fontSize: 16, height: 1.6, color: eInkSoft),
+                ),
+                if (_agreeError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _agreeError!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 14, color: Color(0xFFC0553F)),
+                  ),
+                ],
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _agreeing ? null : _agreeShare,
+                    style: ElevatedButton.styleFrom(backgroundColor: eAccent),
+                    child: const Text(
+                      '동의합니다',
+                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _logout,
+                  child: const Text('처음 화면으로', style: TextStyle(color: eInkSoft)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
