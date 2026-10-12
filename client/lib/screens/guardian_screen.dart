@@ -12,15 +12,15 @@ import 'elderly_detail_screen.dart';
 import 'guardian_account_screen.dart';
 
 // 색상
-const Color eBg = Color(0xFFFBF6ED);
-const Color eBg2 = Color(0xFFF3E7D3);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eAccentSoft = Color(0xFFFBE4D3);
-const Color eBrass = Color(0xFFB78A4A);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eBg2 = Color(0xFFE5F0FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
+const Color eAccentSoft = Color(0xFFE6F0FF);
+const Color eBrass = Color(0xFFFFC21A);
 
 class GuardianScreen extends StatefulWidget {
   const GuardianScreen({super.key});
@@ -210,7 +210,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
         ),
       );
     }
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       backgroundColor: eBg,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -225,7 +227,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   children: [
                     Text(
                       '보호자님\n안녕하세요',
-                      style: GoogleFonts.notoSerifKr(
+                      style: GoogleFonts.notoSansKr(
                         fontSize: 36,
                         fontWeight: FontWeight.w700,
                         color: eInk,
@@ -263,7 +265,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 // 어르신 상태 카드들
                 Text(
                   '관리 중인 어르신',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -283,7 +285,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   children: [
                     Text(
                       '이번 주 통계',
-                      style: GoogleFonts.notoSerifKr(
+                      style: GoogleFonts.notoSansKr(
                         fontSize: 22,
                         fontWeight: FontWeight.w700,
                         color: eInk,
@@ -330,7 +332,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 // 감정 추이 그래프
                 Text(
                   '이번 주 평소와 다른 정도',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -355,7 +357,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                       children: [
                         Text(
                           '최근 알림',
-                          style: GoogleFonts.notoSerifKr(
+                          style: GoogleFonts.notoSansKr(
                             fontSize: 22,
                             fontWeight: FontWeight.w700,
                             color: eInk,
@@ -404,6 +406,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

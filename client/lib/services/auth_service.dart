@@ -131,6 +131,10 @@ class AuthService {
         return {'success': false, 'message': '유효한 이메일을 입력해주세요.'};
       }
 
+      if (password.length < 6) {
+        return {'success': false, 'message': '비밀번호는 6자 이상이어야 합니다.'};
+      }
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_userTypeKey, 'guardian');
       await prefs.setString('email', email);

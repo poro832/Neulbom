@@ -4,10 +4,10 @@ import 'elderly_login_screen.dart';
 import 'guardian_login_screen.dart';
 
 // 색상
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
@@ -27,7 +27,7 @@ class RoleSelectionScreen extends StatelessWidget {
               Text(
                 '늘봄',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 48,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -79,10 +79,10 @@ class RoleSelectionScreen extends StatelessWidget {
                         size: 48,
                         color: eAccent,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 2),
                       Text(
                         '어르신',
-                        style: GoogleFonts.notoSerifKr(
+                        style: GoogleFonts.notoSansKr(
                           fontSize: 24,
                           fontWeight: FontWeight.w700,
                           color: eInk,
@@ -128,10 +128,10 @@ class RoleSelectionScreen extends StatelessWidget {
                         size: 48,
                         color: eAccent,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 2),
                       Text(
                         '보호자',
-                        style: GoogleFonts.notoSerifKr(
+                        style: GoogleFonts.notoSansKr(
                           fontSize: 24,
                           fontWeight: FontWeight.w700,
                           color: eInk,
