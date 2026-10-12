@@ -5,12 +5,12 @@ import 'elderly_signup_screen.dart';
 import 'elderly_gate.dart';
 import 'role_selection_screen.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class ElderlyLoginScreen extends StatefulWidget {
   const ElderlyLoginScreen({super.key});
@@ -51,9 +51,9 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
 
     if (result['success']) {
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const ElderlyGate()),
+        (route) => false,
       );
     } else {
       setState(() {
@@ -106,7 +106,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
         ),
         title: Text(
           '어르신 로그인',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 21,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -124,7 +124,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
                 // 로고/제목
                 Text(
                   '늘봄',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 32,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -144,7 +144,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
                 // 전화번호 입력
                 Text(
                   '전화번호 로그인',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     color: eInk,

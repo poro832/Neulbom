@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class HealthStatusScreen extends StatelessWidget {
   const HealthStatusScreen({super.key});
@@ -20,7 +20,7 @@ class HealthStatusScreen extends StatelessWidget {
         elevation: 0,
         title: Text(
           '건강 현황',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 28,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -40,7 +40,7 @@ class HealthStatusScreen extends StatelessWidget {
               // 실시간 상태
               Text(
                 '실시간 건강 지표',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -88,7 +88,7 @@ class HealthStatusScreen extends StatelessWidget {
               // 일일 활동
               Text(
                 '일일 활동',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -189,7 +189,7 @@ class HealthStatusScreen extends StatelessWidget {
               // 약물 일정
               Text(
                 '약물 복용 일정',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
                   color: eInk,

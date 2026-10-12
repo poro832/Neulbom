@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'conversation_detail_screen.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eBrass = Color(0xFFB78A4A);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
+const Color eBrass = Color(0xFFFFC21A);
 
 class ConversationHistoryScreen extends StatefulWidget {
   const ConversationHistoryScreen({super.key});
@@ -91,7 +91,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
         elevation: 0,
         title: Text(
           '대화 기록',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 24,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -175,7 +175,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                                       child: const Text(
                                         '긴급',
                                         style: TextStyle(
-                                          fontSize: 10,
+                                          fontSize: 11,
                                           fontWeight: FontWeight.w700,
                                           color: Colors.white,
                                         ),

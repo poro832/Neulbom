@@ -38,7 +38,7 @@ class _CallTurnsScreenState extends State<CallTurnsScreen> {
         iconTheme: const IconThemeData(color: eInk),
         title: Text(
           widget.title,
-          style: GoogleFonts.notoSerifKr(fontSize: 20, fontWeight: FontWeight.w700, color: eInk),
+          style: GoogleFonts.notoSansKr(fontSize: 20, fontWeight: FontWeight.w700, color: eInk),
         ),
       ),
       body: FutureBuilder<List<CallTurn>>(

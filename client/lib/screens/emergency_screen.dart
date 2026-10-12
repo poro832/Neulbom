@@ -4,13 +4,13 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eAccentSoft = Color(0xFFFBE4D3);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
+const Color eAccentSoft = Color(0xFFE6F0FF);
 
 class EmergencyScreen extends StatefulWidget {
   const EmergencyScreen({super.key});
@@ -140,7 +140,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               );
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFC0553F),
+              backgroundColor: const Color(0xFFD92D20),
               padding: const EdgeInsets.symmetric(
                 horizontal: 20,
                 vertical: 12,
@@ -236,7 +236,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFC0553F),
+              backgroundColor: const Color(0xFFD92D20),
             ),
             child: const Text(
               '추가',
@@ -253,12 +253,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     return Scaffold(
       backgroundColor: eBg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFC0553F),
+        backgroundColor: const Color(0xFFD92D20),
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Text(
           '비상 연락',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 28,
             fontWeight: FontWeight.w700,
             color: Colors.white,
@@ -279,11 +279,11 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFC0553F),
+                    color: const Color(0xFFD92D20),
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFC0553F).withOpacity(0.6),
+                        color: const Color(0xFFD92D20).withOpacity(0.6),
                         blurRadius: 15,
                         offset: const Offset(0, 8),
                       ),
@@ -314,7 +314,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                         children: [
                           Text(
                             '119 응급 전화',
-                            style: GoogleFonts.notoSerifKr(
+                            style: GoogleFonts.notoSansKr(
                               fontSize: 18.5,
                               fontWeight: FontWeight.w700,
                               color: Colors.white,
@@ -354,7 +354,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                     child: Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0xFFC0553F),
+                        color: const Color(0xFFD92D20),
                       ),
                       padding: const EdgeInsets.all(8),
                       child: const Icon(
