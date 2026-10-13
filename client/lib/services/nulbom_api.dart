@@ -10,8 +10,7 @@ import '../models/nulbom_models.dart';
 /// 팀원 앱의 `ApiService`(별도 백엔드용)와 섞이지 않게 따로 둔다. 이 서버의
 /// 계약은 `POST /v1/calls/request` 하나이고 보호자 열쇠가 있어야 통과한다.
 ///
-///   flutter build apk --dart-define=GUARDIAN_KEY=nlb_... \
-///                     --dart-define=API_BASE_URL=https://nuelbom.duckdns.org
+///   flutter build apk --dart-define=API_BASE_URL=https://nuelbom.duckdns.org
 
 /// 전화 요청 결과. 409는 오류가 아니라 "이미 그 통화가 진행 중"이다.
 class CallRequestResult {
