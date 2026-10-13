@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -44,6 +45,10 @@ class NulbomApi {
   /// 비어 있으면 로그인하지 않은 상태다.
   static String guardianKey = '';
 
+  /// 서버가 보호자 열쇠를 거절(401)하면 — 다른 폰에서 비밀번호를 바꿨거나 폐기된 경우 —
+  /// 저장된 열쇠를 지우고 이 함수를 부른다. 앱이 로그인 화면으로 보내는 데 쓴다.
+  static void Function()? onGuardianKeyRejected;
+
   static const Duration _timeout = Duration(seconds: 10);
 
   /// 테스트에서 교체한다.
@@ -83,9 +88,9 @@ class NulbomApi {
   }
 
   static Future<void> clearGuardianKey() async {
+    guardianKey = ''; // 메모리의 열쇠를 먼저 지운다 — 저장소를 기다리는 동안 다시 쓰이지 않게
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_guardianKeyPref);
-    guardianKey = '';
   }
 
   static String _guardianKeyOrThrow(String? override) {
@@ -144,6 +149,10 @@ class NulbomApi {
         response = await client.delete(uri, headers: headers).timeout(_timeout);
       default:
         throw ArgumentError('지원하지 않는 메서드: $method');
+    }
+    if (response.statusCode == 401 && key != null && key.isNotEmpty && key == guardianKey) {
+      unawaited(clearGuardianKey()); // 폰 저장소 정리는 기다리지 않는다 — 오류 문장이 먼저 나가야 한다
+      onGuardianKeyRejected?.call();
     }
     return _decode(response);
   }

@@ -23,6 +23,8 @@ const Color eAccent = Color(0xFF1A6BFF);
 const Color eAccentSoft = Color(0xFFE6F0FF);
 const Color eBrass = Color(0xFFFFC21A);
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Firebase 설정이 이 프로젝트 것이 아니어도 앱은 떠야 한다. 알림만 빠진다.
@@ -55,6 +57,14 @@ class _ElderCareAppState extends State<ElderCareApp> {
   void initState() {
     super.initState();
     _homeScreen = _determineHomeScreen();
+    // 열쇠가 폐기됐으면(다른 폰에서 비밀번호를 바꿨을 때 등) 로그인 화면으로 돌아간다.
+    NulbomApi.onGuardianKeyRejected = () {
+      AuthService.logout();
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const GuardianLoginScreen()),
+        (route) => false,
+      );
+    };
   }
 
   Future<Widget> _determineHomeScreen() async {
@@ -80,6 +90,7 @@ class _ElderCareAppState extends State<ElderCareApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: '늘봄',
       theme: ThemeData(
         useMaterial3: true,
