@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+# 통화별 약 복용 확인 결과. 어르신이 한 말을 셋으로만 나눈다 (설계: 약 복용 확인).
+MEDICATION_STATUSES = ("taken", "not_taken", "unknown")
+
+
 @dataclass(frozen=True)
 class StoredTurn:
     speaker: str  # ai | elder
