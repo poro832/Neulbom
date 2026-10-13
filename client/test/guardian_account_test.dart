@@ -156,6 +156,8 @@ void main() {
     });
   });
 
+  rejectedKeyTests();
+
   group('화면', () {
     Future<void> pump(WidgetTester tester, Widget home) async {
       tester.view.physicalSize = const Size(1200, 4000);
@@ -266,6 +268,45 @@ void main() {
 
       expect(find.text('현재 비밀번호를 확인해 주세요'), findsOneWidget);
       expect(find.byKey(const Key('new-password')), findsOneWidget); // 대화상자가 그대로 열려 있다
+    });
+  });
+}
+
+void rejectedKeyTests() {
+  group('열쇠가 거절되면', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({'guardian_key': 'nlb_old'});
+      NulbomApi.guardianKey = 'nlb_old';
+    });
+    tearDown(() {
+      NulbomApi.onGuardianKeyRejected = null;
+      NulbomApi.guardianKey = '';
+    });
+
+    test('저장된 열쇠를 지우고 알려 준다', () async {
+      var notified = 0;
+      NulbomApi.onGuardianKeyRejected = () => notified++;
+      NulbomApi.client =
+          MockClient((request) async => json({'detail': '열쇠가 필요합니다'}, 401));
+
+      await expectLater(NulbomApi.guardianMe(), throwsA(isA<ApiException>()));
+
+      await Future<void>.delayed(Duration.zero); // 폰 저장소 정리가 끝나길 기다린다
+      expect(notified, 1);
+      expect(NulbomApi.guardianKey, isEmpty);
+      expect(await NulbomApi.loadGuardianKey(), isEmpty);
+    });
+
+    test('로그인 실패(열쇠 없는 요청의 401)는 알리지 않는다', () async {
+      var notified = 0;
+      NulbomApi.onGuardianKeyRejected = () => notified++;
+      NulbomApi.client = MockClient(
+          (request) async => json({'detail': '이메일이나 비밀번호를 확인해 주세요'}, 401));
+
+      await AuthService.guardianLogin(email: 'a@b.co', password: 'wrong-pass');
+
+      expect(notified, 0);
+      expect(NulbomApi.guardianKey, 'nlb_old');
     });
   });
 }

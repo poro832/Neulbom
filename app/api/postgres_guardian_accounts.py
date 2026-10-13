@@ -8,15 +8,22 @@ from app.api.guardian_accounts import Account, EmailTaken, normalize_email
 class PostgresGuardianAccounts:
     def __init__(self, *, pool) -> None:
         self._pool = pool
+        self.sync_sequence()
 
-    def create(self, name: str, email: str, phone: str, password_hash: str) -> int:
-        email = normalize_email(email)
+    def sync_sequence(self) -> None:
+        """운영 도구가 id를 직접 넣은 보호자가 있어 시퀀스가 뒤처질 수 있다.
+
+        가입 때마다 하면 동시 가입이 같은 번호를 받을 수 있어 시작할 때 한 번만 맞춘다.
+        """
         with self._pool.connection() as conn:
-            # 운영 도구가 id를 직접 넣은 보호자가 있어 시퀀스가 뒤처질 수 있다.
             conn.execute(
                 "SELECT setval(pg_get_serial_sequence('guardians','guardian_id'), "
                 "GREATEST((SELECT COALESCE(MAX(guardian_id), 0) FROM guardians), 1))"
             )
+
+    def create(self, name: str, email: str, phone: str, password_hash: str) -> int:
+        email = normalize_email(email)
+        with self._pool.connection() as conn:
             row = conn.execute(
                 "INSERT INTO guardians (name, email, password_hash, phone_number) "
                 "VALUES (%s, %s, %s, %s) ON CONFLICT (email) DO NOTHING RETURNING guardian_id",

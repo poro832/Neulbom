@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -366,12 +367,15 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         logger.info("보호자 앱 열쇠를 발급했다 guardian_id=%s key=%s", guardian_id, new.key_prefix)
         return new.key
 
-    def too_many(email: str | None = None) -> bool:
-        return data.account_failures.blocked() or (email is not None and data.login_limiter.blocked(email))
+    # 로그인의 "열쇠 발급"과 비밀번호 변경의 "변경 + 다른 열쇠 폐기"를 한 줄로 세운다.
+    # 이게 없으면 옛 비밀번호로 시작한 로그인이 변경이 끝난 뒤에 열쇠를 받아 폐기를 빠져나간다.
+    credential_lock = threading.Lock()
 
-    def record_bad_password(email: str) -> None:
+    def record_bad_password(email: str, *, known: bool) -> None:
         data.login_limiter.record_failure(email)
-        data.account_failures.record_failure()
+        if not known:
+            # 없는 이메일 실패만 서버 전체로 센다 — 맞는 계정의 로그인을 남이 막지 못하게.
+            data.account_failures.record_failure()
 
     @app.post("/v1/guardian/signup")
     @guarded
@@ -391,20 +395,26 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @guarded
     def guardian_login(body: LoginRequest) -> dict:
         email = normalize_email(body.email)
-        if too_many(email):
+        account = data.accounts.find_by_email(email)
+        if data.login_limiter.blocked(email) or (account is None and data.account_failures.blocked()):
             # 잠긴 요청은 비밀번호를 검사하지 않는다.
             raise HTTPException(status_code=429, detail=TRY_LATER)
-        account = data.accounts.find_by_email(email)
         # 없는 이메일도 같은 시간이 걸리게 가짜 해시와 비교한다.
         ok = verify_password(body.password, account.password_hash if account else DUMMY_HASH)
         if account is None or not ok:
-            record_bad_password(email)
+            record_bad_password(email, known=account is not None)
             logger.warning("보호자 로그인 실패")
             raise HTTPException(status_code=401, detail=BAD_LOGIN)
+        with credential_lock:
+            # 검사하는 사이 비밀번호가 바뀌었으면 이 로그인은 옛 비밀번호로 한 것이다.
+            current = data.accounts.profile(account.guardian_id)
+            if current is None or current.password_hash != account.password_hash:
+                raise HTTPException(status_code=401, detail=BAD_LOGIN)
+            key = issue_app_key(account.guardian_id)
         data.login_limiter.clear(email)
         logger.info("보호자가 로그인했다 guardian_id=%s", account.guardian_id)
         return {
-            "key": issue_app_key(account.guardian_id),
+            "key": key,
             "name": account.name,
             "email": account.email,
             "phone": account.phone,
@@ -434,14 +444,17 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         account = data.accounts.profile(guardian_id)
         if account is None:
             raise HTTPException(status_code=404, detail=NEED_KEY)
-        if too_many(account.email):
+        # 비밀번호 변경은 이미 열쇠가 있는 사람의 일이라 이메일별 한도만 적용한다.
+        if data.login_limiter.blocked(account.email):
             raise HTTPException(status_code=429, detail=TRY_LATER)
         if not verify_password(body.current, account.password_hash):
-            record_bad_password(account.email)
+            record_bad_password(account.email, known=True)
             raise HTTPException(status_code=403, detail=BAD_CURRENT)
+        new_hash = hash_password(body.new)
+        with credential_lock:
+            data.accounts.set_password(guardian_id, new_hash)
+            revoked = key_store().revoke_others(guardian_id, hash_key(parse_bearer(authorization)))
         data.login_limiter.clear(account.email)
-        data.accounts.set_password(guardian_id, hash_password(body.new))
-        revoked = key_store().revoke_others(guardian_id, hash_key(parse_bearer(authorization)))
         logger.info("보호자가 비밀번호를 바꿨다 guardian_id=%s revoked_others=%s", guardian_id, revoked)
         return {"revoked_others": revoked}
 

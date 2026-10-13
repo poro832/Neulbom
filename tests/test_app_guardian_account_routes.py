@@ -127,14 +127,46 @@ def test_a_successful_login_resets_the_failure_count():
     assert kit.client.post(LOGIN, json={"email": "kim@example.com", "password": GOOD["password"]}).status_code == 200
 
 
-def test_server_wide_failures_also_block_logins():
+def test_unknown_email_failures_throttle_unknown_emails_but_not_real_accounts():
     kit = make_app_kit()
     sign_up(kit)
     kit.data.account_failures = FailureLimiter(limit=2, window_seconds=60, clock=lambda: 1.0)
-    for _ in range(2):
-        kit.client.post(LOGIN, json={"email": f"x{_}@example.com", "password": "whatever-1"})
+    for n in range(2):
+        kit.client.post(LOGIN, json={"email": f"x{n}@example.com", "password": "whatever-1"})
+    # 없는 이메일을 더 찍어 보는 요청은 막히지만
+    assert kit.client.post(LOGIN, json={"email": "x9@example.com", "password": "whatever-1"}).status_code == 429
+    # 맞는 계정의 로그인과 비밀번호 변경은 남이 막지 못한다
+    ok = kit.client.post(LOGIN, json={"email": "kim@example.com", "password": GOOD["password"]})
+    assert ok.status_code == 200
+    changed = kit.client.post(
+        "/v1/guardian/password",
+        json={"current": GOOD["password"], "new": "brand-new-pass-2"},
+        headers=bearer(ok.json()["key"]),
+    )
+    assert changed.status_code == 200
+
+
+def test_a_login_started_with_the_old_password_gets_no_key_after_the_password_changed(monkeypatch):
+    from app.api import app_data
+
+    kit = make_app_kit()
+    sign_up(kit)
+    real = app_data.verify_password
+    calls = []
+
+    def verify_then_change_password(password, stored):
+        ok = real(password, stored)
+        if not calls:  # 첫 호출(로그인의 비밀번호 검사) 직후에 다른 폰이 비밀번호를 바꾼다
+            calls.append(1)
+            gid = kit.data.accounts.find_by_email("kim@example.com").guardian_id
+            kit.data.accounts.set_password(gid, app_data.hash_password("brand-new-pass-2"))
+        return ok
+
+    monkeypatch.setattr(app_data, "verify_password", verify_then_change_password)
     r = kit.client.post(LOGIN, json={"email": "kim@example.com", "password": GOOD["password"]})
-    assert r.status_code == 429
+
+    assert r.status_code == 401 and r.json() == BAD_LOGIN
+    assert len(kit.data.guardian_auth.store.list_keys()) == 2  # 도우미 열쇠 + 가입 때 열쇠뿐, 새 열쇠 없음
 
 
 # ------------------------------------------------ 로그아웃·내 정보

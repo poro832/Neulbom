@@ -56,3 +56,18 @@ def test_account_flow_against_postgres():
 
     assert client.post("/v1/guardian/logout", headers=bearer(key1)).status_code == 204
     assert client.get("/v1/guardian/me", headers=bearer(key1)).status_code == 401
+
+
+def test_parallel_signups_get_distinct_ids():
+    from concurrent.futures import ThreadPoolExecutor
+
+    client = make_client()
+
+    def go(n):
+        body = {**GOOD, "email": f"user{n}@example.com"}
+        return client.post("/v1/guardian/signup", json=body).status_code
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        codes = list(pool.map(go, range(12)))
+
+    assert codes == [200] * 12
