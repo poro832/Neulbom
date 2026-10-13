@@ -223,6 +223,17 @@ class NulbomApi {
     return (json['revoked_others'] as int?) ?? 0;
   }
 
+  /// 이 폰의 푸시 토큰을 서버에 등록한다. 로그인한 열쇠에 묶여, 로그아웃하면 서버가 지운다.
+  static Future<void> registerDevice(String token, {String? key}) async {
+    await _send('POST', '/v1/guardian/devices',
+        key: _guardianKeyOrThrow(key), body: {'token': token});
+  }
+
+  static Future<void> unregisterDevice(String token, {String? key}) async {
+    await _send('POST', '/v1/guardian/devices/unregister',
+        key: _guardianKeyOrThrow(key), body: {'token': token});
+  }
+
   // ------------------------------------------------------------ 보호자
 
   static Future<PairingCode> issuePairingCode(int elderId, {String? key}) async {
