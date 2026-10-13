@@ -54,7 +54,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   testWidgets('일간: 그날의 실제 통화 수와 평소와 다른 정도를 보여 준다', (tester) async {
     NulbomApi.client = serverWithOneCallPerDay();

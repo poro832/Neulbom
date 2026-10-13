@@ -5,10 +5,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
 import 'services/fcm_service.dart';
 import 'services/auth_service.dart';
+import 'services/nulbom_api.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/elderly_login_screen.dart';
 import 'screens/elderly_gate.dart';
 import 'screens/guardian_home_page.dart';
+import 'screens/guardian_login_screen.dart';
 
 // 어르신 앱 색상
 const Color eBg = Color(0xFFEFF6FF);
@@ -63,6 +65,10 @@ class _ElderCareAppState extends State<ElderCareApp> {
       if (userType == 'elderly') {
         return const ElderlyGate();
       } else if (userType == 'guardian') {
+        // 이 폰 열쇠가 없으면(옛 가짜 로그인 등) 다시 로그인해야 한다.
+        if ((await NulbomApi.loadGuardianKey()).isEmpty) {
+          return const GuardianLoginScreen();
+        }
         return const GuardianHomePage();
       }
     }
