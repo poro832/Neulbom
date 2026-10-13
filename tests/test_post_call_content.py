@@ -135,3 +135,65 @@ def test_end_of_call_finishes_even_if_recording_blows_up():
     _end_of_call(lifecycle, sink=lambda *a: None, recorder=Boom())(StubSession(TURNS), None)
 
     assert lifecycle.finished == [7]
+
+
+class FakeClassifier:
+    model_id = "HCX-DASH-002"
+
+    def __init__(self, result="taken", error=None):
+        self.result, self.error, self.calls = result, error, 0
+
+    def classify(self, turns):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def test_saves_medication_status():
+    content = InMemoryCallContent()
+    rec = ConversationRecorder(content, FakeSummarizer(), classifier=FakeClassifier("not_taken"), spawn=run_now)
+    rec.record(1, TURNS)
+    assert content.medication([1]) == {1: "not_taken"}
+    assert content.summaries([1]) == {1: "점심을 드셨어요."}
+
+
+def test_classifier_alone_works_without_summarizer():
+    content = InMemoryCallContent()
+    ConversationRecorder(content, None, classifier=FakeClassifier("taken"), spawn=run_now).record(1, TURNS)
+    assert content.medication([1]) == {1: "taken"}
+
+
+def test_classifier_returning_none_saves_nothing():
+    content = InMemoryCallContent()
+    ConversationRecorder(content, None, classifier=FakeClassifier(None), spawn=run_now).record(1, TURNS)
+    assert content.medication([1]) == {}
+
+
+def test_ai_only_call_skips_the_classifier():
+    content = InMemoryCallContent()
+    c = FakeClassifier()
+    ConversationRecorder(content, None, classifier=c, spawn=run_now).record(1, [("ai", "안녕하세요")])
+    assert c.calls == 0 and content.medication([1]) == {}
+
+
+def test_classifier_failure_keeps_turns_and_summary_and_logs_no_content(caplog):
+    content = InMemoryCallContent()
+    rec = ConversationRecorder(
+        content, FakeSummarizer(), classifier=FakeClassifier(error=RuntimeError("down")), spawn=run_now
+    )
+    with caplog.at_level(logging.INFO):
+        rec.record(1, TURNS)
+    assert len(content.turns(1)) == 2
+    assert content.summaries([1]) == {1: "점심을 드셨어요."}
+    assert content.medication([1]) == {}
+    assert "안녕하세요" not in caplog.text
+
+
+def test_summary_failure_does_not_block_the_classifier():
+    content = InMemoryCallContent()
+    rec = ConversationRecorder(
+        content, FakeSummarizer(error=RuntimeError("down")), classifier=FakeClassifier("taken"), spawn=run_now
+    )
+    rec.record(1, TURNS)
+    assert content.medication([1]) == {1: "taken"}

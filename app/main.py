@@ -73,6 +73,7 @@ from app.media.stream_server import (
     default_responder,
 )
 from app.media.call_summary import CallSummarizer, summarizer_from_env
+from app.media.medication_check import MedicationClassifier, classifier_from_env
 from app.post_call import analyze_session
 from app.post_call_content import ConversationRecorder
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
@@ -436,6 +437,7 @@ def build_server(
     manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
     call_content: CallContentStore | None = None,
     summarizer: CallSummarizer | None = None,
+    medication: MedicationClassifier | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -516,7 +518,7 @@ def build_server(
         app.router.add_event_handler("shutdown", archiver.stop)
 
     recorder = (
-        None if call_content is None else ConversationRecorder(call_content, summarizer)
+        None if call_content is None else ConversationRecorder(call_content, summarizer, classifier=medication)
     )
 
     add_stream_route(
@@ -821,6 +823,7 @@ app = build_server(
     alert_rules=_alert_rules,
     call_content=_app_data.content,
     summarizer=summarizer_from_env(),
+    medication=classifier_from_env(),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.
