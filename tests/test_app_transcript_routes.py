@@ -107,3 +107,34 @@ def test_elder_can_agree_to_share():
     assert kit.client.get("/v1/me/status", headers=headers).json()["share_agreed"] is True
     assert kit.client.post("/v1/me/share-consent").status_code == 401
     assert kit.client.post("/v1/me/share-consent", headers=kit.guardian_headers).status_code == 401
+
+
+def test_list_shows_medication_when_agreed():
+    kit = make_app_kit(NOW)
+    seed(kit)
+    kit.data.content.save_medication(1, "taken", "m")
+    call = kit.client.get("/v1/elders/12/calls", headers=kit.guardian_headers).json()["calls"][0]
+    assert call["medication"] == "taken"
+
+
+def test_medication_is_null_when_not_analyzed():
+    kit = make_app_kit(NOW)
+    seed(kit)
+    call = kit.client.get("/v1/elders/12/calls", headers=kit.guardian_headers).json()["calls"][0]
+    assert call["medication"] is None
+
+
+def test_medication_never_leaks_before_the_elder_agrees():
+    kit = make_app_kit(NOW)
+    seed(kit, agreed=False)
+    kit.data.content.save_medication(1, "not_taken", "m")
+    resp = kit.client.get("/v1/elders/12/calls", headers=kit.guardian_headers)
+    assert resp.json() == {"share_agreed": False, "calls": []}
+    assert "not_taken" not in resp.text
+
+
+def test_another_guardians_elder_is_404_with_medication_saved():
+    kit = make_app_kit(NOW)
+    seed(kit, call_id=3, elder_id=14)
+    kit.data.content.save_medication(3, "taken", "m")
+    assert kit.client.get("/v1/elders/14/calls", headers=kit.guardian_headers).status_code == 404

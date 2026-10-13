@@ -590,6 +590,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         ids = [line.call_id for line in lines]
         summaries = data.content.summaries(ids)
         with_turns = data.content.calls_with_turns(ids)
+        medication = data.content.medication(ids)
         return {
             "share_agreed": True,
             "calls": [
@@ -600,6 +601,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                     "status": line.status,
                     "summary": summaries.get(line.call_id),
                     "has_turns": line.call_id in with_turns,
+                    "medication": medication.get(line.call_id),
                 }
                 for line in lines
             ],
