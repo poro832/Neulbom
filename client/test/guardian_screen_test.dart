@@ -101,6 +101,35 @@ void main() {
     expect(find.text('다시 불러오기'), findsOneWidget);
   });
 
+  testWidgets('어르신이 없어도 보호자 코드를 만들고 로그아웃할 수 있다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
+      if (request.url.path == '/v1/guardian/alerts') return json({'alerts': []});
+      if (request.url.path == '/v1/guardian/invite') return json({'code': '04829316'});
+      if (request.url.path == '/v1/guardian/logout') return http.Response('', 204);
+      return json({'detail': 'x'}, 404);
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: GuardianScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('관리 중인 어르신이 아직 없어요.'), findsOneWidget);
+    expect(find.text('내 보호자 코드'), findsOneWidget);
+    expect(find.byKey(const Key('logout-button')), findsOneWidget);
+
+    await tester.tap(find.text('코드 발급'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('04829316'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('logout-button')));
+    await tester.pumpAndSettle();
+    expect(find.byType(GuardianScreen), findsNothing);
+    expect(NulbomApi.guardianKey, isEmpty);
+  });
+
   Map<String, dynamic> elderJson(int id, String name, {String status = 'active', String? phone}) => {
         'elder_id': id,
         'name': name,
