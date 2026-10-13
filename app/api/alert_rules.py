@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Protocol
 
 from app.api.alerts import NO_ANSWER_MESSAGE, RISK_MESSAGES, AlertStore
 from app.api.elder_directory import ElderDirectory
@@ -18,10 +19,17 @@ logger = logging.getLogger(__name__)
 _RISK_SEVERITY = {"watch": "warning", "alert": "critical"}
 
 
+class Notifier(Protocol):
+    def notify(self, guardian_id: int, elder_id: int) -> None: ...
+
+
 class AlertRules:
-    def __init__(self, *, alerts: AlertStore, elders: ElderDirectory) -> None:
+    def __init__(
+        self, *, alerts: AlertStore, elders: ElderDirectory, notifier: Notifier | None = None
+    ) -> None:
         self._alerts = alerts
         self._elders = elders
+        self._notifier = notifier
 
     def on_risk(self, *, call_id: int, elder_id: int, risk_level: str) -> None:
         severity = _RISK_SEVERITY.get(risk_level)
@@ -71,5 +79,11 @@ class AlertRules:
                     alert_type,
                     severity,
                 )
+                if self._notifier is not None:
+                    try:
+                        self._notifier.notify(access.guardian_id, elder_id)
+                    except Exception:
+                        # 푸시 때문에 알림 저장이 막히지 않는다(바깥 except가 '알림 생성 실패'로 오해하지 않게 따로 잡는다).
+                        logger.exception("푸시를 시작하지 못했다 call_id=%s elder_id=%s", call_id, elder_id)
         except Exception:
             logger.exception("알림 생성 실패 call_id=%s elder_id=%s", call_id, elder_id)
