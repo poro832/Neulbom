@@ -112,6 +112,10 @@ class GuardianKeyStore(Protocol):
         """
         ...
 
+    def is_active(self, key_hash: str) -> bool:
+        """폐기되지 않은 열쇠인가. `find_guardian`과 달리 마지막 사용 시각을 갱신하지 않는다."""
+        ...
+
     def revoke_hash(self, key_hash: str) -> bool:
         """그 열쇠 하나를 폐기한다(로그아웃). 폐기했으면 True, 없거나 이미 폐기됐으면 False."""
         ...
@@ -184,6 +188,13 @@ class InMemoryGuardianKeyStore:
             hits[0]["revoked_at"] = self._clock()
             return 1
 
+
+    def is_active(self, key_hash: str) -> bool:
+        with self._lock:
+            return any(
+                row["key_hash"] == key_hash and row["revoked_at"] is None
+                for row in self._rows.values()
+            )
 
     def revoke_hash(self, key_hash: str) -> bool:
         with self._lock:

@@ -182,3 +182,21 @@ def test_revoke_others_keeps_only_the_kept_key(store):
 def test_revoke_others_with_nothing_else_is_zero(store):
     _, keep = add(store, guardian_id=1)
     assert store.revoke_others(1, keep.key_hash) == 0
+
+
+def test_is_active_is_true_until_the_key_is_revoked(store):
+    _, new = add(store)
+    assert store.is_active(new.key_hash) is True
+    store.revoke_hash(new.key_hash)
+    assert store.is_active(new.key_hash) is False
+
+
+def test_is_active_is_false_for_an_unknown_hash(store):
+    assert store.is_active("0" * 64) is False
+
+
+def test_is_active_does_not_touch_last_used(store):
+    _, new = add(store)
+    store.is_active(new.key_hash)
+    (info,) = [i for i in store.list_keys() if i.key_prefix == new.key_prefix]
+    assert info.last_used_at is None
