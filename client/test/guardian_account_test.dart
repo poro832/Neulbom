@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:eldercare/models/nulbom_models.dart';
 import 'package:eldercare/screens/guardian_account_screen.dart';
 import 'package:eldercare/screens/guardian_login_screen.dart';
 import 'package:eldercare/screens/guardian_signup_screen.dart';
@@ -157,6 +158,7 @@ void main() {
   });
 
   rejectedKeyTests();
+  pendingTests();
 
   group('화면', () {
     Future<void> pump(WidgetTester tester, Widget home) async {
@@ -307,6 +309,38 @@ void rejectedKeyTests() {
 
       expect(notified, 0);
       expect(NulbomApi.guardianKey, 'nlb_old');
+    });
+  });
+}
+
+void pendingTests() {
+  group('운영자 확인 대기', () {
+    testWidgets('계정 화면에 확인 대기라고 보여 준다', (tester) async {
+      GoogleFonts.config.allowRuntimeFetching = false;
+      SharedPreferences.setMockInitialValues({});
+      NulbomApi.guardianKey = 'nlb_test';
+      addTearDown(() => NulbomApi.guardianKey = '');
+      NulbomApi.client = MockClient((request) async => json({
+            'name': '김보호',
+            'email': 'kim@example.com',
+            'phone': '010-1111-2222',
+            'activated': false,
+          }));
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(const MaterialApp(home: GuardianAccountScreen()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('운영자 확인 대기 중'), findsOneWidget);
+      expect(find.text('활성 중'), findsNothing);
+    });
+
+    test('activated가 없는 옛 응답은 열린 것으로 읽는다', () {
+      final p = GuardianProfile.fromJson(
+          {'name': '가', 'email': 'a@b.co', 'phone': '010-0000-0000'});
+      expect(p.activated, isTrue);
     });
   });
 }

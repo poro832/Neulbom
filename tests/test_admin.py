@@ -185,3 +185,29 @@ def test_set_login_refuses_a_missing_guardian_and_a_taken_email():
     gid = accounts.create("나", "b@example.com", "010-2", "H2")
     code, _, _, err = _set_login(["long-enough-1", "long-enough-1"], guardian=str(gid), accounts=accounts)
     assert code == 1 and "이미" in err.text
+
+
+def test_pending_lists_waiting_signups_and_activate_opens_one():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    keys, directory, out, err = make()
+    accounts = InMemoryGuardianAccounts()
+    gid = accounts.create("김보호", "kim@example.com", "010-1111-2222", "H")
+
+    assert run(["guardian", "pending"], keys=keys, directory=directory, out=out, err=err, accounts=accounts) == 0
+    assert "kim@example.com" in out.text and "010-1111-2222" in out.text
+
+    assert run(["guardian", "activate", str(gid)], keys=keys, directory=directory, out=out, err=err, accounts=accounts) == 0
+    assert accounts.profile(gid).activated is True
+    out2 = Output()
+    run(["guardian", "pending"], keys=keys, directory=directory, out=out2, err=err, accounts=accounts)
+    assert "kim@example.com" not in out2.text
+
+
+def test_activate_a_missing_guardian_fails():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    keys, directory, out, err = make()
+    code = run(["guardian", "activate", "99"], keys=keys, directory=directory, out=out, err=err,
+               accounts=InMemoryGuardianAccounts())
+    assert code == 1
