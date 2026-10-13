@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.alerts import AlertStore
 from app.api.call_content import CallContentStore, InMemoryCallContent
@@ -29,10 +29,17 @@ from app.api.elder_directory import (
     PhoneTaken,
     digits_of,
 )
-from app.api.guardian_auth import GuardianAuth, attempt_label
+from app.api.guardian_accounts import (
+    EmailTaken,
+    GuardianAccounts,
+    InMemoryGuardianAccounts,
+    normalize_email,
+)
+from app.api.guardian_auth import GuardianAuth, attempt_label, generate_key, hash_key, parse_bearer
+from app.api.passwords import DUMMY_HASH, hash_password, verify_password
 from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.pairing import PairingStore, hash_code, new_code
-from app.api.rate_limit import FailureLimiter
+from app.api.rate_limit import FailureLimiter, KeyedFailureLimiter
 from app.api.reports import Reports, kst_week_start, sunday_on_or_before
 from app.scheduler import KST
 
@@ -49,6 +56,11 @@ TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
 NOT_PENDING = "승인 대기 중인 어르신이 아니에요"
 NO_CALL = "없는 통화입니다"
+BAD_LOGIN = "이메일이나 비밀번호를 확인해 주세요"
+EMAIL_TAKEN = "이미 가입된 이메일이에요"
+BAD_CURRENT = "현재 비밀번호를 확인해 주세요"
+MIN_PASSWORD = 8
+APP_KEY_LABEL = "앱"
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
@@ -68,6 +80,11 @@ class AppData:
     wall_clock: Callable[[], float] = time.time
     signup_limiter: FailureLimiter = field(default_factory=FailureLimiter)
     content: CallContentStore = field(default_factory=InMemoryCallContent)
+    accounts: GuardianAccounts = field(default_factory=InMemoryGuardianAccounts)
+    # 같은 이메일 15분 5회 실패 잠금 / 서버 전체 분당 20회 실패·가입 시도 한도
+    login_limiter: KeyedFailureLimiter = field(default_factory=KeyedFailureLimiter)
+    account_failures: FailureLimiter = field(default_factory=FailureLimiter)
+    signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
 
 
 def iso_kst(epoch: float) -> str:
@@ -79,6 +96,28 @@ class SignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
     agreed: bool
+
+
+class AccountSignupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=120)
+    phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
+    password: str = Field(min_length=MIN_PASSWORD, max_length=128)
+
+    @field_validator("name", "email", "phone", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordChangeRequest(BaseModel):
+    current: str = Field(min_length=1, max_length=128)
+    new: str = Field(min_length=MIN_PASSWORD, max_length=128)
 
 
 class PairRequest(BaseModel):
@@ -310,6 +349,101 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if not data.contacts.remove(elder_id, contact_id):
             raise HTTPException(status_code=404, detail="없는 연락처입니다")
         return Response(status_code=204)
+
+    # ------------------------------------------------ 보호자 계정
+
+    def key_store():
+        store = getattr(data.guardian_auth, "store", None)
+        if store is None:
+            raise RuntimeError("이 인증기는 열쇠 저장소가 없다")
+        return store
+
+    def issue_app_key(guardian_id: int) -> str:
+        new = generate_key()
+        key_store().add(
+            guardian_id=guardian_id, label=APP_KEY_LABEL, key_prefix=new.key_prefix, key_hash=new.key_hash
+        )
+        logger.info("보호자 앱 열쇠를 발급했다 guardian_id=%s key=%s", guardian_id, new.key_prefix)
+        return new.key
+
+    def too_many(email: str | None = None) -> bool:
+        return data.account_failures.blocked() or (email is not None and data.login_limiter.blocked(email))
+
+    def record_bad_password(email: str) -> None:
+        data.login_limiter.record_failure(email)
+        data.account_failures.record_failure()
+
+    @app.post("/v1/guardian/signup")
+    @guarded
+    def guardian_signup(body: AccountSignupRequest) -> dict:
+        if data.signup_attempts.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        data.signup_attempts.record_failure()  # 성공도 센다 — 계정을 마구 만드는 것도 늦춘다
+        email = normalize_email(body.email)
+        try:
+            guardian_id = data.accounts.create(body.name, email, body.phone, hash_password(body.password))
+        except EmailTaken:
+            raise HTTPException(status_code=409, detail=EMAIL_TAKEN)
+        logger.info("보호자가 가입했다 guardian_id=%s", guardian_id)
+        return {"key": issue_app_key(guardian_id), "name": body.name, "email": email, "phone": body.phone}
+
+    @app.post("/v1/guardian/login")
+    @guarded
+    def guardian_login(body: LoginRequest) -> dict:
+        email = normalize_email(body.email)
+        if too_many(email):
+            # 잠긴 요청은 비밀번호를 검사하지 않는다.
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        account = data.accounts.find_by_email(email)
+        # 없는 이메일도 같은 시간이 걸리게 가짜 해시와 비교한다.
+        ok = verify_password(body.password, account.password_hash if account else DUMMY_HASH)
+        if account is None or not ok:
+            record_bad_password(email)
+            logger.warning("보호자 로그인 실패")
+            raise HTTPException(status_code=401, detail=BAD_LOGIN)
+        data.login_limiter.clear(email)
+        logger.info("보호자가 로그인했다 guardian_id=%s", account.guardian_id)
+        return {
+            "key": issue_app_key(account.guardian_id),
+            "name": account.name,
+            "email": account.email,
+            "phone": account.phone,
+        }
+
+    @app.post("/v1/guardian/logout")
+    @guarded
+    def guardian_logout(authorization: str | None = Header(default=None)) -> Response:
+        guardian_id = guardian_id_of(authorization)
+        key_store().revoke_hash(hash_key(parse_bearer(authorization)))
+        logger.info("보호자가 로그아웃했다 guardian_id=%s", guardian_id)
+        return Response(status_code=204)
+
+    @app.get("/v1/guardian/me")
+    @guarded
+    def guardian_me(authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        account = data.accounts.profile(guardian_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail=NEED_KEY)
+        return {"name": account.name, "email": account.email, "phone": account.phone}
+
+    @app.post("/v1/guardian/password")
+    @guarded
+    def guardian_password(body: PasswordChangeRequest, authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        account = data.accounts.profile(guardian_id)
+        if account is None:
+            raise HTTPException(status_code=404, detail=NEED_KEY)
+        if too_many(account.email):
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        if not verify_password(body.current, account.password_hash):
+            record_bad_password(account.email)
+            raise HTTPException(status_code=403, detail=BAD_CURRENT)
+        data.login_limiter.clear(account.email)
+        data.accounts.set_password(guardian_id, hash_password(body.new))
+        revoked = key_store().revoke_others(guardian_id, hash_key(parse_bearer(authorization)))
+        logger.info("보호자가 비밀번호를 바꿨다 guardian_id=%s revoked_others=%s", guardian_id, revoked)
+        return {"revoked_others": revoked}
 
     # ------------------------------------------------ 보호자 코드로 어르신 가입
 

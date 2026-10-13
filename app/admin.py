@@ -6,6 +6,7 @@
     key list                                      앞 12글자, 이름표, 날짜 (열쇠와 지문은 안 나온다)
     key revoke --prefix nlb_xxxxxxxx              열쇠를 폐기한다 (다음 요청부터 막힌다)
     guardian add --name ... --phone ...           열쇠 전용 보호자를 만든다
+    guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
     elder assign --elder-id N --guardian-id M     어르신을 그 보호자에게 옮긴다
 
 **동의(`consent_at`)는 여기서 채우지 않는다.** 동의는 사람이 받는 것이다.
@@ -14,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import sys
 from collections.abc import Callable
@@ -21,8 +23,12 @@ from datetime import datetime
 
 from app.api.db import connect, database_url
 from app.api.elder_directory import DirectoryAdmin
+from app.api.guardian_accounts import EmailTaken, GuardianAccounts
 from app.api.guardian_auth import AmbiguousPrefix, GuardianKeyStore, generate_key
+from app.api.passwords import hash_password
 from app.scheduler import KST
+
+MIN_PASSWORD = 8
 
 
 def _when(epoch: float | None) -> str:
@@ -48,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--name", required=True)
     add.add_argument("--phone", required=True)
 
+    set_login = guardian.add_parser("set-login", help="보호자에게 이메일 로그인을 붙인다")
+    set_login.add_argument("guardian_id", type=int)
+    set_login.add_argument("--email", required=True)
+
     elder = groups.add_parser("elder", help="어르신").add_subparsers(dest="action", required=True)
     assign = elder.add_parser("assign", help="어르신을 보호자에게 옮긴다")
     assign.add_argument("--elder-id", type=int, required=True)
@@ -62,6 +72,8 @@ def run(
     directory: DirectoryAdmin,
     out: Callable[..., None] = print,
     err: Callable[..., None] | None = None,
+    accounts: GuardianAccounts | None = None,
+    read_password: Callable[[str], str] = getpass.getpass,
 ) -> int:
     err = err or (lambda text="": print(text, file=sys.stderr))
     args = build_parser().parse_args(argv)
@@ -120,6 +132,29 @@ def run(
         out("이 보호자는 비밀번호 로그인이 되지 않는다(열쇠 전용). 열쇠는 `key issue`로 만든다.")
         return 0
 
+    if (args.group, args.action) == ("guardian", "set-login"):
+        if accounts is None:
+            err("계정 저장소가 없다.")
+            return 1
+        # 비밀번호는 인자로 받지 않는다 — 셸 기록과 프로세스 목록에 남기 때문이다.
+        password = read_password("새 비밀번호: ")
+        if len(password) < MIN_PASSWORD:
+            err(f"비밀번호는 {MIN_PASSWORD}자 이상이어야 한다.")
+            return 1
+        if read_password("한 번 더: ") != password:
+            err("두 번 입력한 비밀번호가 다르다.")
+            return 1
+        try:
+            found = accounts.set_login(args.guardian_id, args.email, hash_password(password))
+        except EmailTaken:
+            err("이미 다른 보호자가 쓰는 이메일이다.")
+            return 1
+        if not found:
+            err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
+            return 1
+        out(f"보호자 {args.guardian_id}번에게 이메일 로그인을 붙였다. 연결된 어르신과 열쇠는 그대로다.")
+        return 0
+
     if (args.group, args.action) == ("elder", "assign"):
         if not directory.assign_elder(args.elder_id, args.guardian_id):
             err("옮기지 못했다 — 어르신이나 보호자가 없다.")
@@ -146,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     from app.api.postgres_elder_directory import PostgresElderDirectory
+    from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
 
     pool = connect(url)
@@ -154,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             sys.argv[1:] if argv is None else argv,
             keys=PostgresGuardianKeyStore(pool=pool),
             directory=PostgresElderDirectory(pool=pool),
+            accounts=PostgresGuardianAccounts(pool=pool),
         )
     finally:
         pool.close()
