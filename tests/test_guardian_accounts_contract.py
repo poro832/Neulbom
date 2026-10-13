@@ -1,0 +1,88 @@
+"""GuardianAccounts 규약 — 메모리와 Postgres에 같은 테스트를 돌린다."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+
+from app.api.guardian_accounts import EmailTaken, InMemoryGuardianAccounts, normalize_email
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+def _memory():
+    return InMemoryGuardianAccounts()
+
+
+def _postgres():
+    from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
+    from tests.pg_helpers import pg_pool, seed_world
+
+    pool = pg_pool()
+    seed_world(pool)
+    return PostgresGuardianAccounts(pool=pool)
+
+
+@pytest.fixture(
+    params=[
+        "memory",
+        pytest.param("postgres", marks=pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")),
+    ]
+)
+def accounts(request):
+    return _memory() if request.param == "memory" else _postgres()
+
+
+def test_normalize_email_lowers_and_strips():
+    assert normalize_email("  Kim@Example.COM ") == "kim@example.com"
+
+
+def test_create_then_find_by_email_ignores_case_and_spaces(accounts):
+    gid = accounts.create("김보호", "Kim@Example.com", "010-1111-2222", "HASH")
+    found = accounts.find_by_email("  kim@example.COM")
+    assert found is not None
+    assert (found.guardian_id, found.name, found.email, found.phone, found.password_hash) == (
+        gid, "김보호", "kim@example.com", "010-1111-2222", "HASH")
+
+
+def test_unknown_email_is_none(accounts):
+    assert accounts.find_by_email("nobody@example.com") is None
+
+
+def test_same_email_in_other_case_is_taken(accounts):
+    accounts.create("가", "a@example.com", "010-1", "H")
+    with pytest.raises(EmailTaken):
+        accounts.create("나", "A@EXAMPLE.com ", "010-2", "H2")
+
+
+def test_profile_by_id(accounts):
+    gid = accounts.create("가", "a@example.com", "010-1", "H")
+    p = accounts.profile(gid)
+    assert (p.name, p.email, p.phone) == ("가", "a@example.com", "010-1")
+    assert accounts.profile(999_999) is None
+
+
+def test_set_password_replaces_the_hash(accounts):
+    gid = accounts.create("가", "a@example.com", "010-1", "OLD")
+    accounts.set_password(gid, "NEW")
+    assert accounts.find_by_email("a@example.com").password_hash == "NEW"
+
+
+def test_set_login_gives_an_existing_guardian_an_email_and_password(accounts):
+    gid = accounts.create("가", "placeholder@no-login.invalid", "010-1", "not-a-login")
+    assert accounts.set_login(gid, "Real@Example.com", "HASH") is True
+    assert accounts.find_by_email("real@example.com").guardian_id == gid
+    assert accounts.find_by_email("placeholder@no-login.invalid") is None
+
+
+def test_set_login_for_a_missing_guardian_is_false(accounts):
+    assert accounts.set_login(999_999, "x@example.com", "H") is False
+
+
+def test_set_login_with_a_taken_email_raises_and_changes_nothing(accounts):
+    accounts.create("가", "a@example.com", "010-1", "H")
+    gid = accounts.create("나", "b@example.com", "010-2", "H2")
+    with pytest.raises(EmailTaken):
+        accounts.set_login(gid, "a@example.com", "NEW")
+    assert accounts.find_by_email("b@example.com").password_hash == "H2"
