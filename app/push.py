@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from collections.abc import Callable, Mapping
 from typing import Protocol
 
@@ -146,3 +147,63 @@ def sender_from_env(env: Mapping[str, str] = os.environ) -> PushSender | None:
         logger.exception("서비스 계정 열쇠를 읽지 못했다 — 푸시를 끈다")
         return None
     return FcmSender(project_id, provider)
+
+
+TITLE = "늘봄"
+
+
+def _spawn_thread(job: Callable[[], None]) -> None:
+    threading.Thread(target=job, name="push-notify", daemon=True).start()
+
+
+class PushNotifier:
+    """알림이 새로 저장되면 그 어르신의 보호자 폰들에 푸시를 보낸다. 어떤 예외도 밖으로 내지 않는다."""
+
+    def __init__(
+        self,
+        *,
+        devices,
+        elders,
+        sender: PushSender | None,
+        spawn: Callable[[Callable[[], None]], None] = _spawn_thread,
+    ) -> None:
+        self._devices = devices
+        self._elders = elders
+        self._sender = sender
+        self._spawn = spawn
+
+    def notify(self, guardian_id: int, elder_id: int) -> None:
+        if self._sender is None:
+            return
+        try:
+            self._spawn(lambda: self._send_all(guardian_id, elder_id))
+        except Exception:
+            logger.exception("푸시 작업을 시작하지 못했다 guardian_id=%s", guardian_id)
+
+    def _send_all(self, guardian_id: int, elder_id: int) -> None:
+        try:
+            access = self._elders.get(elder_id)
+            name = (access.name or "").strip() if access is not None else ""
+            body = f"{name} 어르신 확인이 필요해요" if name else "어르신 확인이 필요해요"
+            tokens = self._devices.tokens_for(guardian_id)
+        except Exception:
+            logger.exception("푸시 대상을 읽지 못했다 guardian_id=%s", guardian_id)
+            return
+        for token in tokens:
+            try:
+                result = self._sender.send(token, TITLE, body, {"elder_id": str(elder_id)})
+            except Exception:
+                logger.exception("푸시 발송 오류 guardian_id=%s token=%s", guardian_id, token[:8])
+                continue
+            if result == INVALID_TOKEN:
+                try:
+                    self._devices.remove_token(token)
+                except Exception:
+                    logger.exception("무효 토큰을 지우지 못했다 token=%s", token[:8])
+            logger.info(
+                "푸시 결과 guardian_id=%s elder_id=%s token=%s 결과=%s",
+                guardian_id,
+                elder_id,
+                token[:8],
+                result,
+            )
