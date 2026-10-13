@@ -86,3 +86,25 @@ def test_set_login_with_a_taken_email_raises_and_changes_nothing(accounts):
     with pytest.raises(EmailTaken):
         accounts.set_login(gid, "a@example.com", "NEW")
     assert accounts.find_by_email("b@example.com").password_hash == "H2"
+
+
+def test_new_accounts_wait_for_the_operator_until_activated(accounts):
+    gid = accounts.create("가", "a@example.com", "010-1", "H")
+    assert accounts.profile(gid).activated is False
+    assert [a.guardian_id for a in accounts.pending()] == [gid]
+
+    assert accounts.activate(gid) is True
+    assert accounts.profile(gid).activated is True
+    assert accounts.pending() == []
+    assert accounts.activate(999_999) is False
+
+
+def test_create_can_open_an_account_at_once(accounts):
+    gid = accounts.create("가", "a@example.com", "010-1", "H", activated=True)
+    assert accounts.profile(gid).activated is True
+
+
+def test_set_login_opens_the_account(accounts):
+    gid = accounts.create("가", "placeholder@no-login.invalid", "010-1", "not-a-login")
+    accounts.set_login(gid, "real@example.com", "HASH")
+    assert accounts.profile(gid).activated is True

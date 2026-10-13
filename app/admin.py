@@ -6,6 +6,8 @@
     key list                                      앞 12글자, 이름표, 날짜 (열쇠와 지문은 안 나온다)
     key revoke --prefix nlb_xxxxxxxx              열쇠를 폐기한다 (다음 요청부터 막힌다)
     guardian add --name ... --phone ...           열쇠 전용 보호자를 만든다
+    guardian pending                              운영자 확인을 기다리는 가입자 목록
+    guardian activate N                           가입자를 연다 (어르신 등록·승인이 가능해진다)
     guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
     elder assign --elder-id N --guardian-id M     어르신을 그 보호자에게 옮긴다
 
@@ -54,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--name", required=True)
     add.add_argument("--phone", required=True)
 
+    guardian.add_parser("pending", help="운영자 확인을 기다리는 보호자")
+    activate = guardian.add_parser("activate", help="보호자를 연다")
+    activate.add_argument("guardian_id", type=int)
     set_login = guardian.add_parser("set-login", help="보호자에게 이메일 로그인을 붙인다")
     set_login.add_argument("guardian_id", type=int)
     set_login.add_argument("--email", required=True)
@@ -130,6 +135,30 @@ def run(
         guardian_id = directory.add_guardian(args.name, args.phone)
         out(f"보호자를 만들었다. 보호자 번호 {guardian_id}")
         out("이 보호자는 비밀번호 로그인이 되지 않는다(열쇠 전용). 열쇠는 `key issue`로 만든다.")
+        return 0
+
+    if (args.group, args.action) == ("guardian", "pending"):
+        if accounts is None:
+            err("계정 저장소가 없다.")
+            return 1
+        rows = accounts.pending()
+        if not rows:
+            out("확인을 기다리는 가입자가 없다.")
+            return 0
+        out("보호자  이름        이메일                         전화번호")
+        for a in rows:
+            out(f"{a.guardian_id:<7} {a.name:<10} {a.email:<30} {a.phone}")
+        out("전화번호로 본인을 확인한 뒤 `guardian activate <번호>`로 연다.")
+        return 0
+
+    if (args.group, args.action) == ("guardian", "activate"):
+        if accounts is None:
+            err("계정 저장소가 없다.")
+            return 1
+        if not accounts.activate(args.guardian_id):
+            err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
+            return 1
+        out(f"보호자 {args.guardian_id}번을 열었다. 이제 어르신을 등록하고 승인할 수 있다.")
         return 0
 
     if (args.group, args.action) == ("guardian", "set-login"):

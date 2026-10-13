@@ -42,6 +42,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       info['name'] = me.name;
       info['email'] = me.email;
       info['phone'] = me.phone;
+      info['activated'] = me.activated;
     } catch (_) {
       // 서버에 닿지 못하면 저장된 값을 그대로 쓴다.
     }
@@ -295,9 +296,11 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                       ).withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: const Text(
-                                      '활성 중',
-                                      style: TextStyle(
+                                    child: Text(
+                                      _guardianInfo['activated'] == false
+                                          ? '운영자 확인 대기 중'
+                                          : '활성 중',
+                                      style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
                                         color: Color(0xFF4CAF50),

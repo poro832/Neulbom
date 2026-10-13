@@ -189,7 +189,7 @@ def test_me_returns_the_profile_and_needs_a_key():
     kit = make_app_kit()
     key = sign_up(kit).json()["key"]
     r = kit.client.get("/v1/guardian/me", headers=bearer(key))
-    assert r.json() == {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222"}
+    assert r.json() == {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "activated": False}
     assert kit.client.get("/v1/guardian/me").status_code == 401
 
 
@@ -269,3 +269,35 @@ def test_no_password_or_hash_in_responses_or_logs(caplog):
     for secret in (GOOD["password"], "wrong-password", "brand-new-pass-2", stored, "kim@example.com"):
         assert secret not in caplog.text, secret
     assert stored not in everything and "scrypt$" not in everything
+
+
+# ------------------------------------------------ 운영자 활성화
+
+
+def test_a_new_signup_is_pending_and_cannot_issue_invites_or_approve():
+    kit = make_app_kit()
+    body = sign_up(kit).json()
+    assert body["activated"] is False
+    assert kit.client.get("/v1/guardian/me", headers=bearer(body["key"])).json()["activated"] is False
+
+    invite = kit.client.post("/v1/guardian/invite", headers=bearer(body["key"]))
+    assert invite.status_code == 403 and invite.json() == {"detail": "운영자 확인 후 사용할 수 있어요"}
+    approve = kit.client.post("/v1/elders/12/approve", headers=bearer(body["key"]))
+    assert approve.status_code == 403
+
+
+def test_an_activated_guardian_can_issue_invites():
+    kit = make_app_kit()
+    body = sign_up(kit).json()
+    kit.data.accounts.activate(kit.data.accounts.find_by_email("kim@example.com").guardian_id)
+
+    assert kit.client.post("/v1/guardian/invite", headers=bearer(body["key"])).status_code == 200
+    assert kit.client.get("/v1/guardian/me", headers=bearer(body["key"])).json()["activated"] is True
+
+
+def test_a_pending_guardian_can_still_log_in_and_read_their_own_list():
+    kit = make_app_kit()
+    sign_up(kit)
+    r = kit.client.post(LOGIN, json={"email": "kim@example.com", "password": GOOD["password"]})
+    assert r.status_code == 200 and r.json()["activated"] is False
+    assert kit.client.get("/v1/guardian/elders", headers=bearer(r.json()["key"])).status_code == 200

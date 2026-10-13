@@ -296,12 +296,19 @@ class GuardianProfile {
   final String name;
   final String email;
   final String phone;
+  final bool activated; // false면 운영자 확인을 기다리는 중이다(어르신 등록·승인 불가)
 
-  const GuardianProfile({required this.name, required this.email, required this.phone});
+  const GuardianProfile({
+    required this.name,
+    required this.email,
+    required this.phone,
+    this.activated = true,
+  });
 
   factory GuardianProfile.fromJson(Map<String, dynamic> json) => GuardianProfile(
         name: json['name'] as String,
         email: json['email'] as String,
         phone: json['phone'] as String,
+        activated: (json['activated'] as bool?) ?? true,
       );
 }

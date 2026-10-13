@@ -62,6 +62,7 @@ EMAIL_TAKEN = "이미 가입된 이메일이에요"
 BAD_CURRENT = "현재 비밀번호를 확인해 주세요"
 MIN_PASSWORD = 8
 APP_KEY_LABEL = "앱"
+NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
@@ -161,6 +162,14 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             logger.warning("어르신 열쇠 인증 실패 key=%s", elder_key_label(authorization))
             raise HTTPException(status_code=401, detail=NEED_KEY)
         return elder_id
+
+    def active_guardian_id_of(authorization: str | None) -> int:
+        """열쇠 + 운영자가 열어 준 보호자일 것. 계정 표에 없는 보호자(운영 도구가 만든 열쇠 전용)는 열린 것으로 본다."""
+        guardian_id = guardian_id_of(authorization)
+        account = data.accounts.profile(guardian_id)
+        if account is not None and not account.activated:
+            raise HTTPException(status_code=403, detail=NOT_ACTIVATED)
+        return guardian_id
 
     def ready_elder_id_of(authorization: str | None) -> int:
         """어르신 열쇠 + 승인 대기가 아닐 것. 대기 중이면 403."""
@@ -389,7 +398,13 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         except EmailTaken:
             raise HTTPException(status_code=409, detail=EMAIL_TAKEN)
         logger.info("보호자가 가입했다 guardian_id=%s", guardian_id)
-        return {"key": issue_app_key(guardian_id), "name": body.name, "email": email, "phone": body.phone}
+        return {
+            "key": issue_app_key(guardian_id),
+            "name": body.name,
+            "email": email,
+            "phone": body.phone,
+            "activated": False,
+        }
 
     @app.post("/v1/guardian/login")
     @guarded
@@ -418,6 +433,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "name": account.name,
             "email": account.email,
             "phone": account.phone,
+            "activated": account.activated,
         }
 
     @app.post("/v1/guardian/logout")
@@ -435,7 +451,12 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         account = data.accounts.profile(guardian_id)
         if account is None:
             raise HTTPException(status_code=404, detail=NEED_KEY)
-        return {"name": account.name, "email": account.email, "phone": account.phone}
+        return {
+            "name": account.name,
+            "email": account.email,
+            "phone": account.phone,
+            "activated": account.activated,
+        }
 
     @app.post("/v1/guardian/password")
     @guarded
@@ -463,7 +484,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/guardian/invite")
     @guarded
     def issue_invite(authorization: str | None = Header(default=None)) -> dict:
-        guardian_id = guardian_id_of(authorization)
+        guardian_id = active_guardian_id_of(authorization)
         code = new_invite_code()
         data.invites.issue(guardian_id, hash_invite_code(code))
         # 코드 원문은 응답에만 있다. 로그에는 발급 사실만 남긴다.
@@ -510,7 +531,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
         authorization: str | None = Header(default=None),
     ) -> dict:
-        guardian_id = guardian_id_of(authorization)
+        guardian_id = active_guardian_id_of(authorization)
         owned_elder(guardian_id, elder_id)
         if not data.elders.approve(elder_id, guardian_id):
             raise HTTPException(status_code=409, detail=NOT_PENDING)
