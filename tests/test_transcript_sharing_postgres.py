@@ -54,10 +54,17 @@ def test_content_is_hidden_until_the_elder_agrees_and_every_view_is_logged():
     assert client.get("/v1/calls/1/turns", headers=mine).status_code == 404
     assert data.content.view_count(1) == 0
 
+    # 약 복용 확인 값이 저장돼 있어도 동의 전에는 나가지 않는다.
+    data.content.save_medication(1, "taken", "m")
+    before = client.get("/v1/elders/12/calls", headers=mine)
+    assert before.json() == {"share_agreed": False, "calls": []}
+    assert "taken" not in before.text
+
     # 어르신이 동의한다.
     data.content.agree_share(12)
     calls = client.get("/v1/elders/12/calls", headers=mine).json()["calls"]
     assert calls[0]["summary"] == "안부를 나누셨어요." and calls[0]["has_turns"] is True
+    assert calls[0]["medication"] == "taken"
     turns = client.get("/v1/calls/1/turns", headers=mine).json()["turns"]
     assert [t["text"] for t in turns] == ["안녕하세요", "네 안녕하세요"]
     assert data.content.view_count(1) == 1

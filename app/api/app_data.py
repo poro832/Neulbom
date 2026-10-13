@@ -590,6 +590,12 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         ids = [line.call_id for line in lines]
         summaries = data.content.summaries(ids)
         with_turns = data.content.calls_with_turns(ids)
+        try:
+            medication = data.content.medication(ids)
+        except Exception:
+            # 약 복용 값은 덤이다. 조회가 터져도 요약·원문 목록은 막지 않는다.
+            logger.exception("약 복용 확인 조회에 실패했다")
+            medication = {}
         return {
             "share_agreed": True,
             "calls": [
@@ -600,6 +606,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                     "status": line.status,
                     "summary": summaries.get(line.call_id),
                     "has_turns": line.call_id in with_turns,
+                    "medication": medication.get(line.call_id),
                 }
                 for line in lines
             ],

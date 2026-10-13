@@ -237,6 +237,7 @@ class CallSummary {
   final String status;
   final String? summary;
   final bool hasTurns;
+  final String? medication; // taken | not_taken | unknown | null(분석 전)
 
   const CallSummary({
     required this.callId,
@@ -245,6 +246,7 @@ class CallSummary {
     required this.status,
     required this.summary,
     required this.hasTurns,
+    this.medication,
   });
 
   factory CallSummary.fromJson(Map<String, dynamic> json) => CallSummary(
@@ -254,6 +256,7 @@ class CallSummary {
         status: json['status'] as String,
         summary: json['summary'] as String?,
         hasTurns: (json['has_turns'] as bool?) ?? false,
+        medication: json['medication'] as String?,
       );
 }
 
