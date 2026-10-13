@@ -64,6 +64,19 @@ CREATE TABLE guardian_keys (
 );
 CREATE INDEX guardian_keys_guardian_idx ON guardian_keys (guardian_id);
 
+-- 푸시를 받을 보호자 폰(FCM 토큰). 로그인한 열쇠(key_hash)에 묶여, 열쇠가 폐기되면 읽을 때 걸러진다.
+CREATE TABLE guardian_devices (
+    token       TEXT PRIMARY KEY,
+    guardian_id BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    key_hash    TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX guardian_devices_guardian_idx ON guardian_devices (guardian_id);
+
+COMMENT ON TABLE guardian_devices IS
+    '푸시를 받을 보호자 폰(FCM 토큰). 로그인한 열쇠(key_hash)에 묶여, 열쇠가 폐기되면 읽을 때 걸러진다.';
+
 -- ============================================================
 -- 3. 통화
 -- ============================================================
