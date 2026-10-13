@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 
-from app.api.call_content import StoredTurn
+from app.api.call_content import MEDICATION_STATUSES, StoredTurn
 
 
 class PostgresCallContent:
@@ -53,6 +53,28 @@ class PostgresCallContent:
         with self._pool.connection() as conn:
             rows = conn.execute(
                 "SELECT call_id, summary FROM call_reports WHERE call_id = ANY(%s)",
+                (list(call_ids),),
+            ).fetchall()
+        return {c: s for c, s in rows}
+
+    def save_medication(self, call_id: int, status: str, model_id: str) -> None:
+        if status not in MEDICATION_STATUSES:
+            raise ValueError(f"알 수 없는 복용 확인 값: {status!r}")
+        with self._pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO call_medication (call_id, status, model_id, created_at) "
+                "VALUES (%s, %s, %s, to_timestamp(%s)) "
+                "ON CONFLICT (call_id) DO UPDATE "
+                "SET status = EXCLUDED.status, model_id = EXCLUDED.model_id",
+                (call_id, status, model_id, self._clock()),
+            )
+
+    def medication(self, call_ids: Sequence[int]) -> dict[int, str]:
+        if not call_ids:
+            return {}
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT call_id, status FROM call_medication WHERE call_id = ANY(%s)",
                 (list(call_ids),),
             ).fetchall()
         return {c: s for c, s in rows}
@@ -111,4 +133,7 @@ class PostgresCallContent:
             reports = conn.execute(
                 "DELETE FROM call_reports WHERE created_at < to_timestamp(%s)", (cutoff,)
             ).rowcount
-        return turns + reports
+            medication = conn.execute(
+                "DELETE FROM call_medication WHERE created_at < to_timestamp(%s)", (cutoff,)
+            ).rowcount
+        return turns + reports + medication

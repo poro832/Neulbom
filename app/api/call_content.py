@@ -33,6 +33,10 @@ class CallContentStore(Protocol):
 
     def summaries(self, call_ids: Sequence[int]) -> dict[int, str]: ...
 
+    def save_medication(self, call_id: int, status: str, model_id: str) -> None: ...
+
+    def medication(self, call_ids: Sequence[int]) -> dict[int, str]: ...
+
     def calls_with_turns(self, call_ids: Sequence[int]) -> set[int]: ...
 
     def elder_of_call(self, call_id: int) -> int | None: ...
@@ -56,6 +60,7 @@ class InMemoryCallContent:
         self._lock = threading.Lock()
         self._turns: dict[int, tuple[list[StoredTurn], float]] = {}
         self._summaries: dict[int, tuple[str, float]] = {}
+        self._medication: dict[int, tuple[str, float]] = {}
         self._owners: dict[int, int] = {}
         self._views: dict[int, int] = {}
         self._shared: set[int] = set()
@@ -80,6 +85,16 @@ class InMemoryCallContent:
     def summaries(self, call_ids: Sequence[int]) -> dict[int, str]:
         with self._lock:
             return {c: self._summaries[c][0] for c in call_ids if c in self._summaries}
+
+    def save_medication(self, call_id: int, status: str, model_id: str) -> None:
+        if status not in MEDICATION_STATUSES:
+            raise ValueError(f"알 수 없는 복용 확인 값: {status!r}")
+        with self._lock:
+            self._medication[call_id] = (status, self._clock())
+
+    def medication(self, call_ids: Sequence[int]) -> dict[int, str]:
+        with self._lock:
+            return {c: self._medication[c][0] for c in call_ids if c in self._medication}
 
     def calls_with_turns(self, call_ids: Sequence[int]) -> set[int]:
         with self._lock:
@@ -109,5 +124,8 @@ class InMemoryCallContent:
                 removed += len(self._turns.pop(call_id)[0])
             for call_id in [c for c, (_, at) in self._summaries.items() if at < cutoff]:
                 del self._summaries[call_id]
+                removed += 1
+            for call_id in [c for c, (_, at) in self._medication.items() if at < cutoff]:
+                del self._medication[call_id]
                 removed += 1
         return removed
