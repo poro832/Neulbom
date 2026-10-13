@@ -2,6 +2,19 @@ import 'package:eldercare/models/nulbom_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('통화 요약: 약 복용 확인은 없으면 null이다', () {
+    final base = {
+      'call_id': 1,
+      'started_at': '2026-10-08T09:00:00+09:00',
+      'duration_s': 60,
+      'status': 'completed',
+      'summary': null,
+      'has_turns': false,
+    };
+    expect(CallSummary.fromJson(base).medication, isNull);
+    expect(CallSummary.fromJson({...base, 'medication': 'not_taken'}).medication, 'not_taken');
+  });
+
   test('어르신 요약: 통화 없는 어르신은 시각과 점수가 null이다', () {
     final s = ElderSummary.fromJson({
       'elder_id': 13,
