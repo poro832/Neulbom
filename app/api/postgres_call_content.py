@@ -7,10 +7,13 @@ InMemoryCallContent와 같은 규약이다. 둘이 갈라지지 않게 tests/tes
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Sequence
 
 from app.api.call_content import MEDICATION_STATUSES, StoredTurn
+
+logger = logging.getLogger(__name__)
 
 
 class PostgresCallContent:
@@ -133,7 +136,14 @@ class PostgresCallContent:
             reports = conn.execute(
                 "DELETE FROM call_reports WHERE created_at < to_timestamp(%s)", (cutoff,)
             ).rowcount
-            medication = conn.execute(
-                "DELETE FROM call_medication WHERE created_at < to_timestamp(%s)", (cutoff,)
-            ).rowcount
+        # 약 복용 표는 따로 지운다 — 표가 아직 없는 배포 순서에서도 턴·요약의 30일 보관이
+        # 이 표에 기대지 않게 하려는 것이다. 위 삭제는 이미 확정되었다.
+        medication = 0
+        try:
+            with self._pool.connection() as conn:
+                medication = conn.execute(
+                    "DELETE FROM call_medication WHERE created_at < to_timestamp(%s)", (cutoff,)
+                ).rowcount
+        except Exception:
+            logger.exception("약 복용 확인 기록 삭제에 실패했다")
         return turns + reports + medication
