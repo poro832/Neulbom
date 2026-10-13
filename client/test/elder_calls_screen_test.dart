@@ -37,7 +37,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   group('ElderCallsScreen', () {
     const screen = ElderCallsScreen(elderId: 20, elderName: '홍길동');

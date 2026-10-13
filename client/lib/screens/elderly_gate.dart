@@ -119,7 +119,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
                 Text(
                   '통화 내용 공유에 동의해 주세요',
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -136,7 +136,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
                   Text(
                     _agreeError!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 14, color: Color(0xFFC0553F)),
+                    style: const TextStyle(fontSize: 14, color: Color(0xFFD92D20)),
                   ),
                 ],
                 const SizedBox(height: 32),
@@ -179,7 +179,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
                 Text(
                   title,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 24,
                     fontWeight: FontWeight.w700,
                     color: eInk,

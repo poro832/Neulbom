@@ -19,7 +19,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   testWidgets('개인 코드를 발급하고 앞자리 0이 있는 코드를 그대로 보여 준다', (tester) async {
     final posts = <String>[];

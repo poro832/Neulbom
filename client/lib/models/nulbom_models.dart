@@ -291,3 +291,17 @@ class InviteCode {
   factory InviteCode.fromJson(Map<String, dynamic> json) =>
       InviteCode(code: json['code'] as String);
 }
+
+class GuardianProfile {
+  final String name;
+  final String email;
+  final String phone;
+
+  const GuardianProfile({required this.name, required this.email, required this.phone});
+
+  factory GuardianProfile.fromJson(Map<String, dynamic> json) => GuardianProfile(
+        name: json['name'] as String,
+        email: json['email'] as String,
+        phone: json['phone'] as String,
+      );
+}

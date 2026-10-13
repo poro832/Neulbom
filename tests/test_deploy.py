@@ -130,6 +130,11 @@ APP_PATHS = {
     "/v1/me/contacts/*",
     "/v1/signup",
     "/v1/guardian/invite",
+    "/v1/guardian/signup",
+    "/v1/guardian/login",
+    "/v1/guardian/logout",
+    "/v1/guardian/me",
+    "/v1/guardian/password",
     "/v1/elders/*/approve",
     "/v1/elders/*/reject",
     "/v1/me/status",
@@ -158,6 +163,11 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     # 열쇠가 필요 없는 /v1/pair는 코드와 번호가 맞아야 한다
     assert client.post("/v1/pair", json={"code": "123456", "phone": "070-1111-2222"}).status_code == 401
     assert client.post("/v1/guardian/invite").status_code == 401
+    assert client.post("/v1/guardian/logout").status_code == 401
+    assert client.get("/v1/guardian/me").status_code == 401
+    assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
+    # 가입·로그인은 열쇠 대신 이메일과 비밀번호가 맞아야 한다 — 없는 계정은 401
+    assert client.post("/v1/guardian/login", json={"email": "no@example.com", "password": "x"}).status_code == 401
     assert client.post("/v1/elders/1/approve").status_code == 401
     assert client.post("/v1/elders/1/reject").status_code == 401
     assert client.get("/v1/me/status").status_code == 401

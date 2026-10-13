@@ -112,6 +112,14 @@ class GuardianKeyStore(Protocol):
         """
         ...
 
+    def revoke_hash(self, key_hash: str) -> bool:
+        """그 열쇠 하나를 폐기한다(로그아웃). 폐기했으면 True, 없거나 이미 폐기됐으면 False."""
+        ...
+
+    def revoke_others(self, guardian_id: int, keep_hash: str) -> int:
+        """그 보호자의 열쇠 중 keep_hash만 남기고 모두 폐기한다(비밀번호 변경). 폐기한 수."""
+        ...
+
 
 class InMemoryGuardianKeyStore:
     def __init__(self, wall_clock: Callable[[], float] = time.time) -> None:
@@ -177,6 +185,28 @@ class InMemoryGuardianKeyStore:
             return 1
 
 
+    def revoke_hash(self, key_hash: str) -> bool:
+        with self._lock:
+            for row in self._rows.values():
+                if row["key_hash"] == key_hash and row["revoked_at"] is None:
+                    row["revoked_at"] = self._clock()
+                    return True
+        return False
+
+    def revoke_others(self, guardian_id: int, keep_hash: str) -> int:
+        count = 0
+        with self._lock:
+            for row in self._rows.values():
+                if (
+                    row["guardian_id"] == guardian_id
+                    and row["key_hash"] != keep_hash
+                    and row["revoked_at"] is None
+                ):
+                    row["revoked_at"] = self._clock()
+                    count += 1
+        return count
+
+
 class GuardianAuth(Protocol):
     def authenticate(self, authorization: str | None) -> int | None:
         """요청 머리의 Authorization 값으로 보호자 번호를 알아낸다. 모르면 None.
@@ -190,6 +220,10 @@ class GuardianAuth(Protocol):
 class KeyAuth:
     def __init__(self, store: GuardianKeyStore) -> None:
         self._store = store
+
+    @property
+    def store(self) -> GuardianKeyStore:
+        return self._store
 
     def authenticate(self, authorization: str | None) -> int | None:
         key = parse_bearer(authorization)

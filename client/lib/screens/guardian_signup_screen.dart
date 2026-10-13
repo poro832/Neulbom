@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
-import 'guardian_login_screen.dart';
+import 'guardian_home_page.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class GuardianSignupScreen extends StatefulWidget {
   const GuardianSignupScreen({super.key});
@@ -20,13 +20,12 @@ class GuardianSignupScreen extends StatefulWidget {
 class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _passwordConfirmController =
       TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
-  String? _successMessage;
-  String? _connectionCode;
   bool _obscurePassword = true;
   bool _obscurePasswordConfirm = true;
 
@@ -34,6 +33,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _passwordConfirmController.dispose();
     super.dispose();
@@ -43,7 +43,6 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     if (_nameController.text.isEmpty) {
       setState(() {
         _errorMessage = '이름을 입력해주세요.';
-        _successMessage = null;
       });
       return;
     }
@@ -51,15 +50,20 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     if (_emailController.text.isEmpty) {
       setState(() {
         _errorMessage = '이메일을 입력해주세요.';
-        _successMessage = null;
       });
       return;
     }
 
-    if (_passwordController.text.isEmpty) {
+    if (_phoneController.text.trim().isEmpty) {
       setState(() {
-        _errorMessage = '비밀번호를 입력해주세요.';
-        _successMessage = null;
+        _errorMessage = '전화번호를 입력해주세요.';
+      });
+      return;
+    }
+
+    if (_passwordController.text.length < 8) {
+      setState(() {
+        _errorMessage = '비밀번호는 8자 이상이어야 합니다.';
       });
       return;
     }
@@ -67,7 +71,6 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     if (_passwordController.text != _passwordConfirmController.text) {
       setState(() {
         _errorMessage = '비밀번호가 일치하지 않습니다.';
-        _successMessage = null;
       });
       return;
     }
@@ -75,25 +78,26 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _successMessage = null;
     });
 
     final result = await AuthService.guardianSignup(
       name: _nameController.text,
       email: _emailController.text,
+      phone: _phoneController.text,
       password: _passwordController.text,
     );
 
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
 
     if (result['success']) {
-      final data = result['data'] as Map<String, dynamic>;
-      setState(() {
-        _connectionCode = data['connectionCode'];
-        _successMessage = '회원가입이 완료되었습니다!';
-      });
+      // 가입하면 바로 로그인된 상태다(서버가 이 폰 열쇠를 줬다).
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const GuardianHomePage()),
+        (route) => false,
+      );
     } else {
       setState(() {
         _errorMessage = result['message'];
@@ -121,7 +125,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
             children: [
               Text(
                 '회원가입',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -207,6 +211,43 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
               ),
               const SizedBox(height: 16),
 
+              // 전화번호
+              Text(
+                '전화번호',
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: eInk,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _phoneController,
+                enabled: !_isLoading,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: '010-0000-0000',
+                  hintStyle: const TextStyle(color: eInkSoft),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eLine),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eLine),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eAccent, width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // 비밀번호
               Text(
                 '비밀번호',
@@ -222,7 +263,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                 enabled: !_isLoading,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  hintText: '6자 이상의 비밀번호',
+                  hintText: '8자 이상의 비밀번호',
                   hintStyle: const TextStyle(color: eInkSoft),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
@@ -326,71 +367,6 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                     ),
                   ),
                 ),
-              if (_successMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4CAF50).withOpacity(0.1),
-                      border: Border.all(color: const Color(0xFF4CAF50)),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _successMessage!,
-                          style: const TextStyle(
-                            color: Color(0xFF4CAF50),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (_connectionCode != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            '보호자 연결 코드: $_connectionCode',
-                            style: GoogleFonts.notoSansKr(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF4CAF50),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            '이 코드를 어르신 회원가입 화면에 입력해주세요.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF4CAF50),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: () {
-                                Navigator.pushReplacement(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        const GuardianLoginScreen(),
-                                  ),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF4CAF50),
-                                foregroundColor: Colors.white,
-                              ),
-                              child: const Text('확인하고 로그인하기'),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-
               const SizedBox(height: 32),
 
               // 회원가입 버튼

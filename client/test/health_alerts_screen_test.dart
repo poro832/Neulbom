@@ -39,7 +39,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   testWidgets('건강 경고 탭은 서버의 실제 알림을 종류별로 보여 준다', (tester) async {
     late http.Request seen;

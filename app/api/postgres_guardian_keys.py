@@ -63,6 +63,24 @@ class PostgresGuardianKeyStore:
             )
         return 1
 
+    def revoke_hash(self, key_hash: str) -> bool:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE guardian_keys SET revoked_at = to_timestamp(%s) "
+                "WHERE key_hash = %s AND revoked_at IS NULL",
+                (self._clock(), key_hash),
+            )
+            return cur.rowcount == 1
+
+    def revoke_others(self, guardian_id: int, keep_hash: str) -> int:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE guardian_keys SET revoked_at = to_timestamp(%s) "
+                "WHERE guardian_id = %s AND key_hash <> %s AND revoked_at IS NULL",
+                (self._clock(), guardian_id, keep_hash),
+            )
+            return cur.rowcount
+
     def reset_for_tests(self) -> None:
         """규약 테스트용. 원격 DB에서는 거부한다(app/api/db.py)."""
         assert_local()

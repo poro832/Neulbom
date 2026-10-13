@@ -10,8 +10,7 @@ import '../models/nulbom_models.dart';
 /// 팀원 앱의 `ApiService`(별도 백엔드용)와 섞이지 않게 따로 둔다. 이 서버의
 /// 계약은 `POST /v1/calls/request` 하나이고 보호자 열쇠가 있어야 통과한다.
 ///
-///   flutter build apk --dart-define=GUARDIAN_KEY=nlb_... \
-///                     --dart-define=API_BASE_URL=https://nuelbom.duckdns.org
+///   flutter build apk --dart-define=API_BASE_URL=https://nuelbom.duckdns.org
 
 /// 전화 요청 결과. 409는 오류가 아니라 "이미 그 통화가 진행 중"이다.
 class CallRequestResult {
@@ -41,12 +40,9 @@ class NulbomApi {
     defaultValue: 'https://nuelbom.duckdns.org',
   );
 
-  /// 보호자 개인 열쇠. 빌드할 때 `--dart-define=GUARDIAN_KEY=nlb_...`로 넣는다.
-  ///
-  /// 시연 단계의 방식이다. 앱 파일에 열쇠가 들어가므로 앱 파일을 남에게 주면
-  /// 열쇠도 간다 — 피해는 그 보호자의 어르신께 하루 상한 이하로 한정되고, 서버에서
-  /// 폐기하면 끝난다. 로그인 단계에서 이 상수는 사라진다.
-  static String guardianKey = const String.fromEnvironment('GUARDIAN_KEY');
+  /// 보호자 개인 열쇠. 가입·로그인에서 서버가 발급하고, 앱이 폰에 저장했다가 시작할 때 불러온다.
+  /// 비어 있으면 로그인하지 않은 상태다.
+  static String guardianKey = '';
 
   static const Duration _timeout = Duration(seconds: 10);
 
@@ -54,6 +50,7 @@ class NulbomApi {
   static http.Client client = http.Client();
 
   static const String _elderKeyPref = 'elder_key';
+  static const String _guardianKeyPref = 'guardian_key';
 
   // ------------------------------------------------------------ 공통
 
@@ -72,10 +69,29 @@ class NulbomApi {
     await prefs.remove(_elderKeyPref);
   }
 
+  /// 폰에 저장된 보호자 열쇠를 불러와 `guardianKey`에 넣는다. 없으면 빈 문자열.
+  static Future<String> loadGuardianKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    guardianKey = prefs.getString(_guardianKeyPref) ?? '';
+    return guardianKey;
+  }
+
+  static Future<void> saveGuardianKey(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_guardianKeyPref, key);
+    guardianKey = key;
+  }
+
+  static Future<void> clearGuardianKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_guardianKeyPref);
+    guardianKey = '';
+  }
+
   static String _guardianKeyOrThrow(String? override) {
     final key = override ?? guardianKey;
     if (key.isEmpty) {
-      throw const ApiException(401, '보호자 열쇠가 앱에 들어 있지 않습니다');
+      throw const ApiException(401, '로그인이 필요해요');
     }
     return key;
   }
@@ -140,6 +156,62 @@ class NulbomApi {
     final result = PairResult.fromJson(json);
     await saveElderKey(result.elderKey);
     return result;
+  }
+
+  // ------------------------------------------------------------ 보호자 계정
+
+  /// 가입하면 서버가 이 폰 전용 열쇠를 주고, 앱이 저장한다.
+  static Future<GuardianProfile> guardianSignup({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    final json = await _send('POST', '/v1/guardian/signup',
+        body: {'name': name, 'email': email, 'phone': phone, 'password': password});
+    await saveGuardianKey(json['key'] as String);
+    return GuardianProfile.fromJson(json);
+  }
+
+  static Future<GuardianProfile> guardianLogin({
+    required String email,
+    required String password,
+  }) async {
+    final json = await _send('POST', '/v1/guardian/login',
+        body: {'email': email, 'password': password});
+    await saveGuardianKey(json['key'] as String);
+    return GuardianProfile.fromJson(json);
+  }
+
+  /// 서버에서 이 폰의 열쇠를 폐기하고 폰에서도 지운다. 서버에 닿지 못해도 폰에서는 지운다.
+  static Future<void> guardianLogout({String? key}) async {
+    final current = key ?? guardianKey;
+    try {
+      if (current.isNotEmpty) {
+        await _send('POST', '/v1/guardian/logout', key: current);
+      }
+    } on ApiException {
+      // 이미 폐기된 열쇠(401)여도 폰에서는 지운다.
+    } catch (_) {
+      // 서버에 닿지 못해도 폰에서는 로그아웃한다.
+    }
+    await clearGuardianKey();
+  }
+
+  static Future<GuardianProfile> guardianMe({String? key}) async {
+    final json = await _send('GET', '/v1/guardian/me', key: _guardianKeyOrThrow(key));
+    return GuardianProfile.fromJson(json);
+  }
+
+  /// 다른 폰의 열쇠는 서버가 폐기한다. 이 폰은 그대로 쓴다. 돌려주는 값은 로그아웃된 폰 수.
+  static Future<int> changeGuardianPassword({
+    required String current,
+    required String next,
+    String? key,
+  }) async {
+    final json = await _send('POST', '/v1/guardian/password',
+        key: _guardianKeyOrThrow(key), body: {'current': current, 'new': next});
+    return (json['revoked_others'] as int?) ?? 0;
   }
 
   // ------------------------------------------------------------ 보호자
