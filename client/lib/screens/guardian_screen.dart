@@ -10,6 +10,9 @@ import 'health_alerts_screen.dart';
 import 'conversation_history_screen.dart';
 import 'elderly_detail_screen.dart';
 import 'guardian_account_screen.dart';
+import 'connection_code_section.dart';
+import 'role_selection_screen.dart';
+import '../services/auth_service.dart';
 
 // 색상
 const Color eBg = Color(0xFFEFF6FF);
@@ -170,6 +173,78 @@ class _GuardianScreenState extends State<GuardianScreen> {
     return '${_formatDate(sunday)} ~ ${_formatDate(saturday)}';
   }
 
+  /// 어르신이 없거나 불러오지 못했을 때. 여기서도 코드를 만들고 로그아웃할 수 있어야 한다 —
+  /// 막다른 화면이 되면 새 계정은 어르신을 추가할 방법도, 나갈 방법도 없다.
+  Widget _buildEmptyState() {
+    final failed = _loadError != null;
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: eBg,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!failed) ..._pending.map(_buildPendingCard),
+                  Text(
+                    _loadError ?? '관리 중인 어르신이 아직 없어요.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.notoSansKr(fontSize: 18, color: eInkSoft),
+                  ),
+                  if (!failed) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      '아래 보호자 코드를 어르신께 알려 드리면, 어르신이 가입한 뒤 여기서 승인할 수 있어요.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
+                    ),
+                    const ConnectionCodeSection(),
+                  ],
+                  const SizedBox(height: 16),
+                  OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _loading = true;
+                        _loadError = null;
+                      });
+                      _load();
+                    },
+                    child: const Text('다시 불러오기'),
+                  ),
+                  TextButton(
+                    key: const Key('logout-button'),
+                    onPressed: _logout,
+                    child: Text(
+                      '로그아웃',
+                      style: GoogleFonts.notoSansKr(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFFF44336),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logout() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -178,38 +253,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    if (_loadError != null || _elders.isEmpty) {
-      return Scaffold(
-        backgroundColor: eBg,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_loadError == null) ..._pending.map(_buildPendingCard),
-                Text(
-                  _loadError ?? '관리 중인 어르신이 아직 없어요.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSansKr(fontSize: 18, color: eInkSoft),
-                ),
-                const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: () {
-                    setState(() {
-                      _loading = true;
-                      _loadError = null;
-                    });
-                    _load();
-                  },
-                  child: const Text('다시 불러오기'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
+    if (_loadError != null || _elders.isEmpty) return _buildEmptyState();
     return PopScope(
       canPop: false,
       child: Scaffold(
