@@ -159,3 +159,49 @@ def test_purge_removes_old_medication_and_keeps_recent(setup):
     clock.now += 21 * DAY
     assert store.purge_older_than(clock.now - 30 * DAY) == 1
     assert store.medication([CALL]) == {}
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다 — Postgres 규약 테스트를 건너뛴다.")
+def test_purge_still_deletes_turns_and_summaries_when_the_medication_table_is_missing():
+    """배포 순서가 어긋나 call_medication 표가 없어도 30일 보관 약속은 지켜진다.
+
+    스키마는 건드리지 않는다. 풀 대리자가 SQL 속 표 이름만 없는 이름으로 바꿔 보낸다.
+    """
+    from contextlib import contextmanager
+
+    from app.api.postgres_call_content import PostgresCallContent
+    from tests.pg_helpers import insert_call, pg_pool, seed_world
+
+    class RenamingConn:
+        def __init__(self, real):
+            self._real = real
+
+        def execute(self, sql, *args, **kwargs):
+            return self._real.execute(
+                sql.replace("call_medication", "call_medication_absent"), *args, **kwargs
+            )
+
+    class RenamingPool:
+        def __init__(self, real):
+            self._real = real
+
+        @contextmanager
+        def connection(self, *args, **kwargs):
+            with self._real.connection(*args, **kwargs) as conn:
+                yield RenamingConn(conn)
+
+    pool = pg_pool()
+    try:
+        seed_world(pool)
+        insert_call(pool, call_id=CALL, elder_id=12, status="completed", created_at=START)
+        clock = Clock()
+        real = PostgresCallContent(pool=pool, clock=clock)
+        real.save_turns(CALL, [("ai", "a"), ("elder", "b")])
+        real.save_summary(CALL, "s", "m")
+        clock.now += 31 * DAY
+
+        broken = PostgresCallContent(pool=RenamingPool(pool), clock=clock)
+        assert broken.purge_older_than(clock.now - 30 * DAY) == 3
+        assert real.turns(CALL) == [] and real.summaries([CALL]) == {}
+    finally:
+        pool.close()
