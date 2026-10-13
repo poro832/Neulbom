@@ -227,6 +227,17 @@ CREATE TABLE call_turns (
     PRIMARY KEY (call_id, seq)
 );
 
+-- 어르신이 약을 먹었다고 말했는지(통화별). 점수·경보에는 쓰지 않는다. 30일 뒤 지운다.
+CREATE TABLE call_medication (
+    call_id    BIGINT PRIMARY KEY REFERENCES calls(call_id) ON DELETE CASCADE,
+    status     TEXT NOT NULL CHECK (status IN ('taken', 'not_taken', 'unknown')),
+    model_id   TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE call_medication IS
+    '어르신이 약을 먹었다고 말했는지(통화별). LLM이 어르신의 말을 셋으로 나눈 것일 뿐 점수·경보에는 쓰지 않는다.';
+
 -- 보호자가 원문을 열 때마다 한 행. 앱에는 보이지 않고 DB에서만 본다.
 CREATE TABLE transcript_views (
     view_id     BIGSERIAL PRIMARY KEY,

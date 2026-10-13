@@ -132,3 +132,30 @@ def test_purge_keeps_recent_rows(setup):
     clock.now += 10 * DAY
     assert store.purge_older_than(clock.now - 30 * DAY) == 0
     assert len(store.turns(CALL)) == 1
+
+
+def test_medication_round_trip_and_overwrite(setup):
+    store, _ = setup
+    assert store.medication([CALL, 999]) == {}
+    store.save_medication(CALL, "unknown", "HCX-DASH-002")
+    store.save_medication(CALL, "taken", "HCX-DASH-002")
+    assert store.medication([CALL, 999]) == {CALL: "taken"}
+    assert store.medication([]) == {}
+
+
+def test_medication_rejects_unknown_status(setup):
+    store, _ = setup
+    with pytest.raises(ValueError):
+        store.save_medication(CALL, "diagnosed", "m")
+    assert store.medication([CALL]) == {}
+
+
+def test_purge_removes_old_medication_and_keeps_recent(setup):
+    store, clock = setup
+    store.save_medication(CALL, "not_taken", "m")
+    clock.now += 10 * DAY
+    assert store.purge_older_than(clock.now - 30 * DAY) == 0
+    assert store.medication([CALL]) == {CALL: "not_taken"}
+    clock.now += 21 * DAY
+    assert store.purge_older_than(clock.now - 30 * DAY) == 1
+    assert store.medication([CALL]) == {}
