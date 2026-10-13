@@ -41,7 +41,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   testWidgets('서버의 실제 어르신 목록을 보여 준다', (tester) async {
     NulbomApi.client = MockClient((request) async {

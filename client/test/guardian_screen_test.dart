@@ -71,7 +71,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     NulbomApi.guardianKey = 'nlb_test';
   });
-  tearDown(() => NulbomApi.guardianKey = const String.fromEnvironment('GUARDIAN_KEY'));
+  tearDown(() => NulbomApi.guardianKey = '');
 
   testWidgets('서버의 어르신과 이번 주 통계와 알림을 보여 준다', (tester) async {
     tester.view.physicalSize = const Size(1200, 4000);

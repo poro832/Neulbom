@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
-import 'guardian_login_screen.dart';
+import 'guardian_home_page.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
 const Color eCard = Color(0xFFFFFFFF);
@@ -20,6 +20,7 @@ class GuardianSignupScreen extends StatefulWidget {
 class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _passwordConfirmController =
       TextEditingController();
@@ -32,6 +33,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     _passwordController.dispose();
     _passwordConfirmController.dispose();
     super.dispose();
@@ -52,9 +54,16 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
       return;
     }
 
-    if (_passwordController.text.isEmpty) {
+    if (_phoneController.text.trim().isEmpty) {
       setState(() {
-        _errorMessage = '비밀번호를 입력해주세요.';
+        _errorMessage = '전화번호를 입력해주세요.';
+      });
+      return;
+    }
+
+    if (_passwordController.text.length < 8) {
+      setState(() {
+        _errorMessage = '비밀번호는 8자 이상이어야 합니다.';
       });
       return;
     }
@@ -74,18 +83,20 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     final result = await AuthService.guardianSignup(
       name: _nameController.text,
       email: _emailController.text,
+      phone: _phoneController.text,
       password: _passwordController.text,
     );
 
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
 
     if (result['success']) {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const GuardianLoginScreen()),
+      // 가입하면 바로 로그인된 상태다(서버가 이 폰 열쇠를 줬다).
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const GuardianHomePage()),
+        (route) => false,
       );
     } else {
       setState(() {
@@ -200,6 +211,43 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
               ),
               const SizedBox(height: 16),
 
+              // 전화번호
+              Text(
+                '전화번호',
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: eInk,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _phoneController,
+                enabled: !_isLoading,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: '010-0000-0000',
+                  hintStyle: const TextStyle(color: eInkSoft),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eLine),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eLine),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: eAccent, width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // 비밀번호
               Text(
                 '비밀번호',
@@ -215,7 +263,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                 enabled: !_isLoading,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  hintText: '6자 이상의 비밀번호',
+                  hintText: '8자 이상의 비밀번호',
                   hintStyle: const TextStyle(color: eInkSoft),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
