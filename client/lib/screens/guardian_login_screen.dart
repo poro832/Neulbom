@@ -5,13 +5,13 @@ import 'guardian_signup_screen.dart';
 import 'guardian_home_page.dart';
 import 'role_selection_screen.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eBrass = Color(0xFFB78A4A);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
+const Color eBrass = Color(0xFFFFC21A);
 
 class GuardianLoginScreen extends StatefulWidget {
   const GuardianLoginScreen({super.key});
@@ -59,15 +59,15 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
       password: _passwordController.text,
     );
 
+    if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
 
     if (result['success']) {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const GuardianHomePage()),
+        (route) => false,
       );
     } else {
       setState(() {
@@ -120,7 +120,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
         ),
         title: Text(
           '보호자 로그인',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 21,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -138,7 +138,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
                 // 로고/제목
                 Text(
                   '늘봄',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 32,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -158,7 +158,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
                 // 로그인 폼
                 Text(
                   '보호자 로그인',
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     color: eInk,

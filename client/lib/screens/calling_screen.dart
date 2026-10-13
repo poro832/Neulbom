@@ -72,9 +72,9 @@ class _CallingScreenState extends State<CallingScreen>
           gradient: RadialGradient(
             center: const Alignment(0.5, 0.3),
             colors: [
-              const Color(0xFFE68F5E),
+              const Color(0xFF6F9BFF),
               eAccent,
-              const Color(0xFFA3502C),
+              const Color(0xFF0E2548),
             ],
             stops: const [0, 0.65, 0.75],
           ),
@@ -90,7 +90,7 @@ class _CallingScreenState extends State<CallingScreen>
                 Text(
                   _headline,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 30,
                     height: 1.4,
                     fontWeight: FontWeight.w700,
@@ -157,7 +157,7 @@ class _CallingScreenState extends State<CallingScreen>
         onPressed: onTap,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFFC0553F),
+          foregroundColor: const Color(0xFF1346B5),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),

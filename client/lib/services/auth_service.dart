@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/nulbom_models.dart';
 import 'nulbom_api.dart';
 
 class AuthService {
@@ -8,10 +9,6 @@ class AuthService {
   static const String _nameKey = 'name';
   static const String _isLoggedInKey = 'is_logged_in';
   static const String _tokenKey = 'auth_token';
-  static const String _connectionCodeKey = 'connection_code';
-
-  // Mock 연결코드 (실제로는 백엔드에서 검증)
-  static const String _validConnectionCode = '123456';
 
   // 어르신 회원가입
   static Future<Map<String, dynamic>> elderlySignup({
@@ -84,68 +81,76 @@ class AuthService {
     }
   }
 
-  // 보호자 회원가입
+  static const String _networkFailure = '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+
+  // 보호자 회원가입 — 서버가 계정을 만들고 이 폰 전용 열쇠를 준다(앱이 저장한다)
   static Future<Map<String, dynamic>> guardianSignup({
     required String name,
     required String email,
+    required String phone,
     required String password,
   }) async {
+    if (!email.contains('@')) {
+      return {'success': false, 'message': '유효한 이메일을 입력해주세요.'};
+    }
+    if (password.length < 8) {
+      return {'success': false, 'message': '비밀번호는 8자 이상이어야 합니다.'};
+    }
     try {
-      if (!email.contains('@')) {
-        return {'success': false, 'message': '유효한 이메일을 입력해주세요.'};
-      }
-
-      if (password.length < 6) {
-        return {'success': false, 'message': '비밀번호는 6자 이상이어야 합니다.'};
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_userTypeKey, 'guardian');
-      await prefs.setString(_nameKey, name);
-      await prefs.setString('email', email);
-      await prefs.setBool(_isLoggedInKey, true);
-      await prefs.setString(_tokenKey, 'mock_token_$email');
-      await prefs.setString(_connectionCodeKey, _validConnectionCode);
-
+      final profile = await NulbomApi.guardianSignup(
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        password: password,
+      );
+      await _rememberGuardian(profile);
       return {
         'success': true,
         'message': '회원가입 성공',
-        'data': {
-          'connectionCode': _validConnectionCode, // 어르신에게 공유할 코드
-          'name': name,
-          'email': email,
-        },
+        'data': {'name': profile.name, 'email': profile.email},
       };
+    } on ApiException catch (e) {
+      return {'success': false, 'message': e.message};
     } catch (e) {
-      return {'success': false, 'message': '회원가입 실패: $e'};
+      return {'success': false, 'message': _networkFailure};
     }
   }
 
-  // 보호자 로그인
+  // 보호자 로그인 — 서버가 이메일·비밀번호를 확인하고 열쇠를 준다
   static Future<Map<String, dynamic>> guardianLogin({
     required String email,
     required String password,
   }) async {
     try {
-      if (!email.contains('@')) {
-        return {'success': false, 'message': '유효한 이메일을 입력해주세요.'};
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_userTypeKey, 'guardian');
-      await prefs.setString('email', email);
-      await prefs.setBool(_isLoggedInKey, true);
-      await prefs.setString(_tokenKey, 'mock_token_$email');
-
+      final profile = await NulbomApi.guardianLogin(
+        email: email.trim(),
+        password: password,
+      );
+      await _rememberGuardian(profile);
       return {'success': true, 'message': '로그인 성공'};
+    } on ApiException catch (e) {
+      return {'success': false, 'message': e.message};
     } catch (e) {
-      return {'success': false, 'message': '로그인 실패: $e'};
+      return {'success': false, 'message': _networkFailure};
     }
+  }
+
+  static Future<void> _rememberGuardian(GuardianProfile profile) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_userTypeKey, 'guardian');
+    await prefs.setString(_nameKey, profile.name);
+    await prefs.setString(_phoneKey, profile.phone);
+    await prefs.setString('email', profile.email);
+    await prefs.setBool(_isLoggedInKey, true);
   }
 
   // 로그아웃
   static Future<bool> logout() async {
     try {
+      // 보호자면 서버에서 이 폰의 열쇠도 폐기한다. 어르신 열쇠는 건드리지 않는다.
+      if (NulbomApi.guardianKey.isNotEmpty) {
+        await NulbomApi.guardianLogout();
+      }
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_userTypeKey);
       await prefs.remove(_phoneKey);
@@ -179,8 +184,6 @@ class AuthService {
       'phone': prefs.getString(_phoneKey),
       'name': prefs.getString(_nameKey),
       'email': prefs.getString('email'),
-      'connectionCode':
-          prefs.getString(_connectionCodeKey) ?? _validConnectionCode,
     };
   }
 }

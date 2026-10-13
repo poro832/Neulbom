@@ -4,12 +4,12 @@ import '../services/nulbom_api.dart';
 import '../models/nulbom_models.dart' show ElderCalls;
 import 'elder_calls_screen.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class ElderlyDetailScreen extends StatefulWidget {
   final int elderlyId;
@@ -98,7 +98,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
           children: [
             Text(
               '최근 통화 요약',
-              style: GoogleFonts.notoSerifKr(
+              style: GoogleFonts.notoSansKr(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 color: eInk,
@@ -221,7 +221,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               _statsError!,
-              style: const TextStyle(fontSize: 13, color: Color(0xFFC0553F)),
+              style: const TextStyle(fontSize: 13, color: Color(0xFFD92D20)),
             ),
           ),
         Row(
@@ -342,45 +342,6 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   String _monthlyLabel() {
     return '${_periodDate.year}년 ${_periodDate.month}월';
-  }
-
-  Future<DateTime?> _showReportDatePicker(DateTime initialDate) {
-    final now = DateTime.now();
-    final lastDate = DateTime(now.year, now.month, now.day);
-    final firstDate = DateTime(2024, 1, 1);
-    var safeInitial = initialDate;
-    if (safeInitial.isAfter(lastDate)) {
-      safeInitial = lastDate;
-    } else if (safeInitial.isBefore(firstDate)) {
-      safeInitial = firstDate;
-    }
-
-    return showDatePicker(
-      context: context,
-      initialDate: safeInitial,
-      firstDate: firstDate,
-      lastDate: lastDate,
-      locale: const Locale('ko', 'KR'),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: eAccent,
-              onPrimary: Colors.white,
-              onSurface: eInk,
-            ),
-            textTheme: Theme.of(
-              context,
-            ).textTheme.apply(fontFamily: 'NotoSansKR'),
-          ),
-          child: Localizations.override(
-            context: context,
-            locale: const Locale('ko', 'KR'),
-            child: child!,
-          ),
-        );
-      },
-    );
   }
 
   Future<DateTime?> _showMonthPicker(DateTime initialDate) {
@@ -507,12 +468,31 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     );
   }
 
+  Future<DateTime?> _showDayPicker(DateTime initialDate) {
+    return _showCalendarPicker(initialDate, selectByWeek: false);
+  }
+
   Future<DateTime?> _showWeekPicker(DateTime initialDate) {
-    var visibleMonth = DateTime(initialDate.year, initialDate.month);
-    final selectedWeekStart = _weekStart(initialDate);
+    return _showCalendarPicker(initialDate, selectByWeek: true);
+  }
+
+  Future<DateTime?> _showCalendarPicker(
+    DateTime initialDate, {
+    required bool selectByWeek,
+  }) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final firstDate = DateTime(2024, 1, 1);
+    var safeInitial = DateTime(initialDate.year, initialDate.month, initialDate.day);
+    if (safeInitial.isAfter(today)) {
+      safeInitial = today;
+    } else if (safeInitial.isBefore(firstDate)) {
+      safeInitial = firstDate;
+    }
+
+    var visibleMonth = DateTime(safeInitial.year, safeInitial.month);
+    final selectedWeekStart = _weekStart(safeInitial);
+    final selectedDay = safeInitial;
     const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
 
     return showDialog<DateTime>(
@@ -603,52 +583,136 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                           ];
                           final weekStart = weekDays.first;
                           final weekEnd = weekDays.last;
-                          final isSelected = weekStart == selectedWeekStart;
-                          final isFutureWeek = weekStart.isAfter(today);
-                          final isTooOld = weekEnd.isBefore(firstDate);
-                          final enabled = !isFutureWeek && !isTooOld;
+
+                          if (selectByWeek) {
+                            final isSelected = weekStart == selectedWeekStart;
+                            final isFutureWeek = weekStart.isAfter(today);
+                            final isTooOld = weekEnd.isBefore(firstDate);
+                            final enabled = !isFutureWeek && !isTooOld;
+
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Material(
+                                color: isSelected
+                                    ? eAccent
+                                    : enabled
+                                    ? eBg
+                                    : eLine.withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(10),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(10),
+                                  onTap: enabled
+                                      ? () => Navigator.pop(context, weekStart)
+                                      : null,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        for (final day in weekDays)
+                                          Expanded(
+                                            child: Text(
+                                              '${day.day}',
+                                              textAlign: TextAlign.center,
+                                              style: GoogleFonts.notoSansKr(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: isSelected
+                                                    ? Colors.white
+                                                    : !enabled ||
+                                                          day.month !=
+                                                              visibleMonth
+                                                                  .month
+                                                    ? eInkSoft
+                                                    : eInk,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
 
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 4),
-                            child: Material(
-                              color: isSelected
-                                  ? eAccent
-                                  : enabled
-                                  ? eBg
-                                  : eLine.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(10),
-                              child: InkWell(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: eBg,
                                 borderRadius: BorderRadius.circular(10),
-                                onTap: enabled
-                                    ? () => Navigator.pop(context, weekStart)
-                                    : null,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 8,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      for (final day in weekDays)
-                                        Expanded(
-                                          child: Text(
-                                            '${day.day}',
-                                            textAlign: TextAlign.center,
-                                            style: GoogleFonts.notoSansKr(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
-                                              color: isSelected
-                                                  ? Colors.white
-                                                  : !enabled ||
-                                                        day.month !=
-                                                            visibleMonth.month
-                                                  ? eInkSoft
-                                                  : eInk,
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  for (final day in weekDays)
+                                    Expanded(
+                                      child: Builder(
+                                        builder: (context) {
+                                          final isOutsideMonth =
+                                              day.month != visibleMonth.month;
+                                          final isFuture = day.isAfter(today);
+                                          final isTooOld = day.isBefore(
+                                            firstDate,
+                                          );
+                                          final enabled =
+                                              !isOutsideMonth &&
+                                              !isFuture &&
+                                              !isTooOld;
+                                          final isSelected =
+                                              day.year == selectedDay.year &&
+                                              day.month == selectedDay.month &&
+                                              day.day == selectedDay.day;
+
+                                          return Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 2,
                                             ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
+                                            child: Material(
+                                              color: isSelected
+                                                  ? eAccent
+                                                  : Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                onTap: enabled
+                                                    ? () => Navigator.pop(
+                                                        context,
+                                                        day,
+                                                      )
+                                                    : null,
+                                                child: SizedBox(
+                                                  height: 36,
+                                                  child: Center(
+                                                    child: Text(
+                                                      '${day.day}',
+                                                      textAlign:
+                                                          TextAlign.center,
+                                                      style:
+                                                          GoogleFonts.notoSansKr(
+                                                        fontSize: 14,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: isSelected
+                                                            ? Colors.white
+                                                            : enabled
+                                                            ? eInk
+                                                            : eInkSoft,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           );
@@ -775,7 +839,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         elevation: 0,
         title: Text(
           '${widget.elderlyName} 건강 리포트',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 24,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -810,7 +874,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             const SizedBox(height: 24),
             Text(
               isWeekly ? '주간 분석 요약' : '월간 분석 요약',
-              style: GoogleFonts.notoSerifKr(
+              style: GoogleFonts.notoSansKr(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 color: eInk,
@@ -849,7 +913,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         elevation: 0,
         title: Text(
           '${widget.elderlyName} 건강 리포트',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 24,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -873,7 +937,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               _buildDateSelector(
                 dateText: _selectedDate,
                 onTap: () async {
-                  final picked = await _showReportDatePicker(
+                  final picked = await _showDayPicker(
                     DateTime.parse(_selectedDate),
                   );
                   if (picked != null) {
@@ -887,7 +951,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               // 통계 제목
               Text(
                 '이날의 통계',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -905,7 +969,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               // 상태 분석
               Text(
                 '상태 분석',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -917,6 +981,65 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildStatsGrid({
+    required String depressionIndex,
+    required String depressionStatus,
+    required String healthStatus,
+    required String healthDetail,
+    required String callCount,
+    required String callStatus,
+    required String chatCount,
+    required String chatStatus,
+  }) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                title: '우울 수치',
+                value: depressionIndex,
+                subtitle: depressionStatus,
+                color: const Color(0xFF4CAF50),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildStatCard(
+                title: '건강상태',
+                value: healthStatus,
+                subtitle: healthDetail,
+                color: const Color(0xFF4CAF50),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _buildStatCard(
+                title: '전화 횟수',
+                value: callCount,
+                subtitle: callStatus,
+                color: eAccent,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _buildStatCard(
+                title: '채팅 횟수',
+                value: chatCount,
+                subtitle: chatStatus,
+                color: const Color(0xFF2196F3),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -932,7 +1055,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         border: Border.all(color: eLine),
         borderRadius: BorderRadius.circular(12),
       ),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

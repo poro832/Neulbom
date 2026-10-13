@@ -772,6 +772,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
     from app.api.postgres_call_content import PostgresCallContent
     from app.api.postgres_contacts import PostgresContactStore
     from app.api.postgres_elder_keys import PostgresElderKeyStore
+    from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_invites import PostgresInviteStore
     from app.api.postgres_pairing import PostgresPairingStore
     from app.api.postgres_reports import PostgresReports
@@ -789,6 +790,7 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         alerts=alerts,
         invites=PostgresInviteStore(pool=pool),
         content=PostgresCallContent(pool=pool),
+        accounts=PostgresGuardianAccounts(pool=pool),
     )
     return data, AlertRules(alerts=alerts, elders=elders)
 

@@ -62,7 +62,7 @@ dependencies:
   # 날짜/시간
   intl: ^0.20.2
 
-  # Google Fonts (Noto Serif KR)
+  # Google Fonts (Noto Sans KR)
   google_fonts: ^6.1.0
 
 dev_dependencies:

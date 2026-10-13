@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,15 +8,15 @@ import 'calling_screen.dart';
 import 'ai_chat_screen.dart';
 
 // 색상
-const Color eBg = Color(0xFFFBF6ED);
-const Color eBg2 = Color(0xFFF3E7D3);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
-const Color eAccentSoft = Color(0xFFFBE4D3);
-const Color eBrass = Color(0xFFB78A4A);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eBg2 = Color(0xFFE5F0FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
+const Color eAccentSoft = Color(0xFFE6F0FF);
+const Color eBrass = Color(0xFFFFC21A);
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -26,6 +28,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   late String _currentTime;
   String _friendName = 'AI 친구';
+  Timer? _timeUpdateTimer;
 
   @override
   void initState() {
@@ -44,9 +47,11 @@ class _MainScreenState extends State<MainScreen> {
         _showSetFriendNameDialog();
       }
     } else {
-      setState(() {
-        _friendName = savedName;
-      });
+      if (mounted) {
+        setState(() {
+          _friendName = savedName;
+        });
+      }
     }
   }
 
@@ -60,7 +65,7 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: eCard,
         title: Text(
           'AI 친구 이름 설정',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 20,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -117,11 +122,10 @@ class _MainScreenState extends State<MainScreen> {
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setString('ai_friend_name', nameController.text);
 
-                  setState(() {
-                    _friendName = nameController.text;
-                  });
-
                   if (mounted) {
+                    setState(() {
+                      _friendName = nameController.text;
+                    });
                     Navigator.pop(context);
                   }
                 }
@@ -149,10 +153,18 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _updateTime() {
+    if (!mounted) return;
+
     setState(() {
       _currentTime = DateFormat('H:mm').format(DateTime.now());
     });
-    Future.delayed(const Duration(minutes: 1), _updateTime);
+    _timeUpdateTimer = Timer(const Duration(minutes: 1), _updateTime);
+  }
+
+  @override
+  void dispose() {
+    _timeUpdateTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -173,7 +185,7 @@ class _MainScreenState extends State<MainScreen> {
                 Text(
                   '오늘도\n평안한 하루\n보내세요',
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSerifKr(
+                  style: GoogleFonts.notoSansKr(
                     fontSize: 32,
                     fontWeight: FontWeight.w700,
                     color: eInk,
@@ -203,17 +215,17 @@ class _MainScreenState extends State<MainScreen> {
                         center: Alignment.center,
                         radius: 1.0,
                         colors: [
-                          const Color(0xFFF4A574),
-                          const Color(0xFFF4A574).withOpacity(0.75),
-                          const Color(0xFFF4A574).withOpacity(0.45),
-                          const Color(0xFFF4A574).withOpacity(0.15),
+                          const Color(0xFF6F9BFF),
+                          const Color(0xFF6F9BFF).withOpacity(0.75),
+                          const Color(0xFF6F9BFF).withOpacity(0.45),
+                          const Color(0xFF6F9BFF).withOpacity(0.15),
                           Colors.transparent,
                         ],
                         stops: const [0.0, 0.28, 0.50, 0.68, 0.82],
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFF4A574).withOpacity(0.4),
+                          color: const Color(0xFF6F9BFF).withOpacity(0.4),
                           blurRadius: 24,
                           spreadRadius: 8,
                         ),
@@ -225,15 +237,15 @@ class _MainScreenState extends State<MainScreen> {
                         Icon(
                           Icons.phone_rounded,
                           size: 52,
-                          color: const Color(0xFF7B4020),
+                          color: Colors.white,
                         ),
                         const SizedBox(height: 12),
                         Text(
                           '$_friendName과 통화하기',
-                          style: GoogleFonts.notoSerifKr(
+                          style: GoogleFonts.notoSansKr(
                             fontSize: 28,
                             fontWeight: FontWeight.w800,
-                            color: const Color(0xFF7B4020),
+                            color: Colors.white,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -242,7 +254,7 @@ class _MainScreenState extends State<MainScreen> {
                           style: GoogleFonts.notoSansKr(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF7B4020).withOpacity(0.8),
+                            color: Colors.white.withOpacity(0.8),
                           ),
                         ),
                       ],
@@ -255,7 +267,7 @@ class _MainScreenState extends State<MainScreen> {
                 _buildMenuCard(
                   title: 'AI 채팅',
                   description: '글로 편하게 이야기해요',
-                  backgroundColor: Color(0xFFF3E4D8),
+                  backgroundColor: eAccentSoft,
                   iconColor: eBrass,
                   icon: Icons.chat_bubble_outline,
                   onTap: () {

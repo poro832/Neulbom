@@ -46,7 +46,7 @@ class _ElderCallsScreenState extends State<ElderCallsScreen> {
         iconTheme: const IconThemeData(color: eInk),
         title: Text(
           '${widget.elderName}님 통화',
-          style: GoogleFonts.notoSerifKr(fontSize: 20, fontWeight: FontWeight.w700, color: eInk),
+          style: GoogleFonts.notoSansKr(fontSize: 20, fontWeight: FontWeight.w700, color: eInk),
         ),
       ),
       body: FutureBuilder<ElderCalls>(

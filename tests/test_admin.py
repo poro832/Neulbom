@@ -137,3 +137,51 @@ def test_an_unknown_command_exits_with_usage():
 
     with pytest.raises(SystemExit):
         go(["nonsense"], keys, directory, out, err)
+
+
+# ------------------------------------------------ guardian set-login
+
+
+def _set_login(passwords, email="Real@Example.com", guardian="1", accounts=None):
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    keys, directory, out, err = make()
+    accounts = accounts or InMemoryGuardianAccounts()
+    answers = iter(passwords)
+    code = run(
+        ["guardian", "set-login", guardian, "--email", email],
+        keys=keys, directory=directory, out=out, err=err,
+        accounts=accounts, read_password=lambda prompt: next(answers),
+    )
+    return code, accounts, out, err
+
+
+def test_set_login_gives_the_guardian_an_email_and_a_hashed_password():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+    from app.api.passwords import NO_LOGIN, verify_password
+
+    accounts = InMemoryGuardianAccounts()
+    gid = accounts.create("보호자", "key-ab@no-login.invalid", "010-0", NO_LOGIN)
+
+    code, _, out, err = _set_login(["long-enough-1", "long-enough-1"], guardian=str(gid), accounts=accounts)
+
+    assert code == 0 and not err.lines
+    account = accounts.find_by_email("real@example.com")
+    assert account.guardian_id == gid and verify_password("long-enough-1", account.password_hash)
+    assert "long-enough-1" not in out.text and account.password_hash not in out.text
+
+
+def test_set_login_refuses_short_or_mismatched_passwords():
+    assert _set_login(["short"])[0] == 1
+    assert _set_login(["long-enough-1", "long-enough-2"])[0] == 1
+
+
+def test_set_login_refuses_a_missing_guardian_and_a_taken_email():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    assert _set_login(["long-enough-1", "long-enough-1"], guardian="99")[0] == 1
+    accounts = InMemoryGuardianAccounts()
+    accounts.create("가", "real@example.com", "010-1", "H")
+    gid = accounts.create("나", "b@example.com", "010-2", "H2")
+    code, _, _, err = _set_login(["long-enough-1", "long-enough-1"], guardian=str(gid), accounts=accounts)
+    assert code == 1 and "이미" in err.text

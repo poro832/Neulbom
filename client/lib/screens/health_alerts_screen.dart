@@ -4,12 +4,12 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/nulbom_models.dart' show AlertItem;
 import '../services/nulbom_api.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class MedicationAlert {
   final String elder;
@@ -170,7 +170,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
         elevation: 0,
         title: Text(
           '건강 알림',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 24,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -252,7 +252,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
           children: [
             Text(
               '약물 복용 일정 및 알림',
-              style: GoogleFonts.notoSerifKr(
+              style: GoogleFonts.notoSansKr(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 color: eInk,
@@ -461,7 +461,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
             const SizedBox(width: 12),
             Text(
               title,
-              style: GoogleFonts.notoSerifKr(
+              style: GoogleFonts.notoSansKr(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 color: eInk,

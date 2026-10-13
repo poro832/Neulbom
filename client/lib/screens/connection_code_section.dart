@@ -98,7 +98,7 @@ class _ConnectionCodeSectionState extends State<ConnectionCodeSection> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 6),
-            Text(_error!, style: const TextStyle(fontSize: 12, color: Color(0xFFC0553F))),
+            Text(_error!, style: const TextStyle(fontSize: 12, color: Color(0xFFD92D20))),
           ],
         ],
       ),

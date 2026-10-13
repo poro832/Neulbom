@@ -143,3 +143,42 @@ def test_the_list_never_contains_the_hash_or_the_full_key(store):
 
     assert new.key_hash not in dumped
     assert new.key not in dumped
+
+
+# ------------------------------------------------ 로그아웃·비밀번호 변경용 폐기
+
+
+def test_revoke_hash_blocks_only_that_key(store):
+    _, mine = add(store, guardian_id=1, label="폰1")
+    _, other = add(store, guardian_id=1, label="폰2")
+
+    assert store.revoke_hash(mine.key_hash) is True
+
+    assert store.find_guardian(mine.key_hash) is None
+    assert store.find_guardian(other.key_hash) == 1
+
+
+def test_revoke_hash_twice_or_unknown_is_false(store):
+    _, mine = add(store)
+    assert store.revoke_hash(mine.key_hash) is True
+    assert store.revoke_hash(mine.key_hash) is False
+    assert store.revoke_hash("0" * 64) is False
+
+
+def test_revoke_others_keeps_only_the_kept_key(store):
+    _, keep = add(store, guardian_id=1, label="이 폰")
+    _, a = add(store, guardian_id=1, label="다른 폰")
+    _, b = add(store, guardian_id=1, label="또 다른 폰")
+    _, stranger = add(store, guardian_id=2, label="남의 폰")
+
+    assert store.revoke_others(1, keep.key_hash) == 2
+
+    assert store.find_guardian(keep.key_hash) == 1
+    assert store.find_guardian(a.key_hash) is None
+    assert store.find_guardian(b.key_hash) is None
+    assert store.find_guardian(stranger.key_hash) == 2  # 다른 보호자의 열쇠는 건드리지 않는다
+
+
+def test_revoke_others_with_nothing_else_is_zero(store):
+    _, keep = add(store, guardian_id=1)
+    assert store.revoke_others(1, keep.key_hash) == 0

@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/nulbom_api.dart';
 import 'connection_code_section.dart';
 import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
-const Color eBg = Color(0xFFFBF6ED);
-const Color eCard = Color(0xFFFFFDF8);
-const Color eInk = Color(0xFF3B2F26);
-const Color eInkSoft = Color(0xFF93816D);
-const Color eLine = Color(0xFFEADFC9);
-const Color eAccent = Color(0xFFD97B4F);
+const Color eBg = Color(0xFFEFF6FF);
+const Color eCard = Color(0xFFFFFFFF);
+const Color eInk = Color(0xFF0E2548);
+const Color eInkSoft = Color(0xFF3C5C8C);
+const Color eLine = Color(0xFFD6E4FF);
+const Color eAccent = Color(0xFF1A6BFF);
 
 class GuardianAccountScreen extends StatefulWidget {
   const GuardianAccountScreen({super.key});
@@ -20,7 +21,7 @@ class GuardianAccountScreen extends StatefulWidget {
 }
 
 class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
-  late Map<String, dynamic> _guardianInfo;
+  Map<String, dynamic> _guardianInfo = {};
   bool _isLoading = true;
   bool _notificationsEnabled = true;
   bool _emailNotificationsEnabled = true;
@@ -34,11 +35,110 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   }
 
   Future<void> _loadGuardianInfo() async {
-    final info = await AuthService.getUserInfo();
+    // 폰에 저장된 값을 먼저 보여 주고, 서버 값이 오면 그것으로 바꾼다.
+    final Map<String, dynamic> info = {...await AuthService.getUserInfo()};
+    try {
+      final me = await NulbomApi.guardianMe();
+      info['name'] = me.name;
+      info['email'] = me.email;
+      info['phone'] = me.phone;
+    } catch (_) {
+      // 서버에 닿지 못하면 저장된 값을 그대로 쓴다.
+    }
+    if (!mounted) return;
     setState(() {
       _guardianInfo = info;
       _isLoading = false;
     });
+  }
+
+  Future<void> _changePassword() async {
+    final current = TextEditingController();
+    final next = TextEditingController();
+    String? error;
+    var busy = false;
+    final changed = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          backgroundColor: eCard,
+          title: Text(
+            '비밀번호 변경',
+            style: GoogleFonts.notoSansKr(
+                fontSize: 18, fontWeight: FontWeight.w700, color: eInk),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                key: const Key('current-password'),
+                controller: current,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '현재 비밀번호'),
+              ),
+              TextField(
+                key: const Key('new-password'),
+                controller: next,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '새 비밀번호 (8자 이상)'),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(error!,
+                      style: const TextStyle(color: Color(0xFFF44336), fontSize: 13)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(dialogContext),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (next.text.length < 8) {
+                        setLocal(() => error = '새 비밀번호는 8자 이상이어야 합니다.');
+                        return;
+                      }
+                      setLocal(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        final others = await NulbomApi.changeGuardianPassword(
+                            current: current.text, next: next.text);
+                        if (dialogContext.mounted) Navigator.pop(dialogContext, others);
+                      } on ApiException catch (e) {
+                        setLocal(() {
+                          busy = false;
+                          error = e.message;
+                        });
+                      } catch (_) {
+                        setLocal(() {
+                          busy = false;
+                          error = '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+                        });
+                      }
+                    },
+              child: const Text('변경'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (changed == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(changed > 0
+            ? '비밀번호를 바꿨어요. 다른 폰 $changed대는 로그아웃됐어요.'
+            : '비밀번호를 바꿨어요.'),
+        backgroundColor: eAccent,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   void _logout() {
@@ -75,11 +175,11 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               onPressed: () async {
                 await AuthService.logout();
                 if (!mounted) return;
-                Navigator.pushReplacement(
-                  context,
+                Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(
                     builder: (context) => const RoleSelectionScreen(),
                   ),
+                  (route) => false,
                 );
               },
               child: Text(
@@ -117,7 +217,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
         elevation: 0,
         title: Text(
           '계정 관리',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 24,
             fontWeight: FontWeight.w700,
             color: eInk,
@@ -246,7 +346,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               // 기본 정보
               Text(
                 '기본 정보',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -264,12 +364,18 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 label: '이메일',
                 value: _guardianInfo['email'] ?? '-',
               ),
+              const SizedBox(height: 12),
+              _buildInfoCard(
+                icon: Icons.phone_outlined,
+                label: '전화번호',
+                value: _guardianInfo['phone'] ?? '-',
+              ),
               const SizedBox(height: 28),
 
               // 알림 설정
               Text(
                 '알림 설정',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -328,7 +434,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 children: [
                   Text(
                     '관리 중인 어르신',
-                    style: GoogleFonts.notoSerifKr(
+                    style: GoogleFonts.notoSansKr(
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: eInk,
@@ -386,7 +492,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               // 계정 보안
               Text(
                 '계정 보안',
-                style: GoogleFonts.notoSerifKr(
+                style: GoogleFonts.notoSansKr(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: eInk,
@@ -394,15 +500,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               ),
               const SizedBox(height: 12),
               GestureDetector(
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('비밀번호 변경 기능은 추후 제공됩니다.'),
-                      backgroundColor: eAccent,
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
+                onTap: _changePassword,
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(

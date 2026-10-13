@@ -60,7 +60,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
         automaticallyImplyLeading: false,
         title: Text(
           '통화 기록',
-          style: GoogleFonts.notoSerifKr(
+          style: GoogleFonts.notoSansKr(
             fontSize: 28,
             fontWeight: FontWeight.w700,
             color: eInk,
