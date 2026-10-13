@@ -22,6 +22,7 @@ from app.api.alerts import AlertStore
 from app.api.call_content import CallContentStore, InMemoryCallContent
 from app.api.calls import MAX_ELDER_ID
 from app.api.contacts import ContactStore, TooManyContacts
+from app.api.devices import DeviceStore, InMemoryDeviceStore
 from app.api.elder_auth import ElderAuth, ElderKeyStore, elder_key_label, generate_elder_key
 from app.api.elder_directory import (
     STATUS_PENDING,
@@ -87,6 +88,7 @@ class AppData:
     login_limiter: KeyedFailureLimiter = field(default_factory=KeyedFailureLimiter)
     account_failures: FailureLimiter = field(default_factory=FailureLimiter)
     signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
+    devices: DeviceStore = field(default_factory=InMemoryDeviceStore)
 
 
 def iso_kst(epoch: float) -> str:
@@ -115,6 +117,10 @@ class AccountSignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(min_length=1, max_length=200)
     password: str = Field(min_length=1, max_length=128)
+
+
+class DeviceRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
 
 
 class PasswordChangeRequest(BaseModel):
@@ -436,11 +442,33 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "activated": account.activated,
         }
 
+    @app.post("/v1/guardian/devices")
+    @guarded
+    def register_device(body: DeviceRequest, authorization: str | None = Header(default=None)) -> Response:
+        guardian_id = guardian_id_of(authorization)
+        data.devices.register(guardian_id, hash_key(parse_bearer(authorization)), body.token)
+        logger.info("보호자 폰을 등록했다 guardian_id=%s token=%s", guardian_id, body.token[:8])
+        return Response(status_code=204)
+
+    @app.post("/v1/guardian/devices/unregister")
+    @guarded
+    def unregister_device(body: DeviceRequest, authorization: str | None = Header(default=None)) -> Response:
+        guardian_id = guardian_id_of(authorization)
+        # 없는 토큰·남의 토큰도 같은 204다 — 존재 여부를 알려 주지 않는다.
+        data.devices.unregister(guardian_id, body.token)
+        return Response(status_code=204)
+
     @app.post("/v1/guardian/logout")
     @guarded
     def guardian_logout(authorization: str | None = Header(default=None)) -> Response:
         guardian_id = guardian_id_of(authorization)
-        key_store().revoke_hash(hash_key(parse_bearer(authorization)))
+        key_hash = hash_key(parse_bearer(authorization))
+        key_store().revoke_hash(key_hash)
+        try:
+            data.devices.remove_for_key(key_hash)
+        except Exception:
+            # 폰 등록을 못 지워도 로그아웃은 끝난다. 열쇠가 폐기됐으니 tokens_for가 어차피 걸러낸다.
+            logger.exception("로그아웃 중 폰 등록을 지우지 못했다 guardian_id=%s", guardian_id)
         logger.info("보호자가 로그아웃했다 guardian_id=%s", guardian_id)
         return Response(status_code=204)
 
