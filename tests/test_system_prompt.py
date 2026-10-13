@@ -36,3 +36,9 @@ def test_the_token_cap_is_a_safety_net_for_short_replies():
 
     # 프롬프트가 길이를 정하고, 상한은 모델이 길게 나가는 날을 막는 안전망이다.
     assert DEFAULT_MAX_TOKENS <= 80
+
+
+def test_prompt_asks_about_medication_once_without_advising():
+    assert "약을 챙겨 드셨는지" in P
+    assert "다시 묻지 않습니다" in P
+    assert "진단이나 치료법은 말하지 않습니다" in P  # 기존 규칙이 그대로 있다
