@@ -86,3 +86,10 @@ def test_logout_still_succeeds_when_the_device_store_is_broken():
     kit = make_app_kit()
     kit.data.devices = Broken()
     assert kit.client.post("/v1/guardian/logout", headers=kit.guardian_headers).status_code == 204
+
+
+def test_unregister_accepts_short_tokens_with_204():
+    kit = kit_with_devices()
+    r = kit.client.post(UNREGISTER, json={"token": "x"}, headers=kit.guardian_headers)
+    assert r.status_code == 204
+

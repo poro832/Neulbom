@@ -123,6 +123,11 @@ class DeviceRequest(BaseModel):
     token: str = Field(min_length=20, max_length=4096)
 
 
+class UnregisterRequest(BaseModel):
+    # 해제는 짧은 값에도 같은 204다(설계: 존재 여부를 알려 주지 않는다). 길이 상한만 둔다.
+    token: str = Field(min_length=1, max_length=4096)
+
+
 class PasswordChangeRequest(BaseModel):
     current: str = Field(min_length=1, max_length=128)
     new: str = Field(min_length=MIN_PASSWORD, max_length=128)
@@ -452,7 +457,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
 
     @app.post("/v1/guardian/devices/unregister")
     @guarded
-    def unregister_device(body: DeviceRequest, authorization: str | None = Header(default=None)) -> Response:
+    def unregister_device(body: UnregisterRequest, authorization: str | None = Header(default=None)) -> Response:
         guardian_id = guardian_id_of(authorization)
         # 없는 토큰·남의 토큰도 같은 204다 — 존재 여부를 알려 주지 않는다.
         data.devices.unregister(guardian_id, body.token)

@@ -8,6 +8,7 @@
     guardian add --name ... --phone ...           열쇠 전용 보호자를 만든다
     guardian pending                              운영자 확인을 기다리는 가입자 목록
     guardian activate N                           가입자를 연다 (어르신 등록·승인이 가능해진다)
+    check                                         서버 반영 점검 — DB 표·칸, 설정, 푸시 열쇠(비밀 값은 출력하지 않는다)
     guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
     elder assign --elder-id N --guardian-id M     어르신을 그 보호자에게 옮긴다
 
@@ -63,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     set_login.add_argument("guardian_id", type=int)
     set_login.add_argument("--email", required=True)
 
+    groups.add_parser("check", help="서버 반영 점검(DB 표·칸, 설정, 푸시 열쇠)")
+
     elder = groups.add_parser("elder", help="어르신").add_subparsers(dest="action", required=True)
     assign = elder.add_parser("assign", help="어르신을 보호자에게 옮긴다")
     assign.add_argument("--elder-id", type=int, required=True)
@@ -79,9 +82,18 @@ def run(
     err: Callable[..., None] | None = None,
     accounts: GuardianAccounts | None = None,
     read_password: Callable[[str], str] = getpass.getpass,
+    pool=None,
 ) -> int:
     err = err or (lambda text="": print(text, file=sys.stderr))
     args = build_parser().parse_args(argv)
+
+    if args.group == "check":
+        from app.ops_check import format_checks, run_checks
+
+        lines, failed = format_checks(run_checks(pool))
+        for line in lines:
+            out(line)
+        return 1 if failed else 0
 
     if (args.group, args.action) == ("key", "issue"):
         if not directory.guardian_exists(args.guardian_id):
@@ -220,6 +232,7 @@ def main(argv: list[str] | None = None) -> int:
             keys=PostgresGuardianKeyStore(pool=pool),
             directory=PostgresElderDirectory(pool=pool),
             accounts=PostgresGuardianAccounts(pool=pool),
+            pool=pool,
         )
     finally:
         pool.close()

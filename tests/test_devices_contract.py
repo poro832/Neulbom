@@ -112,3 +112,26 @@ def test_remove_token_deletes_an_unknown_token_quietly(world):
     devices.remove_token(T1)
     devices.remove_token(T3)
     assert devices.tokens_for(1) == []
+
+
+def test_registering_clears_stale_rows_of_revoked_keys_for_that_guardian(world):
+    devices, add_key, revoke_key = world
+    add_key(K1)
+    add_key(K2)
+    devices.register(1, K1, T1)
+    revoke_key(K1)  # 폐기된 열쇠의 옛 등록이 남아 있다
+    devices.register(1, K2, T2)
+    assert devices.unregister(1, T1) is False  # 이미 치워졌다
+    assert devices.tokens_for(1) == [T2]
+
+
+def test_cleanup_never_touches_other_guardians_rows(world):
+    devices, add_key, revoke_key = world
+    add_key(K1)
+    add_key(K2)
+    add_key(K3)
+    devices.register(2, K3, T3)
+    revoke_key(K3)
+    devices.register(1, K1, T1)
+    assert devices.unregister(2, T3) is True  # 보호자 2의 행은 보호자 1의 등록으로 지워지지 않는다
+
