@@ -40,6 +40,7 @@ from app.api.alert_rules import AlertRules
 from app.api.alerts import InMemoryAlertStore
 from app.api.app_data import AppData, add_app_routes
 from app.api.contacts import InMemoryContactStore
+from app.api.devices import InMemoryDeviceStore
 from app.api.elder_auth import ElderKeyAuth, InMemoryElderKeyStore
 from app.api.invites import InMemoryInviteStore
 from app.api.pairing import InMemoryPairingStore
@@ -76,6 +77,7 @@ from app.media.call_summary import CallSummarizer, summarizer_from_env
 from app.media.medication_check import MedicationClassifier, classifier_from_env
 from app.post_call import analyze_session
 from app.post_call_content import ConversationRecorder
+from app.push import PushNotifier, sender_from_env
 from app.telephony.client import ClawOpsTelephony, FakeTelephony, Telephony
 from app.scheduler import Roster, Scheduler
 from app.transcription import TranscriptionWorker
@@ -748,13 +750,14 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
     return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
 
 
-def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
+def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppData, AlertRules]:
     """풀이 있으면 DB 저장소를, 없으면 빈 메모리 저장소를 묶는다.
 
     메모리 모드에는 열쇠도 연결 코드도 만들 방법이 없어 보호자·어르신 주소가 전부 401이다.
     열려 있는 것보다 막혀 있는 쪽이 안전하다.
     """
     if pool is None:
+        is_key_active = getattr(getattr(guardian_auth, "store", None), "is_active", lambda _h: False)  # 모르면 푸시를 보내지 않는다(닫는 쪽)
         alerts = InMemoryAlertStore()
         elder_keys = InMemoryElderKeyStore()
         data = AppData(
@@ -767,12 +770,15 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
             reports=InMemoryReports(elders, alerts),
             alerts=alerts,
             invites=InMemoryInviteStore(),
+            devices=InMemoryDeviceStore(is_key_active=is_key_active),
         )
-        return data, AlertRules(alerts=alerts, elders=elders)
+        notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
+        return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
     from app.api.postgres_alerts import PostgresAlertStore
     from app.api.postgres_call_content import PostgresCallContent
     from app.api.postgres_contacts import PostgresContactStore
+    from app.api.postgres_devices import PostgresDeviceStore
     from app.api.postgres_elder_keys import PostgresElderKeyStore
     from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_invites import PostgresInviteStore
@@ -793,8 +799,10 @@ def app_data_for(pool, *, guardian_auth, elders) -> tuple[AppData, AlertRules]:
         invites=PostgresInviteStore(pool=pool),
         content=PostgresCallContent(pool=pool),
         accounts=PostgresGuardianAccounts(pool=pool),
+        devices=PostgresDeviceStore(pool=pool),
     )
-    return data, AlertRules(alerts=alerts, elders=elders)
+    notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
+    return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
 
 log_startup_readiness()
@@ -802,7 +810,12 @@ log_startup_readiness()
 _store, _outcomes, _pool = stores_from_env()
 _transcripts = transcripts_for(_pool)
 _guardian_auth, _elders = guardian_auth_for(_pool)
-_app_data, _alert_rules = app_data_for(_pool, guardian_auth=_guardian_auth, elders=_elders)
+_push_sender = sender_from_env()
+if _push_sender is None:
+    logger.info("푸시 꺼짐 — FCM_SERVICE_ACCOUNT_FILE이 없거나 읽지 못했다")
+_app_data, _alert_rules = app_data_for(
+    _pool, guardian_auth=_guardian_auth, elders=_elders, push_sender=_push_sender
+)
 
 app = build_server(
     store=_store,

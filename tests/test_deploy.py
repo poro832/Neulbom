@@ -141,6 +141,8 @@ APP_PATHS = {
     "/v1/elders/*/calls",
     "/v1/calls/*/turns",
     "/v1/me/share-consent",
+    "/v1/guardian/devices",
+    "/v1/guardian/devices/unregister",
 }
 
 
@@ -166,6 +168,8 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     assert client.post("/v1/guardian/logout").status_code == 401
     assert client.get("/v1/guardian/me").status_code == 401
     assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
+    assert client.post("/v1/guardian/devices", json={"token": "token-aaaaaaaaaaaaaaaaaaaa"}).status_code == 401
+    assert client.post("/v1/guardian/devices/unregister", json={"token": "token-aaaaaaaaaaaaaaaaaaaa"}).status_code == 401
     # 가입·로그인은 열쇠 대신 이메일과 비밀번호가 맞아야 한다 — 없는 계정은 401
     assert client.post("/v1/guardian/login", json={"email": "no@example.com", "password": "x"}).status_code == 401
     assert client.post("/v1/elders/1/approve").status_code == 401
