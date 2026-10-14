@@ -12,9 +12,17 @@ from collections.abc import Callable
 from typing import Protocol
 
 
+# 보호자 한 명이 가질 수 있는 폰(토큰) 수. 넘으면 가장 오래된 등록을 지운다.
+MAX_DEVICES_PER_GUARDIAN = 5
+
+
 class DeviceStore(Protocol):
-    def register(self, guardian_id: int, key_hash: str, token: str) -> None:
-        """폰을 등록한다. 같은 토큰이 이미 있으면(다른 보호자 것이어도) 주인과 열쇠를 바꾼다."""
+    def register(self, guardian_id: int, key_hash: str, token: str) -> int | None:
+        """폰을 등록한다. 같은 토큰이 이미 있으면(다른 보호자 것이어도) 주인과 열쇠를 바꾼다.
+
+        그 토큰의 이전 주인(보호자 번호)을 돌려준다. 처음 보는 토큰이면 None.
+        한 보호자의 폰은 MAX_DEVICES_PER_GUARDIAN개까지이고, 넘으면 가장 오래된 등록부터 지운다.
+        """
         ...
 
     def unregister(self, guardian_id: int, token: str) -> bool:
@@ -40,8 +48,9 @@ class InMemoryDeviceStore:
         self._lock = threading.Lock()
         self._rows: dict[str, tuple[int, str]] = {}  # token -> (guardian_id, key_hash)
 
-    def register(self, guardian_id: int, key_hash: str, token: str) -> None:
+    def register(self, guardian_id: int, key_hash: str, token: str) -> int | None:
         with self._lock:
+            previous = self._rows.pop(token, None)  # 다시 넣어 가장 새 등록으로 만든다
             self._rows[token] = (guardian_id, key_hash)
             # 이 보호자의 폐기된 열쇠에 묶인 옛 등록을 같이 치운다 — 따로 청소하는 곳이 없어도 쌓이지 않게.
             stale = [
@@ -50,6 +59,10 @@ class InMemoryDeviceStore:
             ]
             for t in stale:
                 del self._rows[t]
+            mine = [t for t, (g, _) in self._rows.items() if g == guardian_id]  # 오래된 순
+            for t in mine[: max(0, len(mine) - MAX_DEVICES_PER_GUARDIAN)]:
+                del self._rows[t]
+            return None if previous is None else previous[0]
 
     def unregister(self, guardian_id: int, token: str) -> bool:
         with self._lock:

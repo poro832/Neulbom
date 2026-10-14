@@ -124,6 +124,10 @@ class GuardianKeyStore(Protocol):
         """그 보호자의 열쇠 중 keep_hash만 남기고 모두 폐기한다(비밀번호 변경). 폐기한 수."""
         ...
 
+    def revoke_oldest_beyond(self, guardian_id: int, keep: int) -> int:
+        """그 보호자의 사용 중 열쇠가 keep개를 넘으면 가장 오래된 것부터 폐기한다. 폐기한 수."""
+        ...
+
 
 class InMemoryGuardianKeyStore:
     def __init__(self, wall_clock: Callable[[], float] = time.time) -> None:
@@ -216,6 +220,21 @@ class InMemoryGuardianKeyStore:
                     row["revoked_at"] = self._clock()
                     count += 1
         return count
+
+    def revoke_oldest_beyond(self, guardian_id: int, keep: int) -> int:
+        with self._lock:
+            active = sorted(
+                (
+                    row
+                    for row in self._rows.values()
+                    if row["guardian_id"] == guardian_id and row["revoked_at"] is None
+                ),
+                key=lambda row: row["key_id"],
+            )
+            extra = active[: max(0, len(active) - keep)]
+            for row in extra:
+                row["revoked_at"] = self._clock()
+        return len(extra)
 
 
 class GuardianAuth(Protocol):
