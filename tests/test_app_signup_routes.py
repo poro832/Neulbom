@@ -142,15 +142,51 @@ def test_every_code_failure_looks_exactly_the_same():
         assert response.json() == BAD_SIGNUP
 
 
-def test_a_number_already_registered_is_409_in_any_format():
+def test_a_number_already_registered_looks_exactly_like_a_wrong_code():
+    """번호가 등록돼 있는지를 코드 가진 사람이 알아내지 못하게 한다."""
     kit = make_app_kit()
+    code = kit.issue_invite()
 
-    same = sign_up(kit, phone="070 1111 2222")      # 어르신 12번 번호
-    again = sign_up(kit, phone="07011112222")
+    wrong = kit.client.post(SIGNUP, json=body(wrong_code(code)))
+    same = kit.client.post(SIGNUP, json=body(code, phone="070 1111 2222"))  # 어르신 12번 번호
+    again = kit.client.post(SIGNUP, json=body(code, phone="07011112222"))
 
     for response in (same, again):
-        assert response.status_code == 409
-        assert response.json() == {"detail": "이미 등록된 번호예요"}
+        assert response.status_code == wrong.status_code == 401
+        assert response.json() == wrong.json() == BAD_SIGNUP
+
+
+def test_probing_registered_numbers_runs_into_the_failure_limit(caplog):
+    kit = make_app_kit()
+    kit.data.signup_limiter = FailureLimiter(limit=3, clock=kit.clock)
+    code = kit.issue_invite()
+
+    with caplog.at_level(logging.INFO, logger="app.api.app_data"):
+        results = [
+            kit.client.post(SIGNUP, json=body(code, phone="070-1111-2222")).status_code
+            for _ in range(4)
+        ]
+
+    assert results == [401, 401, 401, 429]
+    assert "070-1111-2222" not in caplog.text
+    assert "이미 등록" not in caplog.text
+
+
+def test_the_pending_limit_also_counts_as_a_failure():
+    kit = make_app_kit()
+    kit.data.signup_limiter = FailureLimiter(limit=2, clock=kit.clock)
+    code = kit.issue_invite()
+    for n in range(5):
+        kit.data.elders.create_pending(
+            guardian_id=1, name=f"대기{n}", phone=f"010-1000-000{n}", max_pending=5
+        )
+
+    results = [
+        kit.client.post(SIGNUP, json=body(code, phone=f"010-4000-000{n}")).status_code
+        for n in range(3)
+    ]
+
+    assert results == [401, 401, 429]
 
 
 def test_a_guardian_holds_at_most_five_pending_elders():

@@ -135,3 +135,32 @@ def test_cleanup_never_touches_other_guardians_rows(world):
     devices.register(1, K1, T1)
     assert devices.unregister(2, T3) is True  # 보호자 2의 행은 보호자 1의 등록으로 지워지지 않는다
 
+
+
+def test_register_returns_the_previous_owner_or_none(world):
+    devices, add_key, _ = world
+    add_key(K1)
+    add_key(K2)
+    assert devices.register(1, K1, T1) is None  # 처음 보는 토큰
+    assert devices.register(1, K1, T1) == 1  # 같은 보호자가 다시 등록
+    assert devices.register(2, K2, T1) == 1  # 다른 보호자에게서 넘어온 토큰
+
+
+def test_registering_beyond_five_phones_removes_the_oldest(world):
+    devices, add_key, _ = world
+    add_key(K1)
+    tokens = [f"token-{i:02d}" + "x" * 14 for i in range(7)]
+    for t in tokens:
+        devices.register(1, K1, t)
+    assert sorted(devices.tokens_for(1)) == sorted(tokens[2:])  # 가장 오래된 둘이 밀려났다
+
+
+def test_the_phone_limit_never_touches_other_guardians(world):
+    devices, add_key, _ = world
+    add_key(K1)
+    add_key(K2)
+    devices.register(2, K2, T3)
+    for i in range(7):
+        devices.register(1, K1, f"token-{i:02d}" + "x" * 14)
+    assert devices.tokens_for(2) == [T3]
+    assert len(devices.tokens_for(1)) == 5

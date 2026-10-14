@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from app.api.devices import MAX_DEVICES_PER_GUARDIAN
+
 
 class PostgresDeviceStore:
     def __init__(self, *, pool) -> None:
         self._pool = pool
 
-    def register(self, guardian_id: int, key_hash: str, token: str) -> None:
+    def register(self, guardian_id: int, key_hash: str, token: str) -> int | None:
         with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT guardian_id FROM guardian_devices WHERE token = %s FOR UPDATE", (token,)
+            ).fetchone()
+            previous = None if row is None else row[0]
             conn.execute(
                 "INSERT INTO guardian_devices (token, guardian_id, key_hash) VALUES (%s, %s, %s) "
                 "ON CONFLICT (token) DO UPDATE SET guardian_id = EXCLUDED.guardian_id, "
@@ -22,6 +28,14 @@ class PostgresDeviceStore:
                 "WHERE k.key_hash = d.key_hash AND k.revoked_at IS NULL)",
                 (guardian_id, token),
             )
+            # 이 보호자의 폰이 상한을 넘으면 가장 오래된 등록부터 지운다.
+            conn.execute(
+                "DELETE FROM guardian_devices WHERE guardian_id = %s AND token NOT IN ("
+                "SELECT token FROM guardian_devices WHERE guardian_id = %s "
+                "ORDER BY updated_at DESC, created_at DESC, token DESC LIMIT %s)",
+                (guardian_id, guardian_id, MAX_DEVICES_PER_GUARDIAN),
+            )
+            return previous
 
     def unregister(self, guardian_id: int, token: str) -> bool:
         with self._pool.connection() as conn:

@@ -153,8 +153,84 @@ def test_an_oversized_body_is_dropped_without_logging_it(caplog):
     with caplog.at_level(logging.INFO, logger="app.api.calls"):
         response = client.post("/v1/call-status", data={"CallId": huge})
 
-    assert response.status_code == 204
+    assert response.status_code == 413
     assert huge[:50] not in caplog.text
+
+
+def _raw_post(app, headers, chunks):
+    """ASGI를 직접 불러, 서버가 본문 조각을 몇 개나 읽는지 센다."""
+    import asyncio
+
+    state = {"reads": 0, "status": None}
+    pending = list(chunks)
+
+    async def receive():
+        state["reads"] += 1
+        if pending:
+            return {"type": "http.request", "body": pending.pop(0), "more_body": bool(pending)}
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            state["status"] = message["status"]
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "path": "/v1/call-status",
+        "raw_path": b"/v1/call-status",
+        "query_string": b"",
+        "headers": [(k.encode(), v.encode()) for k, v in headers],
+        "client": ("127.0.0.1", 1),
+        "server": ("test", 80),
+        "scheme": "http",
+    }
+    asyncio.run(app(scope, receive, send))
+    return state
+
+
+def test_a_missing_or_lying_content_length_cannot_make_the_server_read_past_the_limit():
+    """헤더가 없거나 작게 거짓이어도 상한을 넘으면 읽기를 멈추고 413이다."""
+    app = make_client()[0].app
+    chunks = [b"a" * 1024 for _ in range(100)]
+
+    no_header = _raw_post(app, [], chunks)
+    lying = _raw_post(app, [("content-length", "10")], chunks)
+
+    for state in (no_header, lying):
+        assert state["status"] == 413
+        assert state["reads"] <= MAX_STATUS_BODY_BYTES // 1024 + 2
+
+
+def test_an_oversized_content_length_header_is_refused_before_reading_the_body():
+    app = make_client()[0].app
+
+    state = _raw_post(app, [("content-length", str(MAX_STATUS_BODY_BYTES + 1))], [b"a=b"])
+
+    assert state["status"] == 413
+    assert state["reads"] == 0
+
+
+def test_the_interactive_api_docs_are_not_served():
+    client = make_client()[0]
+
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404
+
+
+def test_a_body_at_the_limit_is_still_accepted():
+    client, _, _ = make_client()
+    body = b"CallId=" + b"a" * (MAX_STATUS_BODY_BYTES - len(b"CallId="))
+
+    response = client.post(
+        "/v1/call-status",
+        content=body,
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 204
 
 
 def _placed(client, store):

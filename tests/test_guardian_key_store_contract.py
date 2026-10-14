@@ -200,3 +200,37 @@ def test_is_active_does_not_touch_last_used(store):
     store.is_active(new.key_hash)
     (info,) = [i for i in store.list_keys() if i.key_prefix == new.key_prefix]
     assert info.last_used_at is None
+
+
+# ------------------------------------------------ 열쇠 상한 (가장 오래된 것부터 폐기)
+
+
+def test_revoke_oldest_beyond_keeps_the_newest_and_revokes_the_oldest(store):
+    hashes = [add(store, guardian_id=1, label=f"폰{i}")[1].key_hash for i in range(5)]
+
+    assert store.revoke_oldest_beyond(1, 3) == 2
+
+    assert [store.find_guardian(h) for h in hashes] == [None, None, 1, 1, 1]
+
+
+def test_revoke_oldest_beyond_does_nothing_at_or_under_the_limit(store):
+    hashes = [add(store, guardian_id=1)[1].key_hash for _ in range(3)]
+
+    assert store.revoke_oldest_beyond(1, 3) == 0
+    assert store.revoke_oldest_beyond(1, 10) == 0
+
+    assert all(store.find_guardian(h) == 1 for h in hashes)
+
+
+def test_revoke_oldest_beyond_counts_only_active_keys_of_that_guardian(store):
+    _, gone = add(store, guardian_id=1)
+    store.revoke_hash(gone.key_hash)
+    mine = [add(store, guardian_id=1)[1].key_hash for _ in range(2)]
+    others = [add(store, guardian_id=2)[1].key_hash for _ in range(4)]
+
+    assert store.revoke_oldest_beyond(1, 2) == 0  # 폐기된 열쇠는 세지 않는다
+
+    assert all(store.find_guardian(h) == 1 for h in mine)
+    assert all(store.find_guardian(h) == 2 for h in others)
+    assert store.revoke_oldest_beyond(1, 1) == 1  # 다른 보호자의 열쇠는 건드리지 않는다
+    assert all(store.find_guardian(h) == 2 for h in others)
