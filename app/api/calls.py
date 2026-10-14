@@ -89,7 +89,9 @@ def build_app(
     # 조립 지점(app/main.py)은 스트림 소켓과 같은 lifecycle을 넘긴다. 통화의
     # 끝을 양쪽이 각자 처리하면 한쪽만 일어난다(lifecycle 모듈 설명 참고).
     lifecycle = lifecycle or CallLifecycle(store, registry)
-    app = FastAPI(title="늘봄 통화 트리거")
+    app = FastAPI(
+        title="늘봄 통화 트리거", docs_url=None, redoc_url=None, openapi_url=None
+    )
     answer_url = answer_url_for(public_base_url)
     status_callback_url = status_callback_url_for(public_base_url)
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
@@ -231,10 +233,20 @@ def build_app(
         JSON, 빈 본문) 오류로 돌려보내지 않는다 — 사업자가 실패로 보고 재전송
         하면 같은 통보가 반복된다.
         """
-        body = await request.body()
-        if len(body) > MAX_STATUS_BODY_BYTES:
-            logger.warning("상태 통보가 너무 커서 버린다 bytes=%d", len(body))
-            return Response(status_code=204)
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_STATUS_BODY_BYTES:
+            # 본문을 읽기 전에 돌려보낸다.
+            logger.warning("상태 통보가 너무 커서 버린다 content-length=%s", declared[:12])
+            return Response(status_code=413)
+
+        # 헤더가 없거나 거짓일 수 있으니 스트림을 상한 + 1바이트까지만 읽는다.
+        received = bytearray()
+        async for chunk in request.stream():
+            received.extend(chunk)
+            if len(received) > MAX_STATUS_BODY_BYTES:
+                logger.warning("상태 통보가 너무 커서 버린다 (읽다가 상한을 넘음)")
+                return Response(status_code=413)
+        body = bytes(received)
 
         content_type = request.headers.get("content-type", "")
         data: dict = {}

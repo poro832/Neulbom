@@ -89,6 +89,14 @@ def test_nothing_else_is_proxied():
     assert 'respond "not found" 404' in text
 
 
+def test_caddy_caps_the_request_body_before_proxying():
+    """바깥에 열린 주소가 큰 본문으로 서버 메모리를 먹지 못하게 Caddy가 먼저 자른다."""
+    text = (DEPLOY / "Caddyfile").read_text(encoding="utf-8")
+    block = text.split("handle @clawops {")[1].split("reverse_proxy")[0]
+
+    assert re.search(r"request_body\s*\{\s*max_size\s+64KB\s*\}", block)
+
+
 def test_the_service_runs_the_serve_entrypoint():
     """uvicorn을 직접 부르면 .env가 늦게 읽히고 우리 INFO 로그가 사라진다."""
     unit = (DEPLOY / "systemd" / "nulbom.service").read_text(encoding="utf-8")
