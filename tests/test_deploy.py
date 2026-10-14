@@ -151,6 +151,10 @@ APP_PATHS = {
     "/v1/me/share-consent",
     "/v1/guardian/devices",
     "/v1/guardian/devices/unregister",
+    "/v1/elders/signup",
+    "/v1/me/link-code",
+    "/v1/guardian/link/preview",
+    "/v1/guardian/link",
 }
 
 
@@ -173,6 +177,9 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     # 열쇠가 필요 없는 /v1/pair는 코드와 번호가 맞아야 한다
     assert client.post("/v1/pair", json={"code": "123456", "phone": "070-1111-2222"}).status_code == 401
     assert client.post("/v1/guardian/invite").status_code == 401
+    assert client.post("/v1/me/link-code").status_code == 401
+    assert client.post("/v1/guardian/link/preview", json={"code": "12345678"}).status_code == 401
+    assert client.post("/v1/guardian/link", json={"code": "12345678"}).status_code == 401
     assert client.post("/v1/guardian/logout").status_code == 401
     assert client.get("/v1/guardian/me").status_code == 401
     assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
