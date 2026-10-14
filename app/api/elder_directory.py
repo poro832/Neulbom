@@ -99,6 +99,10 @@ class ElderDirectory(Protocol):
         """
         ...
 
+    def discard_unlinked(self, elder_id: int) -> bool:
+        """가입 직후 실패를 되돌리는 용도. 보호자도 전화 동의(consent_at)도 없는 어르신 행만 지우고 True."""
+        ...
+
     def link(self, elder_id: int, guardian_id: int) -> bool:
         """보호자가 없고 가입 동의(agreed_at)가 있는 어르신일 때만 guardian_id와 consent_at을 채우고 True.
 
@@ -217,6 +221,16 @@ class InMemoryElderDirectory:
             self._phone_text[elder_id] = phone
             self._phones[elder_id] = wanted
             return elder_id
+
+    def discard_unlinked(self, elder_id: int) -> bool:
+        with self._lock:
+            access = self._entries.get(elder_id)
+            if access is None or access.guardian_id is not None or access.consenting:
+                return False
+            del self._entries[elder_id]
+            self._phone_text.pop(elder_id, None)
+            self._phones.pop(elder_id, None)
+            return True
 
     def link(self, elder_id: int, guardian_id: int) -> bool:
         with self._lock:

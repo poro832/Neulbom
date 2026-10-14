@@ -577,9 +577,19 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             logger.warning("어르신 가입 실패")
             raise HTTPException(status_code=409, detail=PHONE_USED)
         # 가입 동의 문구 한 줄이 전화와 통화 내용 공유를 함께 담는다. 전화 동의(consent_at)는 연결 때 보호자 확인이 채운다.
-        data.content.agree_share(elder_id)
         new = generate_elder_key()
-        data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
+        try:
+            data.content.agree_share(elder_id)
+            data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
+        except Exception:
+            # 행만 남고 열쇠가 없으면 번호가 막히고 연결 코드도 못 받는다 — 방금 만든 행을 거둬 다시 가입하게 한다.
+            try:
+                data.elders.discard_unlinked(elder_id)
+            except Exception:
+                logger.exception("가입 실패 뒤 정리도 실패했다 elder_id=%s", elder_id)
+            else:
+                logger.warning("어르신 가입 도중 저장소 오류로 가입을 되돌렸다 elder_id=%s", elder_id)
+            raise
         logger.info("연결 전 어르신이 가입했다 elder_id=%s key=%s", elder_id, new.key_prefix)
         return {"elder_key": new.key, "status": STATUS_UNLINKED}
 

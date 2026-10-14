@@ -264,3 +264,23 @@ def test_mask_phone_hides_the_middle_digits():
     assert mask_phone("010-9999-1111") == "010-****-1111"
     assert mask_phone("01099991111") == "010-****-1111"
     assert mask_phone("12345") == "****"
+
+
+def test_discarding_an_unlinked_elder_deletes_it_and_frees_the_number(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert directory.discard_unlinked(elder_id) is True
+
+    assert directory.get(elder_id) is None
+    assert directory.phone_of(elder_id) is None
+    assert directory.create_unlinked(name="홍길동", phone="010-9999-1111") > 0
+
+
+def test_discarding_refuses_a_linked_elder_and_an_unknown_id(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+    assert directory.link(elder_id, 1) is True
+
+    assert directory.discard_unlinked(elder_id) is False
+    assert directory.get(elder_id) is not None
+    assert directory.discard_unlinked(4242) is False
+    assert directory.discard_unlinked(1) is False  # 시드 어르신은 보호자가 있다

@@ -261,3 +261,46 @@ def test_the_whole_flow_never_logs_codes_numbers_or_names(caplog):
 
     for secret in (code, "010-9999-1111", "01099991111", "홍길동"):
         assert secret not in caplog.text
+
+
+# ------------------------------------------------ 가입 도중 저장소 오류
+
+
+def _break(monkeypatch, target, name):
+    def boom(*args, **kwargs):
+        raise RuntimeError("저장소 오류")
+
+    monkeypatch.setattr(target, name, boom)
+
+
+def test_a_failed_key_save_rolls_the_signup_back_so_a_retry_works(monkeypatch):
+    kit = make_app_kit()
+    with monkeypatch.context() as broken:
+        _break(broken, kit.data.elder_keys, "replace")
+        assert sign_up(kit).status_code == 503
+
+    retry = sign_up(kit)
+
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "unlinked"
+
+
+def test_a_failed_share_agreement_rolls_the_signup_back_so_a_retry_works(monkeypatch):
+    kit = make_app_kit()
+    with monkeypatch.context() as broken:
+        _break(broken, kit.data.content, "agree_share")
+        assert sign_up(kit).status_code == 503
+
+    assert sign_up(kit).status_code == 200
+
+
+def test_a_rolled_back_signup_leaves_no_row_and_logs_only_the_id(monkeypatch, caplog):
+    kit = make_app_kit()
+    before = set(kit.data.elders._entries)
+    with monkeypatch.context() as broken, caplog.at_level(logging.DEBUG):
+        _break(broken, kit.data.elder_keys, "replace")
+        assert sign_up(kit).status_code == 503
+
+    assert set(kit.data.elders._entries) == before
+    for secret in (PHONE, "01099991111", "홍길동"):
+        assert secret not in caplog.text
