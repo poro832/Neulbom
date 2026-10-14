@@ -52,7 +52,6 @@ NO_ELDER = "등록되지 않은 어르신입니다"
 BAD_PAIR = "연결 코드를 확인해 주세요"
 UNAVAILABLE = "인증을 확인할 수 없습니다"
 BAD_SIGNUP = "가입 코드를 확인해 주세요"
-PHONE_TAKEN = "이미 등록된 번호예요"
 NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어요"
 TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
@@ -67,6 +66,9 @@ NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
+
+# 한 보호자의 사용 중 앱 열쇠 상한. 로그인을 거듭해도 열쇠가 무한히 쌓이지 않게, 넘으면 가장 오래된 것부터 폐기한다.
+MAX_ACTIVE_KEYS_PER_GUARDIAN = 10
 
 
 @dataclass
@@ -120,7 +122,8 @@ class LoginRequest(BaseModel):
 
 
 class DeviceRequest(BaseModel):
-    token: str = Field(min_length=20, max_length=4096)
+    # FCM 토큰은 보통 160~200자다. 등록 상한을 두었으니 길이도 넉넉한 만큼만 받는다.
+    token: str = Field(min_length=20, max_length=512)
 
 
 class UnregisterRequest(BaseModel):
@@ -384,6 +387,9 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         key_store().add(
             guardian_id=guardian_id, label=APP_KEY_LABEL, key_prefix=new.key_prefix, key_hash=new.key_hash
         )
+        revoked = key_store().revoke_oldest_beyond(guardian_id, MAX_ACTIVE_KEYS_PER_GUARDIAN)
+        if revoked:
+            logger.info("열쇠가 상한을 넘어 오래된 것을 폐기했다 guardian_id=%s 수=%s", guardian_id, revoked)
         logger.info("보호자 앱 열쇠를 발급했다 guardian_id=%s key=%s", guardian_id, new.key_prefix)
         return new.key
 
@@ -450,9 +456,10 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/guardian/devices")
     @guarded
     def register_device(body: DeviceRequest, authorization: str | None = Header(default=None)) -> Response:
-        guardian_id = guardian_id_of(authorization)
-        data.devices.register(guardian_id, hash_key(parse_bearer(authorization)), body.token)
-        logger.info("보호자 폰을 등록했다 guardian_id=%s token=%s", guardian_id, body.token[:8])
+        guardian_id = active_guardian_id_of(authorization)
+        previous = data.devices.register(guardian_id, hash_key(parse_bearer(authorization)), body.token)
+        moved = f" 이전 보호자={previous}" if previous is not None and previous != guardian_id else ""
+        logger.info("보호자 폰을 등록했다 guardian_id=%s token=%s%s", guardian_id, body.token[:8], moved)
         return Response(status_code=204)
 
     @app.post("/v1/guardian/devices/unregister")
@@ -544,10 +551,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 phone=body.phone.strip(),
                 max_pending=MAX_PENDING_PER_GUARDIAN,
             )
-        except PhoneTaken:
-            raise HTTPException(status_code=409, detail=PHONE_TAKEN)
-        except PendingLimit:
-            # 사유를 알려 주지 않는다 — 없는 코드와 같은 응답이다.
+        except (PhoneTaken, PendingLimit):
+            # 등록된 번호인지, 대기 한도인지 알려 주지 않는다 — 틀린 코드와 같은 응답이고 같은 한도로 센다.
+            # 구분해 주면 코드를 가진 사람이 어르신 번호가 등록돼 있는지 무제한으로 알아낼 수 있다.
+            data.signup_limiter.record_failure()
+            logger.warning("가입 실패")
             raise HTTPException(status_code=401, detail=BAD_SIGNUP)
         # 가입 동의 문구 한 줄이 전화와 통화 내용 공유를 함께 담는다.
         data.content.agree_share(elder_id)

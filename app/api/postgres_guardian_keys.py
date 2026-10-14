@@ -89,6 +89,17 @@ class PostgresGuardianKeyStore:
             )
             return cur.rowcount
 
+    def revoke_oldest_beyond(self, guardian_id: int, keep: int) -> int:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE guardian_keys SET revoked_at = to_timestamp(%s) "
+                "WHERE guardian_id = %s AND revoked_at IS NULL AND key_id NOT IN ("
+                "SELECT key_id FROM guardian_keys WHERE guardian_id = %s AND revoked_at IS NULL "
+                "ORDER BY key_id DESC LIMIT %s)",
+                (self._clock(), guardian_id, guardian_id, keep),
+            )
+            return cur.rowcount
+
     def reset_for_tests(self) -> None:
         """규약 테스트용. 원격 DB에서는 거부한다(app/api/db.py)."""
         assert_local()

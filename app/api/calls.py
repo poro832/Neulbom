@@ -20,6 +20,7 @@ from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url
 from app.api.elder_directory import ElderDirectory
 from app.api.guardian_auth import GuardianAuth, attempt_label
 from app.api.lifecycle import CallLifecycle
+from app.api.log_safe import sanitize_for_log
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
 from app.scheduler import KST
@@ -89,7 +90,9 @@ def build_app(
     # 조립 지점(app/main.py)은 스트림 소켓과 같은 lifecycle을 넘긴다. 통화의
     # 끝을 양쪽이 각자 처리하면 한쪽만 일어난다(lifecycle 모듈 설명 참고).
     lifecycle = lifecycle or CallLifecycle(store, registry)
-    app = FastAPI(title="늘봄 통화 트리거")
+    app = FastAPI(
+        title="늘봄 통화 트리거", docs_url=None, redoc_url=None, openapi_url=None
+    )
     answer_url = answer_url_for(public_base_url)
     status_callback_url = status_callback_url_for(public_base_url)
     action_url = f"{public_base_url.rstrip('/')}/v1/stream-ended"
@@ -187,7 +190,7 @@ def build_app(
         token = lifecycle.token_for(CallId)
         if token is None:
             # 우리가 만들지 않은 통화다. 토큰을 내주면 안 된다.
-            logger.warning("모르는 CallId로 VoiceML 요청 CallId=%s", CallId)
+            logger.warning("모르는 CallId로 VoiceML 요청 CallId=%s", sanitize_for_log(CallId))
             raise HTTPException(status_code=404, detail="unknown call")
         return Response(
             content=connect_stream(
@@ -210,7 +213,9 @@ def build_app(
         '스트림이 시작됐다' 같은 비종료 통보 하나가 통화를 끝내 버렸다 —
         어느 값이 끝인지는 lifecycle이 판정한다.
         """
-        logger.info("스트림 종료 CallId=%s event=%s", CallId, StreamEvent)
+        logger.info(
+            "스트림 종료 CallId=%s event=%s", sanitize_for_log(CallId), sanitize_for_log(StreamEvent)
+        )
         lifecycle.carrier_finished(CallId, StreamEvent)
         return Response(
             content=say_and_hangup("오늘도 좋은 하루 보내세요. 안녕히 계세요."),
@@ -231,10 +236,20 @@ def build_app(
         JSON, 빈 본문) 오류로 돌려보내지 않는다 — 사업자가 실패로 보고 재전송
         하면 같은 통보가 반복된다.
         """
-        body = await request.body()
-        if len(body) > MAX_STATUS_BODY_BYTES:
-            logger.warning("상태 통보가 너무 커서 버린다 bytes=%d", len(body))
-            return Response(status_code=204)
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_STATUS_BODY_BYTES:
+            # 본문을 읽기 전에 돌려보낸다.
+            logger.warning("상태 통보가 너무 커서 버린다 content-length=%s", declared[:12])
+            return Response(status_code=413)
+
+        # 헤더가 없거나 거짓일 수 있으니 스트림을 상한 + 1바이트까지만 읽는다.
+        received = bytearray()
+        async for chunk in request.stream():
+            received.extend(chunk)
+            if len(received) > MAX_STATUS_BODY_BYTES:
+                logger.warning("상태 통보가 너무 커서 버린다 (읽다가 상한을 넘음)")
+                return Response(status_code=413)
+        body = bytes(received)
 
         content_type = request.headers.get("content-type", "")
         data: dict = {}
@@ -264,7 +279,7 @@ def build_app(
             try:
                 lifecycle.carrier_finished(str(data["CallId"]), "no-answer")
             except Exception:
-                logger.exception("안 받음 처리 실패 CallId=%s", data.get("CallId"))
+                logger.exception("안 받음 처리 실패 CallId=%s", sanitize_for_log(data.get("CallId")))
         return Response(status_code=204)
 
     return app
