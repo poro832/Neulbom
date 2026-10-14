@@ -141,6 +141,15 @@ class PostgresElderDirectory:
             raise PhoneTaken(wanted) from exc
         return row[0]
 
+    def discard_unlinked(self, elder_id: int) -> bool:
+        with self._pool.connection() as conn:
+            deleted = conn.execute(
+                "DELETE FROM elders "
+                "WHERE elder_id = %s AND guardian_id IS NULL AND consent_at IS NULL",
+                (elder_id,),
+            ).rowcount
+        return deleted == 1
+
     def link(self, elder_id: int, guardian_id: int) -> bool:
         with self._pool.connection() as conn:
             updated = conn.execute(

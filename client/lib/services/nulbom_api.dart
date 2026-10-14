@@ -126,11 +126,25 @@ class NulbomApi {
     throw ApiException(response.statusCode, message);
   }
 
+  /// 서버(app_data.py BAD_LINK)가 틀리거나 만료된 연결 코드에 401과 함께 돌려주는 문구.
+  static const String badLinkCodeMessage = '연결 코드를 확인해 주세요';
+
+  static String? _detailOf(http.Response response) {
+    try {
+      final body = jsonDecode(utf8.decode(response.bodyBytes));
+      if (body is Map<String, dynamic> && body['detail'] is String) {
+        return body['detail'] as String;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static Future<Map<String, dynamic>> _send(
     String method,
     String path, {
     String? key,
     Object? body,
+    bool linkCodeCall = false,
   }) async {
     final headers = <String, String>{
       if (key != null) 'Authorization': 'Bearer $key',
@@ -150,7 +164,13 @@ class NulbomApi {
       default:
         throw ArgumentError('지원하지 않는 메서드: $method');
     }
-    if (response.statusCode == 401 && key != null && key.isNotEmpty && key == guardianKey) {
+    // 연결 코드 호출의 401 중 "코드 확인" 문구는 열쇠가 아니라 코드가 틀린 것이다 — 로그아웃시키지 않는다.
+    final badLinkCode = linkCodeCall && _detailOf(response) == badLinkCodeMessage;
+    if (response.statusCode == 401 &&
+        !badLinkCode &&
+        key != null &&
+        key.isNotEmpty &&
+        key == guardianKey) {
       unawaited(clearGuardianKey()); // 폰 저장소 정리는 기다리지 않는다 — 오류 문장이 먼저 나가야 한다
       onGuardianKeyRejected?.call();
     }
@@ -340,14 +360,14 @@ class NulbomApi {
   /// 보호자: 코드의 어르신 이름과 가려진 번호를 본다. 아무것도 바꾸지 않는다.
   static Future<ElderPreview> previewLink(String code, {String? key}) async {
     final json = await _send('POST', '/v1/guardian/link/preview',
-        key: _guardianKeyOrThrow(key), body: {'code': code});
+        key: _guardianKeyOrThrow(key), body: {'code': code}, linkCodeCall: true);
     return ElderPreview.fromJson(json);
   }
 
   /// 보호자: 확인한 어르신을 연결한다. 이 호출이 승인이다 — 이때부터 안부 전화가 시작된다.
   static Future<LinkResult> linkElder(String code, {String? key}) async {
     final json = await _send('POST', '/v1/guardian/link',
-        key: _guardianKeyOrThrow(key), body: {'code': code});
+        key: _guardianKeyOrThrow(key), body: {'code': code}, linkCodeCall: true);
     return LinkResult.fromJson(json);
   }
 

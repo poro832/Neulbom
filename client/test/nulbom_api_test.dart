@@ -236,4 +236,55 @@ void main() {
     expect(calls, ['POST /v1/me/link-code', 'POST /v1/guardian/link/preview', 'POST /v1/guardian/link']);
     expect(auth, ['Bearer nle_saved', 'Bearer nlb_test', 'Bearer nlb_test']);
   });
+
+  group('연결 코드 401은 보호자 열쇠를 지우지 않는다', () {
+    Future<void> arrange(Map<String, String> body) async {
+      await NulbomApi.saveGuardianKey('nlb_test');
+      NulbomApi.client = MockClient((request) async => json(body, 401));
+    }
+
+    test('previewLink: 틀린 코드', () async {
+      var rejected = 0;
+      NulbomApi.onGuardianKeyRejected = () => rejected++;
+      addTearDown(() => NulbomApi.onGuardianKeyRejected = null);
+      await arrange({'detail': '연결 코드를 확인해 주세요'});
+
+      await expectLater(
+        NulbomApi.previewLink('00000000'),
+        throwsA(isA<ApiException>().having((e) => e.message, 'message', '연결 코드를 확인해 주세요')),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(NulbomApi.guardianKey, 'nlb_test');
+      expect(await NulbomApi.loadGuardianKey(), 'nlb_test');
+      expect(rejected, 0);
+    });
+
+    test('linkElder: 틀린 코드', () async {
+      var rejected = 0;
+      NulbomApi.onGuardianKeyRejected = () => rejected++;
+      addTearDown(() => NulbomApi.onGuardianKeyRejected = null);
+      await arrange({'detail': '연결 코드를 확인해 주세요'});
+
+      await expectLater(
+        NulbomApi.linkElder('00000000'),
+        throwsA(isA<ApiException>().having((e) => e.message, 'message', '연결 코드를 확인해 주세요')),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(await NulbomApi.loadGuardianKey(), 'nlb_test');
+      expect(rejected, 0);
+    });
+
+    test('previewLink: 다른 401은 열쇠 거절이다', () async {
+      var rejected = 0;
+      NulbomApi.onGuardianKeyRejected = () => rejected++;
+      addTearDown(() => NulbomApi.onGuardianKeyRejected = null);
+      await arrange({'detail': '로그인이 필요해요'});
+
+      await expectLater(NulbomApi.previewLink('00000000'), throwsA(isA<ApiException>()));
+      await Future<void>.delayed(Duration.zero);
+      expect(NulbomApi.guardianKey, '');
+      expect(await NulbomApi.loadGuardianKey(), '');
+      expect(rejected, 1);
+    });
+  });
 }
