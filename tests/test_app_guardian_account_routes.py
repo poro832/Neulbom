@@ -301,3 +301,33 @@ def test_a_pending_guardian_can_still_log_in_and_read_their_own_list():
     r = kit.client.post(LOGIN, json={"email": "kim@example.com", "password": GOOD["password"]})
     assert r.status_code == 200 and r.json()["activated"] is False
     assert kit.client.get("/v1/guardian/elders", headers=bearer(r.json()["key"])).status_code == 200
+
+
+# ------------------------------------------------ 열쇠 상한
+
+
+def _active_keys(kit, guardian_id):
+    return [k for k in kit.data.guardian_auth.store.list_keys() if k.guardian_id == guardian_id and k.revoked_at is None]
+
+
+def test_logging_in_many_times_keeps_only_the_ten_newest_keys():
+    kit = make_app_kit()
+    sign_up(kit)
+    keys = [kit.client.post(LOGIN, json={"email": GOOD["email"], "password": GOOD["password"]}).json()["key"] for _ in range(12)]
+
+    guardian_id = kit.data.accounts.find_by_email("kim@example.com").guardian_id
+    assert len(_active_keys(kit, guardian_id)) == 10
+    me = [kit.client.get("/v1/guardian/me", headers=bearer(k)).status_code for k in keys]
+    assert me[-10:] == [200] * 10  # 가장 새 열쇠 열 개는 쓸 수 있다
+    assert me[:2] == [401, 401]  # 가입 때 받은 열쇠를 포함해 가장 오래된 것은 폐기됐다
+
+
+def test_signup_also_enforces_the_key_cap_without_touching_other_guardians():
+    kit = make_app_kit()
+    first = sign_up(kit).json()["key"]
+    other = sign_up(kit, email="lee@example.com").json()["key"]
+    for _ in range(12):
+        kit.client.post(LOGIN, json={"email": GOOD["email"], "password": GOOD["password"]})
+
+    assert kit.client.get("/v1/guardian/me", headers=bearer(first)).status_code == 401
+    assert kit.client.get("/v1/guardian/me", headers=bearer(other)).status_code == 200

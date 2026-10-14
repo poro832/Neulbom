@@ -68,6 +68,9 @@ NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
 
+# 한 보호자의 사용 중 앱 열쇠 상한. 로그인을 거듭해도 열쇠가 무한히 쌓이지 않게, 넘으면 가장 오래된 것부터 폐기한다.
+MAX_ACTIVE_KEYS_PER_GUARDIAN = 10
+
 
 @dataclass
 class AppData:
@@ -120,7 +123,8 @@ class LoginRequest(BaseModel):
 
 
 class DeviceRequest(BaseModel):
-    token: str = Field(min_length=20, max_length=4096)
+    # FCM 토큰은 보통 160~200자다. 등록 상한을 두었으니 길이도 넉넉한 만큼만 받는다.
+    token: str = Field(min_length=20, max_length=512)
 
 
 class UnregisterRequest(BaseModel):
@@ -384,6 +388,9 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         key_store().add(
             guardian_id=guardian_id, label=APP_KEY_LABEL, key_prefix=new.key_prefix, key_hash=new.key_hash
         )
+        revoked = key_store().revoke_oldest_beyond(guardian_id, MAX_ACTIVE_KEYS_PER_GUARDIAN)
+        if revoked:
+            logger.info("열쇠가 상한을 넘어 오래된 것을 폐기했다 guardian_id=%s 수=%s", guardian_id, revoked)
         logger.info("보호자 앱 열쇠를 발급했다 guardian_id=%s key=%s", guardian_id, new.key_prefix)
         return new.key
 
@@ -450,9 +457,10 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/guardian/devices")
     @guarded
     def register_device(body: DeviceRequest, authorization: str | None = Header(default=None)) -> Response:
-        guardian_id = guardian_id_of(authorization)
-        data.devices.register(guardian_id, hash_key(parse_bearer(authorization)), body.token)
-        logger.info("보호자 폰을 등록했다 guardian_id=%s token=%s", guardian_id, body.token[:8])
+        guardian_id = active_guardian_id_of(authorization)
+        previous = data.devices.register(guardian_id, hash_key(parse_bearer(authorization)), body.token)
+        moved = f" 이전 보호자={previous}" if previous is not None and previous != guardian_id else ""
+        logger.info("보호자 폰을 등록했다 guardian_id=%s token=%s%s", guardian_id, body.token[:8], moved)
         return Response(status_code=204)
 
     @app.post("/v1/guardian/devices/unregister")
