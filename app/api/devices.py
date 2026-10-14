@@ -43,6 +43,13 @@ class InMemoryDeviceStore:
     def register(self, guardian_id: int, key_hash: str, token: str) -> None:
         with self._lock:
             self._rows[token] = (guardian_id, key_hash)
+            # 이 보호자의 폐기된 열쇠에 묶인 옛 등록을 같이 치운다 — 따로 청소하는 곳이 없어도 쌓이지 않게.
+            stale = [
+                t for t, (g, h) in self._rows.items()
+                if g == guardian_id and t != token and not self._is_key_active(h)
+            ]
+            for t in stale:
+                del self._rows[t]
 
     def unregister(self, guardian_id: int, token: str) -> bool:
         with self._lock:

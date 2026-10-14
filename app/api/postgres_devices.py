@@ -15,6 +15,13 @@ class PostgresDeviceStore:
                 "key_hash = EXCLUDED.key_hash, updated_at = now()",
                 (token, guardian_id, key_hash),
             )
+            # 이 보호자의 폐기된 열쇠에 묶인 옛 등록을 같이 치운다 — 따로 청소하는 곳이 없어도 쌓이지 않게.
+            conn.execute(
+                "DELETE FROM guardian_devices d WHERE d.guardian_id = %s AND d.token <> %s "
+                "AND NOT EXISTS (SELECT 1 FROM guardian_keys k "
+                "WHERE k.key_hash = d.key_hash AND k.revoked_at IS NULL)",
+                (guardian_id, token),
+            )
 
     def unregister(self, guardian_id: int, token: str) -> bool:
         with self._pool.connection() as conn:
