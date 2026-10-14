@@ -22,6 +22,7 @@ import secrets
 import threading
 from collections.abc import Callable
 
+from app.api.log_safe import sanitize_for_log
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
 
@@ -120,12 +121,16 @@ class CallLifecycle:
         if event in NON_TERMINAL_STREAM_EVENTS:
             # 끝이 아니라 진행 상황 통보다. 이걸 끝으로 세면 방금 시작한
             # 통화가 끝난 것으로 기록된다(위 상수 설명).
-            logger.info("종료가 아닌 스트림 이벤트 CallId=%s event=%s", sid, event)
+            logger.info(
+                "종료가 아닌 스트림 이벤트 CallId=%s event=%s",
+                sanitize_for_log(sid),
+                sanitize_for_log(event),
+            )
             return
 
         call = self._store.find_by_sid(sid)
         if call is None:
-            logger.warning("모르는 CallId의 스트림 종료 CallId=%s", sid)
+            logger.warning("모르는 CallId의 스트림 종료 CallId=%s", sanitize_for_log(sid))
             return
 
         if call.status == "answered":
