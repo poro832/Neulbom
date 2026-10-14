@@ -20,6 +20,7 @@ from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url
 from app.api.elder_directory import ElderDirectory
 from app.api.guardian_auth import GuardianAuth, attempt_label
 from app.api.lifecycle import CallLifecycle
+from app.api.log_safe import sanitize_for_log
 from app.api.store import CallRecord, CallStore
 from app.media.stream_server import CallRegistry
 from app.scheduler import KST
@@ -189,7 +190,7 @@ def build_app(
         token = lifecycle.token_for(CallId)
         if token is None:
             # 우리가 만들지 않은 통화다. 토큰을 내주면 안 된다.
-            logger.warning("모르는 CallId로 VoiceML 요청 CallId=%s", CallId)
+            logger.warning("모르는 CallId로 VoiceML 요청 CallId=%s", sanitize_for_log(CallId))
             raise HTTPException(status_code=404, detail="unknown call")
         return Response(
             content=connect_stream(
@@ -212,7 +213,9 @@ def build_app(
         '스트림이 시작됐다' 같은 비종료 통보 하나가 통화를 끝내 버렸다 —
         어느 값이 끝인지는 lifecycle이 판정한다.
         """
-        logger.info("스트림 종료 CallId=%s event=%s", CallId, StreamEvent)
+        logger.info(
+            "스트림 종료 CallId=%s event=%s", sanitize_for_log(CallId), sanitize_for_log(StreamEvent)
+        )
         lifecycle.carrier_finished(CallId, StreamEvent)
         return Response(
             content=say_and_hangup("오늘도 좋은 하루 보내세요. 안녕히 계세요."),
@@ -276,7 +279,7 @@ def build_app(
             try:
                 lifecycle.carrier_finished(str(data["CallId"]), "no-answer")
             except Exception:
-                logger.exception("안 받음 처리 실패 CallId=%s", data.get("CallId"))
+                logger.exception("안 받음 처리 실패 CallId=%s", sanitize_for_log(data.get("CallId")))
         return Response(status_code=204)
 
     return app
