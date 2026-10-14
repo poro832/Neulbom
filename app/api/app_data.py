@@ -52,7 +52,6 @@ NO_ELDER = "등록되지 않은 어르신입니다"
 BAD_PAIR = "연결 코드를 확인해 주세요"
 UNAVAILABLE = "인증을 확인할 수 없습니다"
 BAD_SIGNUP = "가입 코드를 확인해 주세요"
-PHONE_TAKEN = "이미 등록된 번호예요"
 NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어요"
 TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
@@ -552,10 +551,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 phone=body.phone.strip(),
                 max_pending=MAX_PENDING_PER_GUARDIAN,
             )
-        except PhoneTaken:
-            raise HTTPException(status_code=409, detail=PHONE_TAKEN)
-        except PendingLimit:
-            # 사유를 알려 주지 않는다 — 없는 코드와 같은 응답이다.
+        except (PhoneTaken, PendingLimit):
+            # 등록된 번호인지, 대기 한도인지 알려 주지 않는다 — 틀린 코드와 같은 응답이고 같은 한도로 센다.
+            # 구분해 주면 코드를 가진 사람이 어르신 번호가 등록돼 있는지 무제한으로 알아낼 수 있다.
+            data.signup_limiter.record_failure()
+            logger.warning("가입 실패")
             raise HTTPException(status_code=401, detail=BAD_SIGNUP)
         # 가입 동의 문구 한 줄이 전화와 통화 내용 공유를 함께 담는다.
         data.content.agree_share(elder_id)
