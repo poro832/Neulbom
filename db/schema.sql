@@ -27,7 +27,8 @@ CREATE TABLE guardians (
 
 CREATE TABLE elders (
     elder_id     BIGSERIAL PRIMARY KEY,
-    guardian_id  BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    -- 어르신이 먼저 가입한 경우 보호자가 연결 코드를 확인하기 전까지 NULL이다.
+    guardian_id  BIGINT REFERENCES guardians(guardian_id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     phone_number TEXT NOT NULL UNIQUE,
     birth_date   DATE,
@@ -290,6 +291,14 @@ CREATE TABLE elder_pairings (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX elder_pairings_elder_idx ON elder_pairings (elder_id, pairing_id DESC);
+
+-- 어르신 연결 코드. 코드는 지문만 저장한다. 어르신당 하나이고 재발급하면 덮어쓴다.
+CREATE TABLE elder_link_codes (
+    elder_id   BIGINT PRIMARY KEY REFERENCES elders(elder_id) ON DELETE CASCADE,
+    code_hash  TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- 어르신 폰 전용 열쇠. 지문만 저장한다(app/api/elder_auth.py).
 CREATE TABLE elder_keys (
