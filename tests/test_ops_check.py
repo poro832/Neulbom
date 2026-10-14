@@ -125,6 +125,12 @@ def test_a_missing_table_and_column_name_the_migration_to_run():
     assert "DB 표·칸" not in checks
 
 
+def test_a_missing_elder_link_table_names_its_migration():
+    checks = by_name(check_database(FakePool(FULL_TABLES - {"elder_link_codes"}, FULL_COLUMNS)))
+    assert checks["표 elder_link_codes"].level == FAIL
+    assert "2026-10-14-elder-link.sql" in checks["표 elder_link_codes"].detail
+
+
 def test_no_guardian_with_a_login_is_a_warning():
     checks = by_name(check_database(FakePool(FULL_TABLES, FULL_COLUMNS, counts=(0, 2))))
     assert checks["로그인 보호자"].level == WARN

@@ -60,7 +60,7 @@ class AlertRules:
     ) -> None:
         try:
             access = self._elders.get(elder_id)
-            if access is None:
+            if access is None or access.guardian_id is None:
                 logger.warning("알림을 받을 보호자를 모른다 — 버린다 elder_id=%s", elder_id)
                 return
             created = self._alerts.raise_alert(

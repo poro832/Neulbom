@@ -157,3 +157,21 @@ def test_a_notifier_that_raises_does_not_break_the_alert():
     rules = AlertRules(alerts=alerts, elders=directory, notifier=RecordingNotifier(error=RuntimeError("x")))
     rules.on_risk(call_id=1, elder_id=12, risk_level="alert")  # 예외 없이 끝나야 한다
     assert len(alerts.recent_for_guardian(1, 10)) == 1
+
+
+def test_an_alert_for_an_elder_without_a_guardian_is_dropped_quietly(caplog):
+    class Spy:
+        def __init__(self):
+            self.calls = []
+
+        def raise_alert(self, **kw):
+            self.calls.append(kw)
+            return True
+
+    spy = Spy()
+    directory = InMemoryElderDirectory({7: ElderAccess(None, False, "연결 전", agreed=True)})
+
+    AlertRules(alerts=spy, elders=directory).on_risk(call_id=1, elder_id=7, risk_level="alert")
+
+    assert spy.calls == []
+    assert "알림 생성 실패" not in caplog.text
