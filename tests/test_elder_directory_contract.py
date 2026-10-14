@@ -6,7 +6,13 @@ import os
 
 import pytest
 
-from app.api.elder_directory import ElderAccess, GuardianProfile, InMemoryElderDirectory
+from app.api.elder_directory import (
+    ElderAccess,
+    GuardianProfile,
+    InMemoryElderDirectory,
+    PhoneTaken,
+    mask_phone,
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -213,3 +219,48 @@ def test_rejecting_deletes_the_pending_elder_and_frees_the_number(directory):
     assert directory.get(elder_id) is None
     assert directory.find_by_phone("01099991111") is None
     assert make_pending(directory, phone="010-9999-1111")  # 같은 번호로 다시 가입할 수 있다
+
+
+def test_an_unlinked_signup_has_no_guardian_and_no_consent(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    access = directory.get(elder_id)
+    assert access == ElderAccess(guardian_id=None, consenting=False, name="홍길동", agreed=True)
+    assert access.status == "unlinked"
+    assert directory.phone_of(elder_id) == "010-9999-1111"
+
+
+def test_an_unknown_elder_has_no_phone(directory):
+    assert directory.phone_of(4242) is None
+
+
+def test_an_unlinked_signup_refuses_a_number_already_registered(directory):
+    with pytest.raises(PhoneTaken):
+        directory.create_unlinked(name="가", phone="070 0000 0012")
+
+
+def test_linking_fills_guardian_and_consent_exactly_once(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert directory.link(elder_id, 1) is True
+
+    access = directory.get(elder_id)
+    assert access.guardian_id == 1 and access.consenting and access.status == "active"
+    assert directory.link(elder_id, 1) is False
+    assert directory.link(elder_id, 2) is False  # 이미 연결된 어르신은 다른 보호자가 가져가지 못한다
+
+
+def test_linking_an_unknown_elder_is_false(directory):
+    assert directory.link(4242, 1) is False
+
+
+def test_unlinked_elders_are_in_nobodys_list(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert elder_id not in [ref.elder_id for ref in directory.elders_of(1)]
+
+
+def test_mask_phone_hides_the_middle_digits():
+    assert mask_phone("010-9999-1111") == "010-****-1111"
+    assert mask_phone("01099991111") == "010-****-1111"
+    assert mask_phone("12345") == "****"
