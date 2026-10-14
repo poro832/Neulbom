@@ -23,6 +23,9 @@ client/macos/Flutter/ephemeral/
 # 비밀
 client/android/app/google-services.json
 client/ios/Runner/GoogleService-Info.plist
+# FCM 서비스 계정 열쇠(서버가 푸시를 보낼 때 쓰는 JSON). 받은 파일이 저장소 안에 놓이더라도 올라가지 않게 한다.
+*firebase-adminsdk*.json
+*service-account*.json
 .env
 # .env.bak, .env.local 같은 사본도 같은 비밀을 담는다. .env 하나만
 # 적어 두면 백업을 뜨는 순간 git이 커밋하자고 권한다.
