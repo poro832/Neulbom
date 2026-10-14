@@ -82,6 +82,13 @@ def seed(pool, phones: dict[int, str]) -> int:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    try:
+        from dotenv import load_dotenv
+
+        # app.admin과 같다. 이미 내보낸 환경 변수(DATABASE_URL 등)가 이긴다 — 실수로 다른 DB를 건드리지 않게.
+        load_dotenv(".env")
+    except ImportError:  # pragma: no cover
+        pass
 
     url = database_url()
     if url is None:
