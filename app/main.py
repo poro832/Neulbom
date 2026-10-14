@@ -782,6 +782,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppD
     from app.api.postgres_elder_keys import PostgresElderKeyStore
     from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_invites import PostgresInviteStore
+    from app.api.postgres_link_codes import PostgresLinkCodeStore
     from app.api.postgres_pairing import PostgresPairingStore
     from app.api.postgres_reports import PostgresReports
 
@@ -800,6 +801,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppD
         content=PostgresCallContent(pool=pool),
         accounts=PostgresGuardianAccounts(pool=pool),
         devices=PostgresDeviceStore(pool=pool),
+        links=PostgresLinkCodeStore(pool=pool),
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)

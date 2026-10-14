@@ -15,6 +15,7 @@ from app.api.elder_auth import ElderKeyAuth, InMemoryElderKeyStore, generate_eld
 from app.api.elder_directory import ElderAccess, GuardianProfile, InMemoryElderDirectory
 from app.api.guardian_auth import InMemoryGuardianKeyStore, KeyAuth, generate_key
 from app.api.invites import InMemoryInviteStore
+from app.api.link_codes import InMemoryLinkCodeStore
 from app.api.pairing import InMemoryPairingStore, hash_code, new_code
 from app.api.reports import InMemoryReports
 from app.scheduler import KST
@@ -89,6 +90,7 @@ def make_app_kit(now: float | None = None) -> AppKit:
         reports=reports,
         alerts=alerts,
         invites=InMemoryInviteStore(),
+        links=InMemoryLinkCodeStore(clock=clock),
         wall_clock=clock,
     )
     elder_store = InMemoryElderKeyStore(wall_clock=clock)
