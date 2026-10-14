@@ -192,4 +192,48 @@ void main() {
       'POST /v1/elders/21/reject',
     ]);
   });
+
+  test('어르신 먼저 가입: 본문을 보내고 어르신 열쇠를 저장한다', () async {
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'elder_key': 'nle_first', 'status': 'unlinked'});
+    });
+
+    final result = await NulbomApi.elderSignup(name: '홍길동', phone: '010-9999-1111', agreed: true);
+
+    expect(result.status, 'unlinked');
+    expect(await NulbomApi.elderKey(), 'nle_first');
+    expect(seen.url.path, '/v1/elders/signup');
+    expect(jsonDecode(seen.body), {'name': '홍길동', 'phone': '010-9999-1111', 'agreed': true});
+  });
+
+  test('연결 코드: 어르신이 발급하고 보호자가 미리보기 후 연결한다', () async {
+    SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved'});
+    final calls = <String>[];
+    final auth = <String?>[];
+    NulbomApi.client = MockClient((request) async {
+      calls.add('${request.method} ${request.url.path}');
+      auth.add(request.headers['Authorization']);
+      switch (request.url.path) {
+        case '/v1/me/link-code':
+          return json({'code': '00001234', 'expires_at': '2026-10-15T09:00:00+09:00'});
+        case '/v1/guardian/link/preview':
+          return json({'name': '홍길동', 'phone_masked': '010-****-1111'});
+        default:
+          return json({'elder_id': 7, 'name': '홍길동', 'status': 'active'});
+      }
+    });
+
+    final issued = await NulbomApi.issueLinkCode();
+    final preview = await NulbomApi.previewLink('00001234', key: 'nlb_test');
+    final linked = await NulbomApi.linkElder('00001234', key: 'nlb_test');
+
+    expect(issued.code, '00001234');
+    expect(preview.name, '홍길동');
+    expect(preview.phoneMasked, '010-****-1111');
+    expect(linked.elderId, 7);
+    expect(calls, ['POST /v1/me/link-code', 'POST /v1/guardian/link/preview', 'POST /v1/guardian/link']);
+    expect(auth, ['Bearer nle_saved', 'Bearer nlb_test', 'Bearer nlb_test']);
+  });
 }

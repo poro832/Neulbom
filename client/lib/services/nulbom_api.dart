@@ -315,6 +315,42 @@ class NulbomApi {
     return result;
   }
 
+  // ------------------------------------------------------------ 어르신 먼저 가입 + 연결 코드
+
+  /// 어르신이 보호자 없이 먼저 가입한다. 서버가 이 폰 전용 열쇠를 주고 앱이 저장한다.
+  /// 보호자가 연결 코드를 확인하기 전에는 전화가 오지 않는다.
+  static Future<SignupResult> elderSignup({
+    required String name,
+    required String phone,
+    required bool agreed,
+  }) async {
+    final json = await _send('POST', '/v1/elders/signup',
+        body: {'name': name, 'phone': phone, 'agreed': agreed});
+    final result = SignupResult.fromJson(json);
+    await saveElderKey(result.elderKey);
+    return result;
+  }
+
+  /// 어르신 화면에 띄울 8자리 연결 코드(24시간). 새로 받으면 이전 코드는 쓸 수 없다.
+  static Future<PairingCode> issueLinkCode({String? key}) async {
+    final json = await _send('POST', '/v1/me/link-code', key: await _elderKeyOrThrow(key));
+    return PairingCode.fromJson(json);
+  }
+
+  /// 보호자: 코드의 어르신 이름과 가려진 번호를 본다. 아무것도 바꾸지 않는다.
+  static Future<ElderPreview> previewLink(String code, {String? key}) async {
+    final json = await _send('POST', '/v1/guardian/link/preview',
+        key: _guardianKeyOrThrow(key), body: {'code': code});
+    return ElderPreview.fromJson(json);
+  }
+
+  /// 보호자: 확인한 어르신을 연결한다. 이 호출이 승인이다 — 이때부터 안부 전화가 시작된다.
+  static Future<LinkResult> linkElder(String code, {String? key}) async {
+    final json = await _send('POST', '/v1/guardian/link',
+        key: _guardianKeyOrThrow(key), body: {'code': code});
+    return LinkResult.fromJson(json);
+  }
+
   static Future<MyStatus> myStatus({String? key}) async {
     final json = await _send('GET', '/v1/me/status', key: await _elderKeyOrThrow(key));
     return MyStatus.fromJson(json);
