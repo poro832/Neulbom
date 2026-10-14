@@ -63,6 +63,14 @@ class PostgresGuardianKeyStore:
             )
         return 1
 
+    def is_active(self, key_hash: str) -> bool:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM guardian_keys WHERE key_hash = %s AND revoked_at IS NULL",
+                (key_hash,),
+            ).fetchone()
+        return row is not None
+
     def revoke_hash(self, key_hash: str) -> bool:
         with self._pool.connection() as conn:
             cur = conn.execute(

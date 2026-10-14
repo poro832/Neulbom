@@ -113,3 +113,47 @@ def test_a_directory_failure_never_escapes():
 
     rules.on_risk(call_id=7, elder_id=12, risk_level="alert")
     rules.on_no_answer(call("scheduled"))
+
+
+class RecordingNotifier:
+    def __init__(self, error=None):
+        self.calls, self.error = [], error
+
+    def notify(self, guardian_id, elder_id):
+        self.calls.append((guardian_id, elder_id))
+        if self.error:
+            raise self.error
+
+
+def _rules_with_notifier(notifier):
+    directory = InMemoryElderDirectory({12: ElderAccess(1, True, "어르신 12")})
+    return AlertRules(alerts=InMemoryAlertStore(), elders=directory, notifier=notifier)
+
+
+def test_a_new_alert_notifies_the_guardian_once():
+    notifier = RecordingNotifier()
+    rules = _rules_with_notifier(notifier)
+    rules.on_risk(call_id=1, elder_id=12, risk_level="alert")
+    assert notifier.calls == [(1, 12)]
+
+
+def test_a_duplicate_alert_does_not_notify_again():
+    notifier = RecordingNotifier()
+    rules = _rules_with_notifier(notifier)
+    rules.on_risk(call_id=1, elder_id=12, risk_level="alert")
+    rules.on_risk(call_id=1, elder_id=12, risk_level="alert")  # 웹훅 재전송
+    assert notifier.calls == [(1, 12)]
+
+
+def test_a_low_risk_call_raises_no_alert_and_no_push():
+    notifier = RecordingNotifier()
+    _rules_with_notifier(notifier).on_risk(call_id=1, elder_id=12, risk_level="ok")
+    assert notifier.calls == []
+
+
+def test_a_notifier_that_raises_does_not_break_the_alert():
+    alerts = InMemoryAlertStore()
+    directory = InMemoryElderDirectory({12: ElderAccess(1, True, "어르신 12")})
+    rules = AlertRules(alerts=alerts, elders=directory, notifier=RecordingNotifier(error=RuntimeError("x")))
+    rules.on_risk(call_id=1, elder_id=12, risk_level="alert")  # 예외 없이 끝나야 한다
+    assert len(alerts.recent_for_guardian(1, 10)) == 1
