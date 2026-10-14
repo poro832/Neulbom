@@ -111,6 +111,45 @@ class PostgresElderDirectory:
             ).rowcount
         return updated == 1
 
+    def phone_of(self, elder_id: int) -> str | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT phone_number FROM elders WHERE elder_id = %s", (elder_id,)
+            ).fetchone()
+        return None if row is None else row[0]
+
+    def create_unlinked(self, *, name: str, phone: str) -> int:
+        from psycopg import errors
+
+        wanted = digits_of(phone)
+        try:
+            with self._pool.connection() as conn:
+                taken = conn.execute(
+                    "SELECT 1 FROM elders "
+                    "WHERE regexp_replace(phone_number, '[^0-9]', '', 'g') = %s LIMIT 1",
+                    (wanted,),
+                ).fetchone()
+                if taken:
+                    raise PhoneTaken(wanted)
+                # guardian_id와 consent_at은 넣지 않는다: 보호자가 연결을 확인하기 전에는 전화가 나가지 않는다.
+                row = conn.execute(
+                    "INSERT INTO elders (name, phone_number, agreed_at) "
+                    "VALUES (%s, %s, now()) RETURNING elder_id",
+                    (name, phone),
+                ).fetchone()
+        except errors.UniqueViolation as exc:
+            raise PhoneTaken(wanted) from exc
+        return row[0]
+
+    def link(self, elder_id: int, guardian_id: int) -> bool:
+        with self._pool.connection() as conn:
+            updated = conn.execute(
+                "UPDATE elders SET guardian_id = %s, consent_at = now() "
+                "WHERE elder_id = %s AND guardian_id IS NULL AND agreed_at IS NOT NULL",
+                (guardian_id, elder_id),
+            ).rowcount
+        return updated == 1
+
     def create_pending(
         self, *, guardian_id: int, name: str, phone: str, max_pending: int
     ) -> int:

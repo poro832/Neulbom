@@ -8,6 +8,7 @@
 - active      consent_at이 있다 — 보호자가 승인했거나 운영자가 동의를 기록했다.
 - pending     agreed_at만 있다 — 어르신이 가입하며 동의에 체크했고 보호자 승인을 기다린다.
 - unconsented 둘 다 없다 — 운영자가 등록한 어르신. 앱에서 승인할 수 없다.
+- unlinked   보호자가 아직 없다 — 어르신이 먼저 가입했고 연결 코드를 기다린다. consent_at은 link()만 채운다.
 `consent_at`을 채우는 곳은 `approve` 하나다. 가입(`create_pending`)은 절대 채우지 않는다.
 """
 
@@ -20,6 +21,7 @@ from typing import Protocol
 STATUS_ACTIVE = "active"
 STATUS_PENDING = "pending"
 STATUS_UNCONSENTED = "unconsented"
+STATUS_UNLINKED = "unlinked"
 
 
 class PhoneTaken(Exception):
@@ -32,13 +34,15 @@ class PendingLimit(Exception):
 
 @dataclass(frozen=True)
 class ElderAccess:
-    guardian_id: int
+    guardian_id: int | None
     consenting: bool
     name: str = ""
     agreed: bool = False
 
     @property
     def status(self) -> str:
+        if self.guardian_id is None:
+            return STATUS_UNLINKED
         if self.consenting:
             return STATUS_ACTIVE
         return STATUS_PENDING if self.agreed else STATUS_UNCONSENTED
@@ -63,6 +67,14 @@ def digits_of(phone: str) -> str:
     return "".join(ch for ch in phone if ch.isdigit())
 
 
+def mask_phone(phone: str) -> str:
+    """보호자가 '내 부모님 번호가 맞나' 볼 수 있을 만큼만 보인다: 010-****-1111."""
+    digits = digits_of(phone)
+    if len(digits) < 8:
+        return "****"
+    return f"{digits[:3]}-****-{digits[-4:]}"
+
+
 class ElderDirectory(Protocol):
     def get(self, elder_id: int) -> ElderAccess | None: ...
 
@@ -75,6 +87,24 @@ class ElderDirectory(Protocol):
         ...
 
     def guardian_profile(self, guardian_id: int) -> GuardianProfile | None: ...
+
+    def phone_of(self, elder_id: int) -> str | None:
+        """어르신이 가입 때 적은 전화번호 원문. 없는 어르신이면 None."""
+        ...
+
+    def create_unlinked(self, *, name: str, phone: str) -> int:
+        """보호자 없이 가입한 어르신을 만든다(agreed_at만 채운다). consent_at은 비워 둔다.
+
+        번호가 이미 있으면 PhoneTaken.
+        """
+        ...
+
+    def link(self, elder_id: int, guardian_id: int) -> bool:
+        """보호자가 없고 가입 동의(agreed_at)가 있는 어르신일 때만 guardian_id와 consent_at을 채우고 True.
+
+        consent_at을 채우는 두 곳 중 하나다(다른 하나는 approve). 보호자가 연결을 확인하는 것이 승인이다.
+        """
+        ...
 
     def create_pending(
         self, *, guardian_id: int, name: str, phone: str, max_pending: int
@@ -114,9 +144,9 @@ class InMemoryElderDirectory:
         self._phone_text = dict(phones or {})
         self._phones = {elder_id: digits_of(phone) for elder_id, phone in self._phone_text.items()}
         self._profiles = dict(guardians or {})
-        self._guardians = {access.guardian_id for access in self._entries.values()} | set(
-            self._profiles
-        )
+        self._guardians = {
+            access.guardian_id for access in self._entries.values() if access.guardian_id is not None
+        } | set(self._profiles)
         self._lock = threading.Lock()
         self._next_guardian = max(self._guardians, default=0) + 1
 
@@ -173,6 +203,29 @@ class InMemoryElderDirectory:
         if access is None or access.guardian_id != guardian_id or access.status != STATUS_PENDING:
             return None
         return access
+
+    def phone_of(self, elder_id: int) -> str | None:
+        return self._phone_text.get(elder_id)
+
+    def create_unlinked(self, *, name: str, phone: str) -> int:
+        with self._lock:
+            wanted = digits_of(phone)
+            if any(digits == wanted for digits in self._phones.values()):
+                raise PhoneTaken(wanted)
+            elder_id = max(self._entries, default=0) + 1
+            self._entries[elder_id] = ElderAccess(None, False, name, agreed=True)
+            self._phone_text[elder_id] = phone
+            self._phones[elder_id] = wanted
+            return elder_id
+
+    def link(self, elder_id: int, guardian_id: int) -> bool:
+        with self._lock:
+            access = self._entries.get(elder_id)
+            if access is None or access.guardian_id is not None or not access.agreed:
+                return False
+            self._entries[elder_id] = replace(access, guardian_id=guardian_id, consenting=True)
+            self._guardians.add(guardian_id)
+            return True
 
     def approve(self, elder_id: int, guardian_id: int) -> bool:
         with self._lock:
