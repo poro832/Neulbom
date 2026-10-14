@@ -757,7 +757,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppD
     열려 있는 것보다 막혀 있는 쪽이 안전하다.
     """
     if pool is None:
-        is_key_active = getattr(getattr(guardian_auth, "store", None), "is_active", lambda _h: True)
+        is_key_active = getattr(getattr(guardian_auth, "store", None), "is_active", lambda _h: False)  # 모르면 푸시를 보내지 않는다(닫는 쪽)
         alerts = InMemoryAlertStore()
         elder_keys = InMemoryElderKeyStore()
         data = AppData(
