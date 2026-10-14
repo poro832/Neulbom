@@ -214,8 +214,33 @@ class SignupResult {
       );
 }
 
+/// 보호자가 연결 코드를 입력했을 때 확인하는 어르신 정보. 번호는 가려져 온다.
+class ElderPreview {
+  final String name;
+  final String phoneMasked; // 010-****-1111
+
+  const ElderPreview({required this.name, required this.phoneMasked});
+
+  factory ElderPreview.fromJson(Map<String, dynamic> json) => ElderPreview(
+        name: json['name'] as String,
+        phoneMasked: json['phone_masked'] as String,
+      );
+}
+
+class LinkResult {
+  final int elderId;
+  final String name;
+
+  const LinkResult({required this.elderId, required this.name});
+
+  factory LinkResult.fromJson(Map<String, dynamic> json) => LinkResult(
+        elderId: json['elder_id'] as int,
+        name: json['name'] as String,
+      );
+}
+
 class MyStatus {
-  final String status; // pending | active | unconsented
+  final String status; // unlinked | pending | active | unconsented
   final String name;
   // 통화 내용(요약·원문)을 보호자에게 공유하는 데 동의했는가. 없으면 동의 전으로 본다.
   final bool shareAgreed;

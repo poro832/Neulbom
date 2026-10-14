@@ -26,10 +26,12 @@ from app.api.devices import DeviceStore, InMemoryDeviceStore
 from app.api.elder_auth import ElderAuth, ElderKeyStore, elder_key_label, generate_elder_key
 from app.api.elder_directory import (
     STATUS_PENDING,
+    STATUS_UNLINKED,
     ElderDirectory,
     PendingLimit,
     PhoneTaken,
     digits_of,
+    mask_phone,
 )
 from app.api.guardian_accounts import (
     EmailTaken,
@@ -40,6 +42,7 @@ from app.api.guardian_accounts import (
 from app.api.guardian_auth import GuardianAuth, attempt_label, generate_key, hash_key, parse_bearer
 from app.api.passwords import DUMMY_HASH, hash_password, verify_password
 from app.api.invites import InviteStore, hash_invite_code, new_invite_code
+from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeStore
 from app.api.pairing import PairingStore, hash_code, new_code
 from app.api.rate_limit import FailureLimiter, KeyedFailureLimiter
 from app.api.reports import Reports, kst_week_start, sunday_on_or_before
@@ -63,6 +66,16 @@ BAD_CURRENT = "현재 비밀번호를 확인해 주세요"
 MIN_PASSWORD = 8
 APP_KEY_LABEL = "앱"
 NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
+BAD_LINK = "연결 코드를 확인해 주세요"
+LINK_WAITING = "보호자 연결을 기다리고 있어요"
+ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
+TOO_MANY_ELDERS = "더 이상 어르신을 연결할 수 없어요"
+PHONE_USED = "이미 등록된 번호예요"
+
+# 한 보호자가 연결할 수 있는 어르신 수. 코드를 가진 사람이 한 보호자에게 어르신을 무한히 붙이지 못하게 한다.
+MAX_ELDERS_PER_GUARDIAN = 10
+# 연결 코드 지문이 다른 어르신과 겹칠 때 새 코드로 다시 시도하는 횟수(1억 가지라 사실상 한 번이면 된다).
+LINK_CODE_RETRIES = 5
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
@@ -91,6 +104,10 @@ class AppData:
     account_failures: FailureLimiter = field(default_factory=FailureLimiter)
     signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
     devices: DeviceStore = field(default_factory=InMemoryDeviceStore)
+    # 어르신 먼저 가입: 연결 코드 저장소 / 어르신 가입 시도 한도(성공도 센다) / 보호자의 코드 실패 한도
+    links: LinkCodeStore = field(default_factory=InMemoryLinkCodeStore)
+    elder_signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
+    link_attempts: FailureLimiter = field(default_factory=FailureLimiter)
 
 
 def iso_kst(epoch: float) -> str:
@@ -141,6 +158,16 @@ class PairRequest(BaseModel):
     phone: str = Field(min_length=7, max_length=20)
 
 
+class ElderSignupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
+    phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
+    agreed: bool
+
+
+class LinkRequest(BaseModel):
+    code: str = Field(pattern=r"^[0-9]{8}$")
+
+
 class ContactRequest(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     relation: str = Field(default="", max_length=20)
@@ -186,9 +213,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         return guardian_id
 
     def ready_elder_id_of(authorization: str | None) -> int:
-        """어르신 열쇠 + 승인 대기가 아닐 것. 대기 중이면 403."""
+        """어르신 열쇠 + 승인 대기·연결 전이 아닐 것. 아니면 403."""
         elder_id = elder_id_of(authorization)
         access = data.elders.get(elder_id)
+        if access is not None and access.status == STATUS_UNLINKED:
+            raise HTTPException(status_code=403, detail=LINK_WAITING)
         if access is not None and access.status == STATUS_PENDING:
             raise HTTPException(status_code=403, detail=WAITING)
         return elder_id
@@ -530,6 +559,102 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         # 코드 원문은 응답에만 있다. 로그에는 발급 사실만 남긴다.
         logger.info("보호자 개인 코드를 발급했다 guardian_id=%s", guardian_id)
         return {"code": code}
+
+    # ------------------------------------------------ 어르신 먼저 가입 + 연결 코드
+
+    @app.post("/v1/elders/signup")
+    @guarded
+    def elder_signup(body: ElderSignupRequest) -> dict:
+        if not body.agreed:
+            raise HTTPException(status_code=400, detail=NEEDS_AGREEMENT)
+        if data.elder_signup_attempts.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        data.elder_signup_attempts.record_failure()  # 성공도 센다 — 인증 없는 주소라 행을 마구 만드는 것을 늦춘다
+        try:
+            elder_id = data.elders.create_unlinked(name=body.name.strip(), phone=body.phone.strip())
+        except PhoneTaken:
+            # 이 주소는 코드가 없어 번호 중복을 숨길 방법이 없다. 시도 한도가 대량 조회를 늦춘다.
+            logger.warning("어르신 가입 실패")
+            raise HTTPException(status_code=409, detail=PHONE_USED)
+        # 가입 동의 문구 한 줄이 전화와 통화 내용 공유를 함께 담는다. 전화 동의(consent_at)는 연결 때 보호자 확인이 채운다.
+        new = generate_elder_key()
+        try:
+            data.content.agree_share(elder_id)
+            data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
+        except Exception:
+            # 행만 남고 열쇠가 없으면 번호가 막히고 연결 코드도 못 받는다 — 방금 만든 행을 거둬 다시 가입하게 한다.
+            try:
+                data.elders.discard_unlinked(elder_id)
+            except Exception:
+                logger.exception("가입 실패 뒤 정리도 실패했다 elder_id=%s", elder_id)
+            else:
+                logger.warning("어르신 가입 도중 저장소 오류로 가입을 되돌렸다 elder_id=%s", elder_id)
+            raise
+        logger.info("연결 전 어르신이 가입했다 elder_id=%s key=%s", elder_id, new.key_prefix)
+        return {"elder_key": new.key, "status": STATUS_UNLINKED}
+
+    @app.post("/v1/me/link-code")
+    @guarded
+    def issue_link_code(authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        access = data.elders.get(elder_id)
+        if access is None:
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        if access.guardian_id is not None:
+            raise HTTPException(status_code=409, detail=ALREADY_LINKED)
+        for _ in range(LINK_CODE_RETRIES):
+            code = new_invite_code()
+            try:
+                expires_at = data.links.issue(elder_id, hash_invite_code(code))
+            except CodeCollision:
+                continue
+            # 코드 원문은 응답에만 있다. 로그에는 발급 사실만 남긴다.
+            logger.info("연결 코드를 발급했다 elder_id=%s", elder_id)
+            return {"code": code, "expires_at": iso_kst(expires_at)}
+        raise HTTPException(status_code=503, detail=UNAVAILABLE)
+
+    def elder_for_link_code(code: str, *, consume: bool) -> int:
+        """코드의 어르신. 틀림·만료·소진은 모두 같은 401이고 같은 한도로 센다."""
+        if data.link_attempts.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        code_hash = hash_invite_code(code)
+        elder_id = data.links.consume(code_hash) if consume else data.links.find(code_hash)
+        if elder_id is None:
+            data.link_attempts.record_failure()
+            logger.warning("연결 실패")
+            raise HTTPException(status_code=401, detail=BAD_LINK)
+        return elder_id
+
+    @app.post("/v1/guardian/link/preview")
+    @guarded
+    def preview_link(body: LinkRequest, authorization: str | None = Header(default=None)) -> dict:
+        active_guardian_id_of(authorization)
+        elder_id = elder_for_link_code(body.code, consume=False)
+        access = data.elders.get(elder_id)
+        phone = data.elders.phone_of(elder_id)
+        if access is None or phone is None or access.guardian_id is not None:
+            data.link_attempts.record_failure()
+            logger.warning("연결 실패")
+            raise HTTPException(status_code=401, detail=BAD_LINK)
+        return {"name": access.name, "phone_masked": mask_phone(phone)}
+
+    @app.post("/v1/guardian/link")
+    @guarded
+    def link_elder(body: LinkRequest, authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = active_guardian_id_of(authorization)
+        # 코드를 쓰기 전에 확인한다 — 한도에 걸린 보호자가 코드를 태우지 않게.
+        if len(data.elders.elders_of(guardian_id)) >= MAX_ELDERS_PER_GUARDIAN:
+            raise HTTPException(status_code=409, detail=TOO_MANY_ELDERS)
+        elder_id = elder_for_link_code(body.code, consume=True)
+        # 보호자가 이 확인을 누르는 것이 승인이다: 연결과 전화 동의(consent_at)가 함께 기록된다.
+        if not data.elders.link(elder_id, guardian_id):
+            # 코드는 이미 소진됐다(그 사이 다른 경로로 연결된 어르신). 어르신이 새 코드를 만든다.
+            data.link_attempts.record_failure()
+            logger.warning("연결 실패")
+            raise HTTPException(status_code=401, detail=BAD_LINK)
+        access = data.elders.get(elder_id)
+        logger.info("어르신을 연결했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
+        return {"elder_id": elder_id, "name": "" if access is None else access.name, "status": "active"}
 
     @app.post("/v1/signup")
     @guarded

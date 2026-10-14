@@ -34,6 +34,7 @@ TABLE_MIGRATIONS = {
     "transcript_views": "2026-10-10-transcript-sharing.sql",
     "call_medication": "2026-10-13-call-medication.sql",
     "guardian_devices": "2026-10-13-guardian-devices.sql",
+    "elder_link_codes": "2026-10-14-elder-link.sql",
 }
 
 # (표, 칸) -> 그 칸을 더하는 SQL 파일
