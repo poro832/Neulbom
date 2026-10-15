@@ -129,6 +129,9 @@ class NulbomApi {
   /// 서버(app_data.py BAD_LINK)가 틀리거나 만료된 연결 코드에 401과 함께 돌려주는 문구.
   static const String badLinkCodeMessage = '연결 코드를 확인해 주세요';
 
+  /// 서버가 이메일 인증 증명서를 못 믿을 때 401과 함께 돌려주는 문구.
+  static const String badEmailProofMessage = '이메일 인증을 확인하지 못했어요';
+
   static String? _detailOf(http.Response response) {
     try {
       final body = jsonDecode(utf8.decode(response.bodyBytes));
@@ -144,7 +147,7 @@ class NulbomApi {
     String path, {
     String? key,
     Object? body,
-    bool linkCodeCall = false,
+    Set<String> keepKeyOn401 = const {},
   }) async {
     final headers = <String, String>{
       if (key != null) 'Authorization': 'Bearer $key',
@@ -164,10 +167,10 @@ class NulbomApi {
       default:
         throw ArgumentError('지원하지 않는 메서드: $method');
     }
-    // 연결 코드 호출의 401 중 "코드 확인" 문구는 열쇠가 아니라 코드가 틀린 것이다 — 로그아웃시키지 않는다.
-    final badLinkCode = linkCodeCall && _detailOf(response) == badLinkCodeMessage;
+    // 연결 코드·이메일 인증 호출의 401 중 허용 문구는 열쇠가 아니라 코드·증명서가 틀린 것이다 — 로그아웃시키지 않는다.
+    final keepKey = keepKeyOn401.contains(_detailOf(response));
     if (response.statusCode == 401 &&
-        !badLinkCode &&
+        !keepKey &&
         key != null &&
         key.isNotEmpty &&
         key == guardianKey) {
@@ -225,6 +228,15 @@ class NulbomApi {
       // 서버에 닿지 못해도 폰에서는 로그아웃한다.
     }
     await clearGuardianKey();
+  }
+
+  /// Firebase에서 이메일을 인증한 뒤 받은 ID 토큰을 서버에 보내 인증을 기록한다.
+  static Future<bool> verifyEmail(String idToken, {String? key}) async {
+    final json = await _send('POST', '/v1/guardian/email/verify',
+        key: _guardianKeyOrThrow(key),
+        body: {'id_token': idToken},
+        keepKeyOn401: {badEmailProofMessage});
+    return (json['email_verified'] as bool?) ?? false;
   }
 
   static Future<GuardianProfile> guardianMe({String? key}) async {
@@ -360,14 +372,14 @@ class NulbomApi {
   /// 보호자: 코드의 어르신 이름과 가려진 번호를 본다. 아무것도 바꾸지 않는다.
   static Future<ElderPreview> previewLink(String code, {String? key}) async {
     final json = await _send('POST', '/v1/guardian/link/preview',
-        key: _guardianKeyOrThrow(key), body: {'code': code}, linkCodeCall: true);
+        key: _guardianKeyOrThrow(key), body: {'code': code}, keepKeyOn401: {badLinkCodeMessage});
     return ElderPreview.fromJson(json);
   }
 
   /// 보호자: 확인한 어르신을 연결한다. 이 호출이 승인이다 — 이때부터 안부 전화가 시작된다.
   static Future<LinkResult> linkElder(String code, {String? key}) async {
     final json = await _send('POST', '/v1/guardian/link',
-        key: _guardianKeyOrThrow(key), body: {'code': code}, linkCodeCall: true);
+        key: _guardianKeyOrThrow(key), body: {'code': code}, keepKeyOn401: {badLinkCodeMessage});
     return LinkResult.fromJson(json);
   }
 
