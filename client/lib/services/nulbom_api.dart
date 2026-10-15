@@ -288,6 +288,14 @@ class NulbomApi {
     return WeeklyStats.fromJson(json);
   }
 
+  /// 한 달 통계를 한 번에 읽는다. `month`는 YYYY-MM, 없으면 서버가 한국 시간의 이번 달로 정한다.
+  static Future<MonthlyStats> monthly(int elderId, {String? month, String? key}) async {
+    final query = month == null ? '' : '?month=$month';
+    final json = await _send('GET', '/v1/elders/$elderId/monthly$query',
+        key: _guardianKeyOrThrow(key));
+    return MonthlyStats.fromJson(json);
+  }
+
   static Future<List<AlertItem>> guardianAlerts({String? key, int limit = 20}) async {
     final json = await _send('GET', '/v1/guardian/alerts?limit=$limit',
         key: _guardianKeyOrThrow(key));

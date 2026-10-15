@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
-from app.analysis.baseline import BASELINE_WINDOW
+from app.analysis.baseline import BASELINE_MIN_CALLS, BASELINE_WINDOW
 from app.api.alerts import InMemoryAlertStore
 from app.api.elder_directory import ElderAccess, InMemoryElderDirectory
 from app.api.reports import InMemoryReports, kst_week_start, sunday_on_or_before
@@ -197,6 +199,16 @@ def test_unanswered_calls_do_not_take_a_window_slot(world):
         world.add_call(call_id=n, elder_id=12, status="no_answer", created_at=kst(2026, 9, n, 9))
 
     assert world.reports.baseline_calls(12) == BASELINE_WINDOW
+
+
+def test_the_app_hint_uses_the_same_baseline_numbers():
+    """앱의 '평소 기준 쌓는 중' 안내는 3통·14통을 직접 쓴다. 서버 상수만 바꾸면 안내가 조용히 틀린다."""
+    screen = (
+        Path(__file__).resolve().parent.parent / "client" / "lib" / "screens" / "elderly_detail_screen.dart"
+    ).read_text(encoding="utf-8")
+
+    assert re.search(rf"const int baselineMinCalls = {BASELINE_MIN_CALLS};", screen)
+    assert re.search(rf"const int baselineWindow = {BASELINE_WINDOW};", screen)
 
 
 # ------------------------------------------------ 어르신 요약

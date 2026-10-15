@@ -26,9 +26,22 @@ const Map<String, dynamic> mentionsBeforeConsent = {
   'categories': [],
 };
 
-/// 요청한 날이 속한 주(일~토)의 7일을 돌려준다. 하루에 한 통, 평균 점수 40.
+/// 그 달(YYYY-MM)의 모든 날짜 키.
+List<String> monthKeys(String month) {
+  final year = int.parse(month.substring(0, 4));
+  final mon = int.parse(month.substring(5, 7));
+  final length = DateTime(year, mon + 1, 0).day;
+  return [for (var d = 1; d <= length; d++) '$month-${d.toString().padLeft(2, '0')}'];
+}
+
+/// 받은 요청을 "경로?쿼리"로 적는다.
+String requestLine(http.BaseRequest request) =>
+    request.url.hasQuery ? '${request.url.path}?${request.url.query}' : request.url.path;
+
+/// 요청한 날이 속한 주(일~토)의 7일, 또는 요청한 달의 모든 날을 돌려준다. 하루에 한 통, 평균 점수 40.
 http.Client serverWithOneCallPerDay({
   List<String>? weekStarts,
+  List<String>? months,
   Map<String, dynamic>? calls,
   Map<String, dynamic>? mentions,
   List<String>? paths,
@@ -40,6 +53,17 @@ http.Client serverWithOneCallPerDay({
       }
       if (request.url.path == '/v1/elders/20/mentions') {
         return json(mentions ?? mentionsBeforeConsent);
+      }
+      if (request.url.path == '/v1/elders/20/monthly') {
+        final month = request.url.queryParameters['month']!;
+        months?.add(month);
+        final keys = monthKeys(month);
+        return json({
+          'month': month,
+          'days': [for (final key in keys) {'date': key, 'calls': 1, 'avg_score': 40.0}],
+          'total_calls': keys.length,
+          'avg_score': 40.0,
+        });
       }
       if (request.url.path != '/v1/elders/20/weekly') return json({'detail': 'x'}, 404);
       final asked = DateTime.parse(request.url.queryParameters['week_start']!);
@@ -60,20 +84,39 @@ http.Client serverWithOneCallPerDay({
 /// 2026-10-10(토) 정오(한국 날짜). 그 주는 2026-10-04(일) ~ 2026-10-10(토).
 DateTime fixedNow() => DateTime(2026, 10, 10, 12);
 
-/// 요청한 날이 속한 주(일~토)의 7일을 날짜별 점수 표에서 만든다. 표에 있는 날은 한 통, 없는 날은 통화 없음.
-http.Client serverWithScores(Map<String, double> scores) => MockClient((request) async {
+/// 요청한 날이 속한 주(일~토)의 7일, 또는 요청한 달의 모든 날을 날짜별 점수 표에서 만든다.
+/// 표에 있는 날은 한 통, 없는 날은 통화 없음. 기준 통화 수가 null이면 응답에 그 필드를 넣지 않는다(옛 서버).
+http.Client serverWithScores(
+  Map<String, double> scores, {
+  int? baselineCalls,
+  int? monthBaselineCalls,
+  List<String>? requests,
+}) =>
+    MockClient((request) async {
+      requests?.add(requestLine(request));
       if (request.url.path == '/v1/elders/20/calls') {
         return json({'share_agreed': true, 'calls': []});
       }
       if (request.url.path == '/v1/elders/20/mentions') return json(mentionsBeforeConsent);
-      if (request.url.path != '/v1/elders/20/weekly') return json({'detail': 'x'}, 404);
-      final asked = DateTime.parse(request.url.queryParameters['week_start']!);
-      final sunday = DateTime(asked.year, asked.month, asked.day - asked.weekday % 7);
-      final keys = [
-        for (var i = 0; i < 7; i++) dateKey(DateTime(sunday.year, sunday.month, sunday.day + i)),
-      ];
+      final List<String> keys;
+      final Map<String, dynamic> head;
+      if (request.url.path == '/v1/elders/20/monthly') {
+        final month = request.url.queryParameters['month']!;
+        keys = monthKeys(month);
+        final baseline = monthBaselineCalls ?? baselineCalls;
+        head = {'month': month, 'baseline_calls': ?baseline};
+      } else if (request.url.path == '/v1/elders/20/weekly') {
+        final asked = DateTime.parse(request.url.queryParameters['week_start']!);
+        final sunday = DateTime(asked.year, asked.month, asked.day - asked.weekday % 7);
+        keys = [
+          for (var i = 0; i < 7; i++) dateKey(DateTime(sunday.year, sunday.month, sunday.day + i)),
+        ];
+        head = {'week_start': dateKey(sunday), 'baseline_calls': ?baselineCalls};
+      } else {
+        return json({'detail': 'x'}, 404);
+      }
       return json({
-        'week_start': dateKey(sunday),
+        ...head,
         'days': [
           for (final key in keys)
             {'date': key, 'calls': scores.containsKey(key) ? 1 : 0, 'avg_score': scores[key]},
@@ -139,20 +182,166 @@ void main() {
     expect(asked, isNotEmpty);
   });
 
-  testWidgets('월간: 그 달에 걸친 주들을 이어 읽어 그 달의 날만 합친다', (tester) async {
-    final asked = <String>[];
-    NulbomApi.client = serverWithOneCallPerDay(weekStarts: asked);
+  testWidgets('월간: 이번 달 통계를 월간 주소에서 한 번에 읽는다', (tester) async {
+    final weeks = <String>[];
+    final months = <String>[];
+    NulbomApi.client = serverWithOneCallPerDay(weekStarts: weeks, months: months);
     final now = kstNow(); // 화면도 한국 날짜로 이번 달을 정한다
     final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
 
     await open(tester);
+    final weeksBefore = weeks.length; // 일간이 읽은 주
     await tester.tap(find.text('월간'));
     await tester.pumpAndSettle();
 
-    expect(find.text('$daysInMonth회'), findsOneWidget); // 이전·다음 달의 날은 빠진다
+    expect(find.text('$daysInMonth회'), findsOneWidget);
     expect(find.text('40점'), findsOneWidget);
-    expect(asked.length, greaterThanOrEqualTo(4)); // 한 달은 최소 네 주에 걸친다
-    expect(find.text('48회'), daysInMonth == 48 ? findsOneWidget : findsNothing); // 옛 고정값이 아니다
+    expect(months, ['${now.year}-${now.month.toString().padLeft(2, '0')}']);
+    expect(weeks.length, weeksBefore); // 주간 통계를 여러 번 이어 읽지 않는다
+    expect(find.text('48회'), findsNothing); // 옛 고정값이 아니다
+  });
+
+  group('월간은 한 번만 부른다', () {
+    bool isStats(String r) => r.contains('/weekly') || r.contains('/monthly');
+
+    testWidgets('월간: /monthly?month=2026-10 한 번만 부르고 주간 통계는 부르지 않는다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = serverWithScores({'2026-09-30': 99, '2026-10-01': 15, '2026-10-31': 65},
+          requests: requests);
+
+      await open(tester, now: fixedNow);
+      requests.clear();
+      await tester.tap(find.text('월간'));
+      await tester.pumpAndSettle();
+
+      expect(requests.where(isStats).toList(), ['/v1/elders/20/monthly?month=2026-10']);
+      expect(find.text('2회'), findsOneWidget); // 9월 30일은 그 달이 아니다
+      expect(find.text('40점'), findsOneWidget); // (15 + 65) / 2
+    });
+
+    testWidgets('다른 달을 고르면 그 달로 한 번 부른다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = serverWithScores({'2026-09-30': 50}, requests: requests);
+
+      await open(tester, now: fixedNow);
+      await tester.tap(find.text('월간'));
+      await tester.pumpAndSettle();
+      requests.clear();
+      await tester.tap(find.text('2026년 10월'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('9월'));
+      await tester.pumpAndSettle();
+
+      expect(requests.where(isStats).toList(), ['/v1/elders/20/monthly?month=2026-09']);
+      expect(find.text('1회'), findsOneWidget);
+      expect(find.text('가장 높았던 날: 9월 30일 · 50점'), findsOneWidget);
+    });
+  });
+
+  group('평소 기준 안내', () {
+    for (final (count, text) in <(int?, String?)>[
+      (0, '아직 평소 기준을 만드는 중이에요(0통). 점수는 참고만 해 주세요.'),
+      (2, '아직 평소 기준을 만드는 중이에요(2통). 점수는 참고만 해 주세요.'),
+      (3, '평소 기준 3/14통을 쌓았어요.'),
+      (13, '평소 기준 13/14통을 쌓았어요.'),
+      (14, null),
+      (20, null),
+      (null, null), // 옛 서버: 응답에 필드가 없다
+    ]) {
+      testWidgets('기준 $count통: ${text ?? '안내 없음'}', (tester) async {
+        NulbomApi.client = serverWithScores({'2026-10-10': 20}, baselineCalls: count);
+
+        await open(tester, now: fixedNow);
+
+        if (text == null) {
+          expect(find.textContaining('평소 기준'), findsNothing);
+        } else {
+          expect(find.text(text), findsOneWidget);
+          // 통계 카드 바로 아래, 최근 통화 요약 위
+          final y = tester.getTopLeft(find.text(text)).dy;
+          expect(y, greaterThan(tester.getBottomLeft(find.text('상태')).dy));
+          expect(y, lessThan(tester.getTopLeft(find.text('최근 통화 요약')).dy));
+        }
+      });
+    }
+
+    testWidgets('주간은 주간 응답, 월간은 월간 응답의 기준 수로 안내한다', (tester) async {
+      NulbomApi.client =
+          serverWithScores({'2026-10-08': 20}, baselineCalls: 5, monthBaselineCalls: 1);
+
+      await open(tester, now: fixedNow);
+      await tester.tap(find.text('주간'));
+      await tester.pumpAndSettle();
+      expect(find.text('평소 기준 5/14통을 쌓았어요.'), findsOneWidget);
+
+      await tester.tap(find.text('월간'));
+      await tester.pumpAndSettle();
+      expect(find.text('아직 평소 기준을 만드는 중이에요(1통). 점수는 참고만 해 주세요.'), findsOneWidget);
+      expect(find.textContaining('5/14'), findsNothing);
+    });
+
+    testWidgets('통계를 못 읽으면 안내도 보이지 않는다', (tester) async {
+      NulbomApi.client = MockClient((request) async => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
+
+      await open(tester, now: fixedNow);
+
+      expect(find.textContaining('평소 기준'), findsNothing);
+    });
+  });
+
+  group('상태는 화면에 보이는 반올림 점수로 정한다', () {
+    for (final (score, shown, label, color) in <(double, String, String, Color)>[
+      (59.4, '59점', '주의', orange),
+      (59.6, '60점', '경보', red),
+      (29.4, '29점', '정상', green),
+      (29.6, '30점', '주의', orange),
+    ]) {
+      testWidgets('일간: $score점은 $shown으로 보이고 $label이다', (tester) async {
+        NulbomApi.client = serverWithScores({'2026-10-10': score});
+
+        await open(tester, now: fixedNow);
+
+        expect(find.text(shown), findsOneWidget);
+        expect(tester.widget<Text>(find.text(shown)).style?.color, color);
+        expect(find.text(label), findsNWidgets(2)); // 상태 카드와 상태 분석
+        for (final w in find.text(label).evaluate()) {
+          expect((w.widget as Text).style?.color, color);
+        }
+      });
+    }
+
+    testWidgets('주간: 59.6점인 날은 카드·막대·툴팁·가장 높았던 날 모두 60점 경보다', (tester) async {
+      NulbomApi.client = serverWithScores({'2026-10-05': 29.6, '2026-10-08': 59.6});
+
+      await open(tester, now: fixedNow);
+      await tester.tap(find.text('주간'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('경보'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('경보')).style?.color, red);
+      expect(find.text('45점'), findsOneWidget); // 평균 44.6 → 45점, 주의
+      expect(tester.widget<Text>(find.text('45점')).style?.color, orange);
+      final data = chartData(tester);
+      final monday = data.barGroups[1];
+      final thursday = data.barGroups[4];
+      expect(monday.barRods.single.color, orange); // 29.6 → 30점 → 주의
+      expect(thursday.barRods.single.color, red); // 59.6 → 60점 → 경보
+      final tooltip = data.barTouchData.touchTooltipData.getTooltipItem;
+      expect(tooltip(monday, 1, monday.barRods.single, 0)?.text, '10/5 · 30점');
+      expect(tooltip(thursday, 4, thursday.barRods.single, 0)?.text, '10/8 · 60점');
+      expect(find.text('가장 높았던 날: 10월 8일 · 60점'), findsOneWidget);
+      expect(find.textContaining('(60점, 경보)'), findsOneWidget);
+    });
+
+    testWidgets('보이는 점수가 같은 두 날이면 가장 높았던 날은 나중 날이다', (tester) async {
+      NulbomApi.client = serverWithScores({'2026-10-05': 60.4, '2026-10-08': 60.0});
+
+      await open(tester, now: fixedNow);
+      await tester.tap(find.text('주간'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('가장 높았던 날: 10월 8일 · 60점'), findsOneWidget);
+    });
   });
 
   testWidgets('통화가 없는 기간은 기록 없음으로 보여 준다', (tester) async {
