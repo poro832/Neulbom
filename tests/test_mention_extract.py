@@ -189,3 +189,27 @@ def test_from_env_needs_both_credentials(monkeypatch):
     built = extractor_from_env()
     assert built is not None and built.model_id
     assert built._chat.system_prompt == MENTION_SYSTEM_PROMPT
+    assert built._chat.max_tokens == 600
+
+
+def test_a_quote_found_in_two_distinct_sentences_is_ambiguous_and_dropped():
+    assert parse_mentions("body|bad|아파요", ["다리는 하나도 안 아파요. 근데 허리가 좀 아파요."]) == []
+    assert parse_mentions("body|bad|아파요", ["안 아파요.", "허리가 아파요."]) == []
+
+
+def test_the_same_sentence_repeated_counts_once():
+    assert parse_mentions("body|bad|아파요", ["허리가 아파요.", "허리가  아파요."]) == [
+        Mention("body", "bad", "허리가 아파요.")
+    ]
+
+
+def test_a_too_long_match_still_makes_the_quote_ambiguous():
+    long_sentence = "허리가 아파요 " + "가" * 80 + "."
+    assert parse_mentions("body|bad|허리가 아파요", [long_sentence, "허리가 아파요."]) == []
+
+
+def test_sentence_marks_around_the_model_quote_are_ignored():
+    assert parse_mentions("body|bad|“허리가 아파요.”", ["허리가 아파요"]) == [
+        Mention("body", "bad", "허리가 아파요")
+    ]
+    assert parse_mentions("body|bad|허리가 아파요?!…", ["허리가 아파요"]) == [Mention("body", "bad", "허리가 아파요")]

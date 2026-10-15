@@ -37,12 +37,17 @@ def _squash(text: str) -> str:
 
 
 def _sentence_holding(quote: str, utterances: Sequence[str]) -> str | None:
-    """인용이 통째로 들어 있는 어르신의 한 문장(원문)을 찾는다. 발화를 가로지르거나 문장을 걸치면 None."""
+    """인용이 통째로 들어 있는 어르신의 한 문장(원문)을 찾는다.
+
+    발화를 가로지르거나 문장을 걸치면 None. 서로 다른 문장 둘 이상에 들어 있어도(어느 쪽을 가리키는지
+    알 수 없다) None — 같은 문장의 반복은 하나로 센다. 너무 길거나 짧은 문장도 후보로 센다.
+    """
+    matches: dict[str, str] = {}
     for utterance in utterances:
         for sentence in _SENTENCE_END.split(utterance):
             if quote in _squash(sentence):
-                return sentence.strip()
-    return None
+                matches.setdefault(_squash(sentence), sentence.strip())
+    return next(iter(matches.values())) if len(matches) == 1 else None
 
 
 def parse_mentions(answer: str, elder_utterances: Sequence[str] | str) -> list[Mention]:
@@ -58,7 +63,7 @@ def parse_mentions(answer: str, elder_utterances: Sequence[str] | str) -> list[M
         if len(parts) != 3:
             continue
         category, said = parts[0].lower(), parts[1].lower()
-        quote = _squash(parts[2].strip("\"'“”‘’ "))
+        quote = _squash(parts[2].strip("\"'“”‘’ .?!…。"))
         if category not in MENTION_CATEGORIES or said not in MENTION_SAID:
             continue
         if len(quote) < MIN_QUOTE_CHARS:
