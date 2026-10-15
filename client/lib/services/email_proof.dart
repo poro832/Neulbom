@@ -29,6 +29,9 @@ abstract class EmailProof {
 }
 
 class FirebaseEmailProof implements EmailProof {
+  /// Firebase가 보내는 인증 메일과 링크 안내 페이지의 언어. 우리 앱은 한국어만 쓴다.
+  static const String mailLanguageCode = 'ko';
+
   FirebaseAuth get _auth => FirebaseAuth.instance;
 
   @override
@@ -71,6 +74,7 @@ class FirebaseEmailProof implements EmailProof {
   @override
   Future<void> sendVerification({required String email, required String password}) async {
     try {
+      await _auth.setLanguageCode(mailLanguageCode);
       UserCredential credential;
       try {
         credential = await _auth.createUserWithEmailAndPassword(email: email, password: password);
@@ -89,6 +93,7 @@ class FirebaseEmailProof implements EmailProof {
     final user = _auth.currentUser;
     if (user == null) throw const EmailProofException('다시 로그인이 필요해요.');
     try {
+      await _auth.setLanguageCode(mailLanguageCode);
       await user.sendEmailVerification();
     } on FirebaseAuthException catch (e) {
       throw EmailProofException(_message(e));
