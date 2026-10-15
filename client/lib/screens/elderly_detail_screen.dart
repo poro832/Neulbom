@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/nulbom_api.dart';
 import '../models/nulbom_models.dart' show ElderCalls;
 import 'elder_calls_screen.dart';
+import 'elder_mentions_section.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
 const Color eCard = Color(0xFFFFFFFF);
@@ -964,6 +965,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               const SizedBox(height: 24),
 
               _buildRecentCallsSection(),
+              const SizedBox(height: 24),
+
+              // 어르신이 통화에서 직접 하신 건강·기분 이야기(주간)
+              ElderMentionsSection(elderId: widget.elderlyId),
               const SizedBox(height: 24),
 
               // 상태 분석

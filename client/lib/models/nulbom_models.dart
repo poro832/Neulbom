@@ -343,3 +343,80 @@ class GuardianProfile {
         emailVerified: (json['email_verified'] as bool?) ?? true,
       );
 }
+
+class MentionItem {
+  final int callId;
+  final DateTime date;
+  final String said; // bad | ok | good — 어르신이 스스로 한 표현
+  final String quote; // 어르신 말 그대로
+
+  const MentionItem({required this.callId, required this.date, required this.said, required this.quote});
+
+  factory MentionItem.fromJson(Map<String, dynamic> json) => MentionItem(
+        callId: json['call_id'] as int,
+        date: _asTime(json['date'])!,
+        said: json['said'] as String,
+        quote: json['quote'] as String,
+      );
+}
+
+class MentionCategory {
+  final String category; // body | sleep | meal | mood | activity
+  final int negative;
+  final int neutral;
+  final int positive;
+  final List<MentionItem> items;
+
+  const MentionCategory({
+    required this.category,
+    required this.negative,
+    required this.neutral,
+    required this.positive,
+    required this.items,
+  });
+
+  int get total => negative + neutral + positive;
+
+  String get label {
+    switch (category) {
+      case 'body':
+        return '몸이 아프거나 불편함';
+      case 'sleep':
+        return '잠';
+      case 'meal':
+        return '식사·입맛';
+      case 'mood':
+        return '기분·외로움';
+      case 'activity':
+        return '움직임·외출';
+      default:
+        return category;
+    }
+  }
+
+  factory MentionCategory.fromJson(Map<String, dynamic> json) => MentionCategory(
+        category: json['category'] as String,
+        negative: (json['negative'] as int?) ?? 0,
+        neutral: (json['neutral'] as int?) ?? 0,
+        positive: (json['positive'] as int?) ?? 0,
+        items: ((json['items'] as List<dynamic>?) ?? [])
+            .map((i) => MentionItem.fromJson(i as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+class ElderMentions {
+  final bool shareAgreed; // false면 어르신이 아직 공유에 동의하지 않았다 — categories는 비어 있다
+  final String weekStart;
+  final List<MentionCategory> categories;
+
+  const ElderMentions({required this.shareAgreed, required this.weekStart, required this.categories});
+
+  factory ElderMentions.fromJson(Map<String, dynamic> json) => ElderMentions(
+        shareAgreed: (json['share_agreed'] as bool?) ?? false,
+        weekStart: (json['week_start'] as String?) ?? '',
+        categories: ((json['categories'] as List<dynamic>?) ?? [])
+            .map((c) => MentionCategory.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}

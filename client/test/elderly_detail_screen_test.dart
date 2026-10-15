@@ -17,11 +17,27 @@ http.Response json(Object body, [int status = 200]) => http.Response(
 String dateKey(DateTime d) =>
     '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+/// 건강·기분 언급 구역이 읽는 주소의 기본 응답: 어르신이 아직 동의하지 않았다.
+const Map<String, dynamic> mentionsBeforeConsent = {
+  'share_agreed': false,
+  'week_start': '2026-10-04',
+  'categories': [],
+};
+
 /// 요청한 날이 속한 주(일~토)의 7일을 돌려준다. 하루에 한 통, 평균 점수 40.
-http.Client serverWithOneCallPerDay({List<String>? weekStarts, Map<String, dynamic>? calls}) =>
+http.Client serverWithOneCallPerDay({
+  List<String>? weekStarts,
+  Map<String, dynamic>? calls,
+  Map<String, dynamic>? mentions,
+  List<String>? paths,
+}) =>
     MockClient((request) async {
+      paths?.add(request.url.path);
       if (request.url.path == '/v1/elders/20/calls') {
         return json(calls ?? {'share_agreed': true, 'calls': []});
+      }
+      if (request.url.path == '/v1/elders/20/mentions') {
+        return json(mentions ?? mentionsBeforeConsent);
       }
       if (request.url.path != '/v1/elders/20/weekly') return json({'detail': 'x'}, 404);
       final asked = DateTime.parse(request.url.queryParameters['week_start']!);
@@ -101,6 +117,7 @@ void main() {
 
   testWidgets('통화가 없는 기간은 기록 없음으로 보여 준다', (tester) async {
     NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/elders/20/mentions') return json(mentionsBeforeConsent);
       final asked = DateTime.parse(request.url.queryParameters['week_start']!);
       final sunday = DateTime(asked.year, asked.month, asked.day)
           .subtract(Duration(days: asked.weekday % 7));
@@ -157,7 +174,13 @@ void main() {
   });
 
   testWidgets('어르신이 동의하기 전에는 최근 통화 요약 자리에 안내만 보인다', (tester) async {
-    NulbomApi.client = serverWithOneCallPerDay(calls: {'share_agreed': false, 'calls': []});
+    // 이 테스트는 통화 요약 카드만 본다. 언급 구역도 동의 전이면 같은 안내가 한 번 더 나오므로,
+    // 언급 구역은 "동의했지만 이번 주 말씀 없음"으로 둔다(언급 구역의 동의 전 안내는
+    // elder_mentions_section_test.dart가 따로 확인한다).
+    NulbomApi.client = serverWithOneCallPerDay(
+      calls: {'share_agreed': false, 'calls': []},
+      mentions: {'share_agreed': true, 'week_start': '2026-10-04', 'categories': []},
+    );
 
     await open(tester);
 
@@ -173,5 +196,38 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('홍길동님 통화'), findsOneWidget);
+  });
+
+  testWidgets('최근 통화 요약 아래에 이번 주 어르신이 말씀하신 것 구역이 있다', (tester) async {
+    final paths = <String>[];
+    NulbomApi.client = serverWithOneCallPerDay(
+      paths: paths,
+      mentions: {
+        'share_agreed': true,
+        'week_start': '2026-10-04',
+        'categories': [
+          {
+            'category': 'body',
+            'negative': 1,
+            'neutral': 0,
+            'positive': 0,
+            'items': [
+              {'call_id': 7, 'date': '2026-10-08T09:00:00+09:00', 'said': 'bad', 'quote': '허리가 아파요'}
+            ],
+          },
+        ],
+      },
+    );
+
+    await open(tester);
+
+    expect(paths, contains('/v1/elders/20/mentions'));
+    final title = find.text('이번 주 어르신이 말씀하신 것');
+    expect(title, findsOneWidget);
+    expect(find.text('몸이 아프거나 불편함'), findsOneWidget);
+    expect(find.textContaining('진단이 아니에요'), findsOneWidget);
+    final y = tester.getTopLeft(title).dy;
+    expect(y, greaterThan(tester.getTopLeft(find.text('최근 통화 요약')).dy));
+    expect(y, lessThan(tester.getTopLeft(find.text('상태 분석')).dy));
   });
 }
