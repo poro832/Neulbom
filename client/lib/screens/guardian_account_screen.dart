@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/email_proof.dart';
 import '../services/nulbom_api.dart';
+import 'email_verification_screen.dart';
 import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
@@ -13,7 +15,10 @@ const Color eLine = Color(0xFFD6E4FF);
 const Color eAccent = Color(0xFF1A6BFF);
 
 class GuardianAccountScreen extends StatefulWidget {
-  const GuardianAccountScreen({super.key});
+  const GuardianAccountScreen({super.key, this.emailProof});
+
+  /// "이메일 인증하기"로 여는 인증 화면에 넘긴다. 없으면 Firebase. 테스트에서 가짜로 바꾼다.
+  final EmailProof? emailProof;
 
   @override
   State<GuardianAccountScreen> createState() => _GuardianAccountScreenState();
@@ -25,6 +30,9 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   bool _notificationsEnabled = true;
   bool _emailNotificationsEnabled = true;
   bool _smsNotificationsEnabled = false;
+
+  /// 서버가 인증 전이라고 했을 때만 true — 서버에 닿지 못했거나 옛 응답이면 표시하지 않는다.
+  bool get _emailPending => _guardianInfo['emailVerified'] == false;
 
   @override
   void initState() {
@@ -41,6 +49,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       info['email'] = me.email;
       info['phone'] = me.phone;
       info['activated'] = me.activated;
+      info['emailVerified'] = me.emailVerified;
     } catch (_) {
       // 서버에 닿지 못하면 저장된 값을 그대로 쓴다.
     }
@@ -49,6 +58,20 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       _guardianInfo = info;
       _isLoading = false;
     });
+  }
+
+  /// 인증 화면에서 돌아오면(인증했든 나중에 하든) 서버에서 다시 읽어 표시를 맞춘다.
+  Future<void> _verifyEmail() async {
+    final email = _guardianInfo['email'];
+    if (email is! String || email.isEmpty) return;
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EmailVerificationScreen(email: email, proof: widget.emailProof),
+      ),
+    );
+    if (!mounted) return;
+    await _loadGuardianInfo();
   }
 
   Future<void> _changePassword() async {
@@ -281,7 +304,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              Row(
+                              // 표시가 둘이면 좁은 폰에서 줄을 넘긴다.
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
                                 children: [
                                   Container(
                                     padding: const EdgeInsets.symmetric(
@@ -305,6 +331,25 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                       ),
                                     ),
                                   ),
+                                  if (_emailPending)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: eAccent.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        '이메일 인증 대기 중',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: eAccent,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ],
@@ -312,6 +357,31 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                         ),
                       ],
                     ),
+                    // 인증 전에는 어르신을 연결할 수 없다(서버 403) — 여기서 인증을 이어 간다.
+                    if (_emailPending) ...[
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _verifyEmail,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: eAccent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            '이메일 인증하기',
+                            style: GoogleFonts.notoSansKr(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

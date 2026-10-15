@@ -1,10 +1,12 @@
 import 'dart:convert';
 
 import 'package:eldercare/models/nulbom_models.dart';
+import 'package:eldercare/screens/email_verification_screen.dart';
 import 'package:eldercare/screens/guardian_account_screen.dart';
 import 'package:eldercare/screens/guardian_login_screen.dart';
 import 'package:eldercare/screens/guardian_signup_screen.dart';
 import 'package:eldercare/services/auth_service.dart';
+import 'package:eldercare/services/email_proof.dart';
 import 'package:eldercare/services/nulbom_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -159,6 +161,7 @@ void main() {
 
   rejectedKeyTests();
   pendingTests();
+  emailPendingTests();
 
   group('화면', () {
     Future<void> pump(WidgetTester tester, Widget home) async {
@@ -341,6 +344,115 @@ void pendingTests() {
       final p = GuardianProfile.fromJson(
           {'name': '가', 'email': 'a@b.co', 'phone': '010-0000-0000'});
       expect(p.activated, isTrue);
+    });
+  });
+}
+
+/// Firebase 대신 쓰는 가짜 — 이 폰에 세션이 있고, 링크를 눌렀으면 [token]을 준다.
+class FakeProof implements EmailProof {
+  FakeProof({this.token});
+  final String? token;
+
+  @override
+  bool get hasSession => true;
+
+  @override
+  Future<void> sendVerification({required String email, required String password}) async {}
+
+  @override
+  Future<void> resend() async {}
+
+  @override
+  Future<String?> verifiedIdToken() async => token;
+}
+
+void emailPendingTests() {
+  group('이메일 인증 대기', () {
+    Map<String, dynamic> me({required bool emailVerified}) => {
+          'name': '김보호',
+          'email': 'kim@example.com',
+          'phone': '010-1111-2222',
+          'activated': true,
+          'email_verified': emailVerified,
+        };
+
+    Future<void> pump(WidgetTester tester, Widget home) async {
+      GoogleFonts.config.allowRuntimeFetching = false;
+      SharedPreferences.setMockInitialValues({});
+      NulbomApi.guardianKey = 'nlb_test';
+      addTearDown(() => NulbomApi.guardianKey = '');
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      await tester.pumpWidget(MaterialApp(home: home));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('인증 전이면 대기 표시와 인증하기 버튼을 보여 준다', (tester) async {
+      NulbomApi.client = MockClient((request) async => json(me(emailVerified: false)));
+
+      await pump(tester, const GuardianAccountScreen());
+
+      expect(find.text('이메일 인증 대기 중'), findsOneWidget);
+      expect(find.text('이메일 인증하기'), findsOneWidget);
+      expect(find.text('활성 중'), findsOneWidget); // 운영자 확인 표시는 그대로 있다
+    });
+
+    testWidgets('인증됐으면(또는 옛 응답이면) 표시와 버튼이 없다', (tester) async {
+      NulbomApi.client = MockClient((request) async => json(me(emailVerified: true)));
+
+      await pump(tester, const GuardianAccountScreen());
+
+      expect(find.text('이메일 인증 대기 중'), findsNothing);
+      expect(find.text('이메일 인증하기'), findsNothing);
+    });
+
+    testWidgets('인증하기 → 인증을 마치고 돌아오면 서버에서 새로 읽어 표시를 내린다', (tester) async {
+      var verified = false;
+      var meCalls = 0;
+      NulbomApi.client = MockClient((request) async {
+        if (request.url.path == '/v1/guardian/email/verify') {
+          expect(jsonDecode(request.body), {'id_token': 'firebase-id-token'});
+          verified = true;
+          return json({'email_verified': true});
+        }
+        meCalls++;
+        return json(me(emailVerified: verified));
+      });
+
+      await pump(tester,
+          GuardianAccountScreen(emailProof: FakeProof(token: 'firebase-id-token')));
+      expect(meCalls, 1);
+
+      await tester.tap(find.text('이메일 인증하기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(EmailVerificationScreen), findsOneWidget);
+      expect(find.textContaining('kim@example.com로 인증 메일을 보냈어요'), findsOneWidget);
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EmailVerificationScreen), findsNothing);
+      expect(meCalls, 2);
+      expect(find.text('이메일 인증 대기 중'), findsNothing);
+      expect(find.text('이메일 인증하기'), findsNothing);
+    });
+
+    testWidgets('나중에 하기로 돌아와도 서버에서 새로 읽고, 인증 전이면 표시가 남는다', (tester) async {
+      var meCalls = 0;
+      NulbomApi.client = MockClient((request) async {
+        meCalls++;
+        return json(me(emailVerified: false));
+      });
+
+      await pump(tester, GuardianAccountScreen(emailProof: FakeProof()));
+      await tester.tap(find.text('이메일 인증하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('나중에 하기'));
+      await tester.pumpAndSettle();
+
+      expect(meCalls, 2);
+      expect(find.text('이메일 인증 대기 중'), findsOneWidget);
     });
   });
 }
