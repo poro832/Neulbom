@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/nulbom_models.dart' show ElderSummary;
 import '../services/auth_service.dart';
 import '../services/email_proof.dart';
 import '../services/nulbom_api.dart';
@@ -34,10 +35,29 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   /// 서버가 인증 전이라고 했을 때만 true — 서버에 닿지 못했거나 옛 응답이면 표시하지 않는다.
   bool get _emailPending => _guardianInfo['emailVerified'] == false;
 
+  /// 서버의 실제 "관리 중인 어르신" 목록. null이면 아직 불러오는 중.
+  List<ElderSummary>? _elders;
+  bool _eldersFailed = false;
+
   @override
   void initState() {
     super.initState();
     _loadGuardianInfo();
+    _loadElders();
+  }
+
+  Future<void> _loadElders() async {
+    try {
+      final elders = await NulbomApi.guardianElders();
+      if (!mounted) return;
+      setState(() {
+        _elders = elders;
+        _eldersFailed = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _eldersFailed = true);
+    }
   }
 
   Future<void> _loadGuardianInfo() async {
@@ -529,11 +549,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildElderlyItem('김할머니', '78세'),
-                    const Divider(color: eLine, height: 20),
-                    _buildElderlyItem('이할아버지', '82세'),
-                  ],
+                  children: _buildElderlyItems(),
                 ),
               ),
               const SizedBox(height: 28),
@@ -710,7 +726,41 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     );
   }
 
-  Widget _buildElderlyItem(String name, String age) {
+  List<Widget> _buildElderlyItems() {
+    const hint = TextStyle(fontSize: 13, color: eInkSoft);
+    if (_eldersFailed && _elders == null) {
+      return [
+        const Text('어르신 목록을 불러오지 못했어요.', style: hint),
+        TextButton(onPressed: _loadElders, child: const Text('다시 시도')),
+      ];
+    }
+    final elders = _elders;
+    if (elders == null) {
+      return [const Text('불러오는 중이에요.', style: hint)];
+    }
+    if (elders.isEmpty) {
+      return [const Text('연결된 어르신이 없어요', style: hint)];
+    }
+    return [
+      for (var i = 0; i < elders.length; i++) ...[
+        if (i > 0) const Divider(color: eLine, height: 20),
+        _buildElderlyItem(elders[i].name, _statusText(elders[i].status)),
+      ],
+    ];
+  }
+
+  static String _statusText(String status) {
+    switch (status) {
+      case 'pending':
+        return '승인 대기';
+      case 'unconsented':
+        return '공유 동의 전';
+      default:
+        return '연결됨';
+    }
+  }
+
+  Widget _buildElderlyItem(String name, String statusText) {
     return Row(
       children: [
         Column(
@@ -725,7 +775,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(age, style: const TextStyle(fontSize: 12, color: eInkSoft)),
+            Text(statusText, style: const TextStyle(fontSize: 12, color: eInkSoft)),
           ],
         ),
       ],
