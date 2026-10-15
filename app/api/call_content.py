@@ -20,14 +20,14 @@ MEDICATION_STATUSES = ("taken", "not_taken", "unknown")
 # 통화 속 건강·기분 언급 (설계: 통화 속 건강·기분 언급 모으기). 어르신이 한 말을 그대로 옮기며 진단이 아니다.
 MENTION_CATEGORIES = ("body", "sleep", "meal", "mood", "activity")
 MENTION_SAID = ("bad", "ok", "good")
-MAX_MENTION_QUOTE = 40
+MAX_MENTION_QUOTE = 80
 
 
 @dataclass(frozen=True)
 class Mention:
     category: str  # MENTION_CATEGORIES 중 하나
     said: str  # 어르신이 스스로 한 표현: bad | ok | good
-    quote: str  # 어르신 말 그대로(40자 이하)
+    quote: str  # 어르신 말 그대로(어르신이 한 한 문장, 80자 이하)
 
 
 def check_mentions(mentions: Sequence[Mention]) -> None:

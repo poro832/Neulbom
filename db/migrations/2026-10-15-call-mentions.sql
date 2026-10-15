@@ -2,12 +2,14 @@
 -- 기존 서버(RDS)에 한 번 실행한다. 새 설치는 db/schema.sql에 같은 내용이 있다.
 -- 원격 DB에 쓰는 일이므로 실행 전에 내용을 확인하고 사용자가 psql로 직접 돌린다.
 
+-- quote는 어르신이 한 통화 속 한 문장(어르신 발화에서 그대로 가져온 것)이다. 그 문장이 누구 이야기인지와
+-- 느낌(said)은 모델이 정한다. 점수·경보에는 쓰지 않는다.
 CREATE TABLE IF NOT EXISTS call_mentions (
     mention_id BIGSERIAL PRIMARY KEY,
     call_id    BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
     category   TEXT NOT NULL CHECK (category IN ('body', 'sleep', 'meal', 'mood', 'activity')),
     said       TEXT NOT NULL CHECK (said IN ('bad', 'ok', 'good')),
-    quote      TEXT NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 40),
+    quote      TEXT NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 80),
     model_id   TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

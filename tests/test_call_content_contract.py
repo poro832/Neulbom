@@ -238,7 +238,7 @@ def test_mentions_reject_values_outside_the_rules_and_change_nothing(setup):
         Mention("heart", "bad", "x"),
         Mention("body", "awful", "x"),
         Mention("body", "bad", ""),
-        Mention("body", "bad", "가" * 41),
+        Mention("body", "bad", "가" * 81),
     ):
         with pytest.raises(ValueError):
             store.save_mentions(CALL, [M_SLEEP, bad], "m2")
