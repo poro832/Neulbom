@@ -42,6 +42,7 @@ COLUMN_MIGRATIONS = {
     ("calls", "requested_by_guardian_id"): "2026-10-08-guardian-keys.sql",
     ("elders", "share_agreed_at"): "2026-10-10-transcript-sharing.sql",
     ("guardians", "activated_at"): "2026-10-13-guardian-activation.sql",
+    ("guardians", "email_verified_at"): "2026-10-15-email-verified.sql",
 }
 
 NO_LOGIN_SUFFIX = "@no-login.invalid"

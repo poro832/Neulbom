@@ -21,14 +21,24 @@ class PostgresGuardianAccounts:
                 "GREATEST((SELECT COALESCE(MAX(guardian_id), 0) FROM guardians), 1))"
             )
 
-    def create(self, name: str, email: str, phone: str, password_hash: str, *, activated: bool = False) -> int:
+    def create(
+        self,
+        name: str,
+        email: str,
+        phone: str,
+        password_hash: str,
+        *,
+        activated: bool = False,
+        email_verified: bool | None = None,
+    ) -> int:
         email = normalize_email(email)
+        verified = activated if email_verified is None else email_verified
         with self._pool.connection() as conn:
             row = conn.execute(
-                "INSERT INTO guardians (name, email, password_hash, phone_number, activated_at) "
-                "VALUES (%s, %s, %s, %s, CASE WHEN %s THEN now() ELSE NULL END) "
+                "INSERT INTO guardians (name, email, password_hash, phone_number, activated_at, email_verified_at) "
+                "VALUES (%s, %s, %s, %s, CASE WHEN %s THEN now() ELSE NULL END, CASE WHEN %s THEN now() ELSE NULL END) "
                 "ON CONFLICT (email) DO NOTHING RETURNING guardian_id",
-                (name, email, password_hash, phone, activated),
+                (name, email, password_hash, phone, activated, verified),
             ).fetchone()
         if row is None:
             raise EmailTaken(email)
@@ -37,7 +47,8 @@ class PostgresGuardianAccounts:
     def _account(self, where: str, arg) -> Account | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT guardian_id, name, email, phone_number, password_hash, activated_at IS NOT NULL "
+                "SELECT guardian_id, name, email, phone_number, password_hash, activated_at IS NOT NULL, "
+                "email_verified_at IS NOT NULL "
                 "FROM guardians WHERE "
                 + where,
                 (arg,),
@@ -52,10 +63,18 @@ class PostgresGuardianAccounts:
             )
             return cur.rowcount == 1
 
+    def mark_email_verified(self, guardian_id: int) -> bool:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE guardians SET email_verified_at = COALESCE(email_verified_at, now()) WHERE guardian_id = %s",
+                (guardian_id,),
+            )
+            return cur.rowcount == 1
+
     def pending(self) -> list[Account]:
         with self._pool.connection() as conn:
             rows = conn.execute(
-                "SELECT guardian_id, name, email, phone_number, password_hash, false FROM guardians "
+                "SELECT guardian_id, name, email, phone_number, password_hash, false, email_verified_at IS NOT NULL FROM guardians "
                 "WHERE activated_at IS NULL ORDER BY guardian_id"
             ).fetchall()
         return [Account(*row) for row in rows]
@@ -83,7 +102,8 @@ class PostgresGuardianAccounts:
                 raise EmailTaken(email)
             cur = conn.execute(
                 "UPDATE guardians SET email = %s, password_hash = %s, "
-                "activated_at = COALESCE(activated_at, now()) WHERE guardian_id = %s",
+                "activated_at = COALESCE(activated_at, now()), "
+                "email_verified_at = COALESCE(email_verified_at, now()) WHERE guardian_id = %s",
                 (email, password_hash, guardian_id),
             )
             return cur.rowcount == 1
