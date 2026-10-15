@@ -33,6 +33,7 @@ TABLE_MIGRATIONS = {
     "call_turns": "2026-10-10-transcript-sharing.sql",
     "transcript_views": "2026-10-10-transcript-sharing.sql",
     "call_medication": "2026-10-13-call-medication.sql",
+    "call_mentions": "2026-10-15-call-mentions.sql",
     "guardian_devices": "2026-10-13-guardian-devices.sql",
     "elder_link_codes": "2026-10-14-elder-link.sql",
 }
