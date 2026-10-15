@@ -23,15 +23,23 @@ class FakeProof implements EmailProof {
   FakeProof({this.token});
   String? token;
   bool session = false;
+  String? email;
   final sent = <String>[];
 
   @override
   bool get hasSession => session;
 
   @override
+  String? get sessionEmail => session ? email : null;
+
+  @override
+  Future<void> signOut() async => session = false;
+
+  @override
   Future<void> sendVerification({required String email, required String password}) async {
     sent.add('$email|$password');
     session = true;
+    this.email = email;
   }
 
   @override

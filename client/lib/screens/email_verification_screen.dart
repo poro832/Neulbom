@@ -12,8 +12,9 @@ const String _sendFailed = '인증 메일을 보내지 못했어요. 잠시 뒤�
 
 /// 보호자가 가입한 이메일이 본인 것임을 Firebase 인증 메일로 확인한다.
 ///
-/// 비밀번호를 받으면(가입 직후) 바로 인증 메일을 보낸다. 비밀번호가 없고 이 폰에 Firebase
-/// 세션도 없으면(계정 화면에서 열었을 때 등) 비밀번호를 다시 입력받아 보낸다. "인증했어요"를
+/// 비밀번호를 받으면(가입 직후) 바로 인증 메일을 보낸다. 비밀번호가 없고 이 폰에 이 이메일의
+/// Firebase 세션도 없으면(계정 화면에서 열었을 때, 같은 폰의 앞 보호자 세션만 남았을 때 등)
+/// 비밀번호를 다시 입력받아 보낸다. "인증했어요"를
 /// 누르면 Firebase가 준 증명서(ID 토큰)를 서버에 보내고, 서버가 기록하면 true로 닫힌다.
 /// "나중에 하기"·뒤로 가기는 false(또는 null)다. 비밀번호는 저장하거나 기록하지 않는다.
 /// 오류는 SnackBar가 아니라 화면 안 문장으로 보여 준다.
@@ -68,20 +69,26 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     super.dispose();
   }
 
-  /// Firebase가 초기화되지 않은 폰에서도 화면은 떠야 한다 — 그때는 세션이 없는 것으로 본다.
+  /// 이 폰의 Firebase 세션이 이 화면의 이메일 것인가. 같은 폰을 다른 보호자가 썼으면 앞 사람
+  /// 세션이 남아 있을 수 있다 — 그때는 세션이 없는 것으로 보고 비밀번호를 받아 이 이메일로 로그인한다.
+  /// Firebase가 초기화되지 않은 폰에서도 화면은 떠야 한다 — 그때도 세션이 없는 것으로 본다.
   bool _hasSession() {
     try {
-      return _proof.hasSession;
+      if (!_proof.hasSession) return false;
+      final owner = _proof.sessionEmail;
+      return owner != null && owner.trim().toLowerCase() == widget.email.trim().toLowerCase();
     } catch (_) {
       return false;
     }
   }
 
-  void _show(String message, {required bool error}) {
+  /// [needsPassword]를 주면 비밀번호 칸을 보일지도 같은 setState에서 바꾼다.
+  void _show(String message, {required bool error, bool? needsPassword}) {
     setState(() {
       _busy = false;
       _message = message;
       _messageIsError = error;
+      if (needsPassword != null) _needsPassword = needsPassword;
     });
   }
 
@@ -97,8 +104,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       _passwordController.clear();
     } catch (error) {
       if (!mounted) return;
-      _needsPassword = !_hasSession(); // 로그인하지 못했으면 비밀번호를 다시 받아 보낸다
-      _show(error is EmailProofException ? error.message : _sendFailed, error: true);
+      // 로그인하지 못했으면 비밀번호를 다시 받아 보낸다
+      _show(error is EmailProofException ? error.message : _sendFailed,
+          error: true, needsPassword: !_hasSession());
     }
   }
 
@@ -128,8 +136,8 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       _show('인증 메일을 다시 보냈어요.', error: false);
     } catch (error) {
       if (!mounted) return;
-      _needsPassword = !_hasSession();
-      _show(error is EmailProofException ? error.message : _sendFailed, error: true);
+      _show(error is EmailProofException ? error.message : _sendFailed,
+          error: true, needsPassword: !_hasSession());
     }
   }
 
