@@ -1,97 +1,52 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'api_service.dart';
+import 'package:flutter/foundation.dart';
+
+import 'push_registration.dart';
+
+/// 진짜 Firebase에서 이 폰의 푸시 토큰을 얻는다.
+class FirebasePushTokenSource implements PushTokenSource {
+  @override
+  Future<String?> getToken() => FirebaseMessaging.instance.getToken();
+
+  @override
+  Stream<String> get onTokenRefresh => FirebaseMessaging.instance.onTokenRefresh;
+}
 
 class FcmService {
   static final FirebaseMessaging _firebaseMessaging =
       FirebaseMessaging.instance;
 
+  /// 알림 권한을 묻고 수신 리스너를 건다. 토큰 등록은 여기서 하지 않는다 —
+  /// 로그인한 보호자 폰만 등록하므로 `PushRegistration`이 앱 시작·로그인 때 맡는다.
   static Future<void> init() async {
+    PushRegistration.source = FirebasePushTokenSource();
     try {
-      // 권한 요청
       NotificationSettings settings = await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
         sound: true,
         provisional: false,
       );
+      debugPrint('FCM 권한: ${settings.authorizationStatus}');
 
-      print('FCM 권한: ${settings.authorizationStatus}');
+      FirebaseMessaging.onMessage.listen(_handleMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
 
-      // FCM 토큰 가져오기
-      String? token = await _firebaseMessaging.getToken();
-      if (token != null) {
-        print('FCM Token: $token');
-        // 백엔드에 토큰 등록
-        await ApiService.registerFcmToken(token);
-      }
-
-      // 포그라운드 메시지 수신
-      FirebaseMessaging.onMessage.listen(
-        (RemoteMessage message) {
-          print('포그라운드 메시지 수신: ${message.notification?.title}');
-          _handleMessage(message);
-        },
-      );
-
-      // 백그라운드에서 메시지 수신했을 때 앱 열기
-      FirebaseMessaging.onMessageOpenedApp.listen(
-        (RemoteMessage message) {
-          print('알림으로 앱 열림: ${message.notification?.title}');
-          _handleMessage(message);
-        },
-      );
-
-      // 종료된 상태에서 메시지로 앱 시작
-      RemoteMessage? initialMessage =
-          await _firebaseMessaging.getInitialMessage();
+      final initialMessage = await _firebaseMessaging.getInitialMessage();
       if (initialMessage != null) {
-        print('초기 메시지: ${initialMessage.notification?.title}');
         _handleMessage(initialMessage);
       }
-
-      print('FCM 초기화 완료');
     } catch (e) {
-      print('FCM 초기화 실패: $e');
+      debugPrint('FCM 초기화 실패: $e');
     }
   }
 
-  static void _handleMessage(RemoteMessage message) {
-    print('메시지 처리:');
-    print('제목: ${message.notification?.title}');
-    print('본문: ${message.notification?.body}');
-    print('데이터: ${message.data}');
+  // 의도적으로 처리하지 않는다: 알림 내용은 알림 목록에서 본다.
+  // 화면이 켜져 있을 때 받은 알림이나 알림을 눌러 앱을 연 경우 모두 별도 동작 없이 앱만 연다.
+  static void _handleMessage(RemoteMessage message) {}
 
-    // TODO: 여기에 알림 처리 로직 추가
-    // - 화면 네비게이션
-    // - 로컬 알림 표시
-    // - 데이터 저장 등
-  }
-
-  // 토큰 갱신 리스너
+  // 토큰이 바뀌면 서버에 다시 등록한다(로그인한 보호자 폰만).
   static void listenToTokenRefresh() {
-    _firebaseMessaging.onTokenRefresh.listen((String newToken) {
-      print('FCM 토큰 갱신: $newToken');
-      ApiService.registerFcmToken(newToken);
-    });
-  }
-
-  // FCM 구독 (토픽별)
-  static Future<void> subscribeToTopic(String topic) async {
-    try {
-      await _firebaseMessaging.subscribeToTopic(topic);
-      print('토픽 구독: $topic');
-    } catch (e) {
-      print('토픽 구독 실패: $e');
-    }
-  }
-
-  // FCM 구독 해제
-  static Future<void> unsubscribeFromTopic(String topic) async {
-    try {
-      await _firebaseMessaging.unsubscribeFromTopic(topic);
-      print('토픽 구독 해제: $topic');
-    } catch (e) {
-      print('토픽 구독 해제 실패: $e');
-    }
+    PushRegistration.listenToRefresh();
   }
 }

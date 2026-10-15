@@ -11,22 +11,13 @@ const Color eInkSoft = Color(0xFF3C5C8C);
 const Color eLine = Color(0xFFD6E4FF);
 const Color eAccent = Color(0xFF1A6BFF);
 
-class MedicationAlert {
+/// 어르신이 통화에서 약에 대해 한 말 한 건 - 서버의 통화 요약에서 모은다.
+class MedicationEntry {
   final String elder;
-  final String name;
-  final String time;
-  final String dosage;
-  final String nextAlert;
-  final bool notified;
+  final DateTime at;
+  final String medication; // taken | not_taken | unknown
 
-  MedicationAlert({
-    required this.elder,
-    required this.name,
-    required this.time,
-    required this.dosage,
-    required this.nextAlert,
-    required this.notified,
-  });
+  const MedicationEntry({required this.elder, required this.at, required this.medication});
 }
 
 class HealthAlert {
@@ -49,24 +40,6 @@ class HealthAlert {
   });
 }
 
-class HealthCheck {
-  final String date;
-  final String time;
-  final String elder;
-  final String duration;
-  final String status;
-  final String notes;
-
-  HealthCheck({
-    required this.date,
-    required this.time,
-    required this.elder,
-    required this.duration,
-    required this.status,
-    required this.notes,
-  });
-}
-
 class HealthAlertsScreen extends StatefulWidget {
   final int initialTabIndex;
   final String? elderName;
@@ -85,9 +58,14 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // 건강 경고 탭은 서버의 실제 알림을 보여 준다. (약물·건강 확인 탭은 아직 서버 자료가 없다.)
+  // 건강 경고 탭은 서버의 실제 알림을, 약물 복용 탭은 서버의 통화 요약을 보여 준다.
+  // (건강 확인 탭은 아직 서버 자료가 없다.)
   List<HealthAlert>? _serverAlerts;
   String? _alertsError;
+
+  List<MedicationEntry>? _medEntries;
+  List<String> _medUnconsented = const [];
+  String? _medError;
 
   @override
   void initState() {
@@ -98,6 +76,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
       initialIndex: widget.initialTabIndex,
     );
     _loadAlerts();
+    _loadMedication();
   }
 
   Future<void> _loadAlerts() async {
@@ -116,6 +95,67 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
             ? error.message
             : '알림을 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
       });
+    }
+  }
+
+  static const String _medFailure = '약 복용 이야기를 불러오지 못했어요. 잠시 뒤에 다시 해 주세요.';
+
+  Future<void> _loadMedication() async {
+    setState(() {
+      _medEntries = null;
+      _medError = null;
+    });
+    try {
+      var elders = await NulbomApi.guardianElders();
+      if (widget.elderName != null) {
+        elders = elders.where((e) => e.name == widget.elderName).toList();
+      }
+      // 승인 대기 어르신은 아직 통화 자료를 볼 수 없다.
+      elders = elders.where((e) => e.status != 'pending').toList();
+      final entries = <MedicationEntry>[];
+      final unconsented = <String>[];
+      var failed = 0;
+      for (final elder in elders) {
+        try {
+          final result = await NulbomApi.elderCalls(elder.elderId, limit: 14);
+          if (!result.shareAgreed) {
+            unconsented.add(elder.name);
+            continue;
+          }
+          for (final call in result.calls) {
+            final medication = call.medication;
+            if (medication == null) continue;
+            entries.add(MedicationEntry(elder: elder.name, at: call.startedAt, medication: medication));
+          }
+        } catch (_) {
+          failed++;
+        }
+      }
+      if (elders.isNotEmpty && failed == elders.length) {
+        throw const ApiException(0, _medFailure);
+      }
+      entries.sort((a, b) => b.at.compareTo(a.at));
+      if (!mounted) return;
+      setState(() {
+        _medEntries = entries;
+        _medUnconsented = unconsented;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _medError = error is ApiException && error.message.isNotEmpty ? error.message : _medFailure;
+      });
+    }
+  }
+
+  static String _medicationText(String medication) {
+    switch (medication) {
+      case 'taken':
+        return '약을 드셨다고 하셨어요';
+      case 'not_taken':
+        return '아직 안 드셨다고 하셨어요';
+      default:
+        return '약 이야기가 없었어요';
     }
   }
 
@@ -211,38 +251,29 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
   }
 
   Widget _buildMedicationTab() {
-    final medications = <MedicationAlert>[
-      MedicationAlert(
-        elder: '김할머니',
-        name: '혈압약',
-        time: '09:00',
-        dosage: '1일 1회',
-        nextAlert: '내일 09:00',
-        notified: true,
-      ),
-      MedicationAlert(
-        elder: '김할머니',
-        name: '당뇨약',
-        time: '12:00',
-        dosage: '1일 1회',
-        nextAlert: '내일 12:00',
-        notified: true,
-      ),
-      MedicationAlert(
-        elder: '이할아버지',
-        name: '수면제',
-        time: '21:00',
-        dosage: '1일 1회',
-        nextAlert: '오늘 21:00',
-        notified: false,
-      ),
-    ];
-
-    final filteredMedications = widget.elderName == null
-        ? medications
-        : medications
-              .where((medication) => medication.elder == widget.elderName)
-              .toList();
+    if (_medError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _medError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14, color: eInkSoft),
+              ),
+              const SizedBox(height: 12),
+              TextButton(onPressed: _loadMedication, child: const Text('다시 시도')),
+            ],
+          ),
+        ),
+      );
+    }
+    final entries = _medEntries;
+    if (entries == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return SingleChildScrollView(
       child: Padding(
@@ -251,7 +282,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '약물 복용 일정 및 알림',
+              '최근 통화에서 약에 대해 하신 말씀',
               style: GoogleFonts.notoSansKr(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -259,124 +290,53 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
               ),
             ),
             const SizedBox(height: 16),
-            ...filteredMedications.map((med) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: eCard,
-                  border: Border.all(color: eLine),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              med.elder,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: eInkSoft,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              med.name,
-                              style: GoogleFonts.notoSansKr(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: eInk,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${med.time} (${med.dosage})',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: eInkSoft,
-                              ),
-                            ),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: med.notified
-                                ? const Color(0xFF4CAF50).withOpacity(0.15)
-                                : eAccent.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            med.notified ? '알림 완료' : '알림 대기',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: med.notified
-                                  ? const Color(0xFF4CAF50)
-                                  : eAccent,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.notifications_active_rounded,
-                          size: 16,
-                          color: eInkSoft,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '다음 알림: ${med.nextAlert}',
-                          style: const TextStyle(fontSize: 12, color: eInkSoft),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                color: eAccent.withOpacity(0.1),
-                border: Border.all(color: eAccent.withOpacity(0.2)),
-                borderRadius: BorderRadius.circular(12),
+            for (final name in _medUnconsented)
+              _medCard(elder: name, line: '통화 내용 공유에 동의하기 전이에요', when: null),
+            if (entries.isEmpty && _medUnconsented.isEmpty)
+              const Text(
+                '아직 약 복용에 대한 이야기가 없어요.',
+                style: TextStyle(fontSize: 14, color: eInkSoft),
               ),
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.info_outline_rounded,
-                    color: eAccent,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '보호자와 어르신 모두에게 약물 복용 시간에 푸시 알림이 전송됩니다.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: eInkSoft,
-                        height: 1.5,
-                      ),
-                    ),
-                  ),
-                ],
+            for (final entry in entries)
+              _medCard(
+                elder: entry.elder,
+                line: _medicationText(entry.medication),
+                when: _timeText(entry.at),
               ),
-            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _medCard({required String elder, required String line, required String? when}) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: eCard,
+        border: Border.all(color: eLine),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            elder,
+            style: GoogleFonts.notoSansKr(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: eInk,
+            ),
+          ),
+          if (when != null) ...[
+            const SizedBox(height: 2),
+            Text(when, style: const TextStyle(fontSize: 12, color: eInkSoft)),
+          ],
+          const SizedBox(height: 8),
+          Text(line, style: const TextStyle(fontSize: 14, color: eInk, height: 1.5)),
+        ],
       ),
     );
   }
@@ -569,143 +529,13 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
   }
 
   Widget _buildHealthCheckTab() {
-    final healthChecks = <HealthCheck>[
-      HealthCheck(
-        date: '2024-12-15',
-        time: '15:30',
-        elder: '김할머니',
-        duration: '15분',
-        status: '정상',
-        notes: '통화 종료 후 건강 상태 확인 완료. 특이사항 없음.',
-      ),
-      HealthCheck(
-        date: '2024-12-14',
-        time: '14:15',
-        elder: '이할아버지',
-        duration: '10분',
-        status: '정상',
-        notes: '건강 상태 점검. 모든 지표 정상 범위.',
-      ),
-      HealthCheck(
-        date: '2024-12-13',
-        time: '16:45',
-        elder: '김할머니',
-        duration: '25분',
-        status: '정상',
-        notes: '상세 건강 확인 완료. 긍정적인 감정 상태 유지.',
-      ),
-    ];
-
-    final filteredHealthChecks = widget.elderName == null
-        ? healthChecks
-        : healthChecks
-              .where((check) => check.elder == widget.elderName)
-              .toList();
-
-    return SingleChildScrollView(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: filteredHealthChecks.map((check) {
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: eCard,
-                border: Border.all(color: eLine),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            check.elder,
-                            style: GoogleFonts.notoSansKr(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: eInk,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${check.date} ${check.time}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: eInkSoft,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4CAF50).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          check.status,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF4CAF50),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: eBg,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.phone_rounded,
-                              size: 16,
-                              color: eAccent,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '통화 시간: ${check.duration}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: eInkSoft,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          check.notes,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: eInkSoft,
-                            height: 1.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
+        padding: EdgeInsets.all(24),
+        child: Text(
+          '준비 중인 기능이에요',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 14, color: eInkSoft),
         ),
       ),
     );

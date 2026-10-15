@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/nulbom_models.dart';
 import 'email_proof.dart';
 import 'nulbom_api.dart';
+import 'push_registration.dart';
 
 class AuthService {
   /// 로그아웃 때 이 폰의 Firebase(이메일 인증) 세션도 끝낸다. 테스트에서 가짜로 바꾼다.
@@ -10,6 +13,8 @@ class AuthService {
 
   /// Firebase 세션 끝내기를 기다리는 최대 시간 — 멈춰도 로그아웃을 붙잡지 않는다.
   static const Duration _signOutWait = Duration(seconds: 2);
+
+  static const Duration _pushWait = Duration(seconds: 6);
 
   static const String _userTypeKey = 'user_type';
   static const String _phoneKey = 'phone';
@@ -157,6 +162,8 @@ class AuthService {
     await prefs.setString(_phoneKey, profile.phone);
     await prefs.setString('email', profile.email);
     await prefs.setBool(_isLoggedInKey, true);
+    // 로그인·가입 직후 이 폰의 푸시 토큰을 등록해 본다. 서버가 거절해도(이메일 인증 전 등) 조용히 넘어간다.
+    unawaited(PushRegistration.registerIfGuardian());
   }
 
   // 로그아웃
@@ -165,6 +172,10 @@ class AuthService {
     // 할 수 있는 만큼만 한다 — 실패하거나 멈춰도 로그아웃은 계속한다.
     try {
       await emailProof.signOut().timeout(_signOutWait);
+    } catch (_) {}
+    // 푸시 토큰 해제는 열쇠를 지우기 전에 해야 서버가 누구의 토큰인지 안다. 실패·지연돼도 로그아웃은 계속한다.
+    try {
+      await PushRegistration.unregister().timeout(_pushWait);
     } catch (_) {}
     try {
       // 보호자면 서버에서 이 폰의 열쇠도 폐기한다. 어르신 열쇠는 건드리지 않는다.
