@@ -53,26 +53,57 @@ class DayStat {
       );
 }
 
+List<DayStat> _days(Object? value) => (value as List<dynamic>)
+    .map((d) => DayStat.fromJson(d as Map<String, dynamic>))
+    .toList();
+
 class WeeklyStats {
   final String weekStart;
   final List<DayStat> days;
   final int totalCalls;
   final double? avgScore;
+  // 평소 기준에 쓸 수 있는 최근 통화 수(0~14). 옛 서버거나 서버가 못 읽었으면 null.
+  final int? baselineCalls;
 
   const WeeklyStats({
     required this.weekStart,
     required this.days,
     required this.totalCalls,
     required this.avgScore,
+    this.baselineCalls,
   });
 
   factory WeeklyStats.fromJson(Map<String, dynamic> json) => WeeklyStats(
         weekStart: json['week_start'] as String,
-        days: (json['days'] as List<dynamic>)
-            .map((d) => DayStat.fromJson(d as Map<String, dynamic>))
-            .toList(),
+        days: _days(json['days']),
         totalCalls: json['total_calls'] as int,
         avgScore: _asDouble(json['avg_score']),
+        baselineCalls: json['baseline_calls'] as int?,
+      );
+}
+
+/// 한 달(1일~말일)의 날짜별 통계. 서버가 그 달의 날만 모아 준다.
+class MonthlyStats {
+  final String month; // YYYY-MM
+  final List<DayStat> days;
+  final int totalCalls;
+  final double? avgScore;
+  final int? baselineCalls;
+
+  const MonthlyStats({
+    required this.month,
+    required this.days,
+    required this.totalCalls,
+    required this.avgScore,
+    this.baselineCalls,
+  });
+
+  factory MonthlyStats.fromJson(Map<String, dynamic> json) => MonthlyStats(
+        month: json['month'] as String,
+        days: _days(json['days']),
+        totalCalls: json['total_calls'] as int,
+        avgScore: _asDouble(json['avg_score']),
+        baselineCalls: json['baseline_calls'] as int?,
       );
 }
 
