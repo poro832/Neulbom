@@ -204,6 +204,33 @@ def test_pending_lists_waiting_signups_and_activate_opens_one():
     assert "kim@example.com" not in out2.text
 
 
+def test_verify_records_the_email_as_verified_and_pending_shows_the_state():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    keys, directory, out, err = make()
+    accounts = InMemoryGuardianAccounts()
+    gid = accounts.create("가", "a@example.com", "010-1", "H")
+    out0 = Output()
+    run(["guardian", "pending"], keys=keys, directory=directory, out=out0, err=err, accounts=accounts)
+    assert "이메일 인증 대기" in out0.text
+
+    assert run(["guardian", "verify", str(gid)], keys=keys, directory=directory, out=out, err=err, accounts=accounts) == 0
+    assert accounts.profile(gid).email_verified is True
+    assert str(gid) in out.text
+    out2 = Output()
+    run(["guardian", "pending"], keys=keys, directory=directory, out=out2, err=err, accounts=accounts)
+    assert "이메일 인증됨" in out2.text and "이메일 인증 대기" not in out2.text
+
+
+def test_verify_a_missing_guardian_fails():
+    from app.api.guardian_accounts import InMemoryGuardianAccounts
+
+    keys, directory, out, err = make()
+    code = run(["guardian", "verify", "99"], keys=keys, directory=directory, out=out, err=err,
+               accounts=InMemoryGuardianAccounts())
+    assert code == 1 and err.text
+
+
 def test_activate_a_missing_guardian_fails():
     from app.api.guardian_accounts import InMemoryGuardianAccounts
 
