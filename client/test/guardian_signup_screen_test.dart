@@ -165,4 +165,52 @@ void main() {
     expect(find.byType(EmailVerificationScreen), findsNothing);
     expect(find.text('회원가입이 완료되었습니다'), findsOneWidget);
   });
+
+  testWidgets('비밀번호 확인 칸: 입력하는 동안 다르면 바로 알리고, 같아지면 사라진다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(const MaterialApp(home: GuardianSignupScreen()));
+    const mismatch = '비밀번호가 동일하지 않습니다.';
+    final fields = find.byType(TextField);
+
+    await tester.enterText(fields.at(3), 'correct-horse-1');
+    await tester.pump();
+    expect(find.text(mismatch), findsNothing); // 확인 칸을 아직 안 쳤다
+
+    await tester.enterText(fields.at(4), 'correct');
+    await tester.pump();
+    expect(find.text(mismatch), findsOneWidget);
+
+    await tester.enterText(fields.at(4), 'correct-horse-1');
+    await tester.pump();
+    expect(find.text(mismatch), findsNothing);
+
+    await tester.enterText(fields.at(3), 'other-password-2'); // 위 칸을 고쳐도 다시 알린다
+    await tester.pump();
+    expect(find.text(mismatch), findsOneWidget);
+  });
+
+  testWidgets('비밀번호가 다르면 서버에 가입 요청을 보내지 않는다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    var called = false;
+    NulbomApi.client = MockClient((request) async {
+      called = true;
+      return json({'detail': 'x'}, 500);
+    });
+    await tester.pumpWidget(const MaterialApp(home: GuardianSignupScreen()));
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), '김보호');
+    await tester.enterText(fields.at(1), 'kim@example.com');
+    await tester.enterText(fields.at(2), '010-1111-2222');
+    await tester.enterText(fields.at(3), 'correct-horse-1');
+    await tester.enterText(fields.at(4), 'correct-horse-2');
+    await tester.tap(find.text('회원가입 완료'));
+    await tester.pumpAndSettle();
+
+    expect(called, isFalse);
+    expect(find.text('비밀번호가 동일하지 않습니다.'), findsWidgets);
+  });
 }
