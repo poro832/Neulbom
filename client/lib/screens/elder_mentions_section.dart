@@ -8,7 +8,8 @@ import '../services/nulbom_api.dart';
 /// 보호자: 어르신이 통화에서 직접 하신 건강·기분 이야기를 한 주씩 모아 보여 준다.
 ///
 /// 서버는 통화 기록의 어르신이 한 번에 말씀하신 말을 그대로 저장한다. 이 구역은 그 말을 옮길 뿐 판단하지 않는다 —
-/// 그래서 "진단이 아니에요" 안내가 늘 함께 보인다.
+/// 그래서 구역이 보일 때는 "진단이 아니에요" 안내가 늘 함께 보인다.
+/// 어르신이 공유에 동의하기 전에는 구역 전체(제목·주 이동·안내)를 그리지 않는다.
 class ElderMentionsSection extends StatefulWidget {
   final int elderId;
 
@@ -62,6 +63,30 @@ class _ElderMentionsSectionState extends State<ElderMentionsSection> {
 
   @override
   Widget build(BuildContext context) {
+    return FutureBuilder<ElderMentions>(
+      future: _future,
+      builder: (context, snapshot) {
+        final done = snapshot.connectionState == ConnectionState.done;
+        final mentions = done ? snapshot.data : null;
+        // 동의 전 안내는 바로 위 최근 통화 요약 카드가 이미 한다. 이 구역은 통째로 숨긴다.
+        if (mentions != null && !mentions.shareAgreed) return const SizedBox.shrink();
+        final Widget body;
+        if (!done) {
+          body = const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: LinearProgressIndicator(),
+          );
+        } else if (snapshot.hasError) {
+          body = _buildError(snapshot.error);
+        } else {
+          body = _buildBody(mentions!);
+        }
+        return _buildFrame(body);
+      },
+    );
+  }
+
+  Widget _buildFrame(Widget body) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -78,19 +103,7 @@ class _ElderMentionsSectionState extends State<ElderMentionsSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              FutureBuilder<ElderMentions>(
-                future: _future,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8),
-                      child: LinearProgressIndicator(),
-                    );
-                  }
-                  if (snapshot.hasError) return _buildError(snapshot.error);
-                  return _buildBody(snapshot.data!);
-                },
-              ),
+              body,
               const SizedBox(height: 12),
               const Divider(height: 1, color: eLine),
               const SizedBox(height: 10),
@@ -123,15 +136,25 @@ class _ElderMentionsSectionState extends State<ElderMentionsSection> {
             spacing: 8,
             children: [
               Text(
-                '이번 주 어르신이 말씀하신 것',
+                '어르신이 말씀하신 것',
                 style: GoogleFonts.notoSansKr(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   color: eInk,
                 ),
               ),
-              if (_weeksBack > 0)
-                Text('$_weeksBack주 전', style: const TextStyle(fontSize: 13, color: eInkSoft)),
+              // 지금 보는 주: 이번 주 / 1주 전 … 4주 전
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: eAccent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  _weeksBack == 0 ? '이번 주' : '$_weeksBack주 전',
+                  style: const TextStyle(fontSize: 13, color: eAccent, fontWeight: FontWeight.w600),
+                ),
+              ),
             ],
           ),
         ),
@@ -172,9 +195,6 @@ class _ElderMentionsSectionState extends State<ElderMentionsSection> {
 
   Widget _buildBody(ElderMentions mentions) {
     const plain = TextStyle(fontSize: 14, color: eInkSoft);
-    if (!mentions.shareAgreed) {
-      return const Text('어르신이 동의한 뒤에 볼 수 있어요.', style: plain);
-    }
     final spoken = mentions.categories.where((c) => c.total > 0).toList();
     if (spoken.isEmpty) {
       final when = _weeksBack == 0 ? '이번 주에는' : '이 주에는';
