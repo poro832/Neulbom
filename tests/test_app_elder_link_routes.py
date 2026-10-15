@@ -53,6 +53,7 @@ def pending_guardian_kit():
         "/v1/guardian/signup",
         json={"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "password": "correct-horse-1"},
     ).json()
+    kit.data.accounts.mark_email_verified(kit.data.accounts.find_by_email("kim@example.com").guardian_id)
     return kit, {"Authorization": f"Bearer {signup['key']}"}
 
 

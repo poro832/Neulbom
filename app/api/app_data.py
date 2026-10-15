@@ -46,6 +46,7 @@ from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeSto
 from app.api.pairing import PairingStore, hash_code, new_code
 from app.api.rate_limit import FailureLimiter, KeyedFailureLimiter
 from app.api.reports import Reports, kst_week_start, sunday_on_or_before
+from app.firebase_verify import EmailVerifier
 from app.scheduler import KST
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,9 @@ BAD_CURRENT = "현재 비밀번호를 확인해 주세요"
 MIN_PASSWORD = 8
 APP_KEY_LABEL = "앱"
 NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
+EMAIL_NOT_VERIFIED = "이메일 인증 후 사용할 수 있어요"
+BAD_EMAIL_PROOF = "이메일 인증을 확인하지 못했어요"
+EMAIL_VERIFY_OFF = "이메일 인증을 아직 쓸 수 없어요"
 BAD_LINK = "연결 코드를 확인해 주세요"
 LINK_WAITING = "보호자 연결을 기다리고 있어요"
 ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
@@ -108,6 +112,9 @@ class AppData:
     links: LinkCodeStore = field(default_factory=InMemoryLinkCodeStore)
     elder_signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
     link_attempts: FailureLimiter = field(default_factory=FailureLimiter)
+    # 보호자 이메일 인증: Firebase 증명서 확인기(없으면 인증 주소는 닫힌다) / 서버 전체 분당 20회 실패 한도
+    email_verifier: EmailVerifier | None = None
+    email_verify_failures: FailureLimiter = field(default_factory=FailureLimiter)
 
 
 def iso_kst(epoch: float) -> str:
@@ -168,6 +175,10 @@ class LinkRequest(BaseModel):
     code: str = Field(pattern=r"^[0-9]{8}$")
 
 
+class EmailProofRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+
+
 class ContactRequest(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     relation: str = Field(default="", max_length=20)
@@ -205,9 +216,14 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         return elder_id
 
     def active_guardian_id_of(authorization: str | None) -> int:
-        """열쇠 + 운영자가 열어 준 보호자일 것. 계정 표에 없는 보호자(운영 도구가 만든 열쇠 전용)는 열린 것으로 본다."""
+        """열쇠 + 이메일 인증 + 운영자가 열어 준 보호자일 것. 계정 표에 없는 보호자(운영 도구가 만든 열쇠 전용)는 열린 것으로 본다.
+
+        이메일 인증을 먼저 검사한다 — 보호자가 직접 할 수 있는 일을 먼저 알린다.
+        """
         guardian_id = guardian_id_of(authorization)
         account = data.accounts.profile(guardian_id)
+        if account is not None and not account.email_verified:
+            raise HTTPException(status_code=403, detail=EMAIL_NOT_VERIFIED)
         if account is not None and not account.activated:
             raise HTTPException(status_code=403, detail=NOT_ACTIVATED)
         return guardian_id
@@ -450,6 +466,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "email": email,
             "phone": body.phone,
             "activated": False,
+            "email_verified": False,
         }
 
     @app.post("/v1/guardian/login")
@@ -480,6 +497,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "email": account.email,
             "phone": account.phone,
             "activated": account.activated,
+            "email_verified": account.email_verified,
         }
 
     @app.post("/v1/guardian/devices")
@@ -525,7 +543,29 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "email": account.email,
             "phone": account.phone,
             "activated": account.activated,
+            "email_verified": account.email_verified,
         }
+
+    @app.post("/v1/guardian/email/verify")
+    @guarded
+    def verify_email(body: EmailProofRequest, authorization: str | None = Header(default=None)) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        account = data.accounts.profile(guardian_id)
+        if account is None or account.email_verified:
+            return {"email_verified": True}
+        if data.email_verifier is None:
+            raise HTTPException(status_code=503, detail=EMAIL_VERIFY_OFF)
+        if data.email_verify_failures.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        proof = data.email_verifier.verify(body.id_token)
+        # 틀린 증명서, 미인증 이메일, 남의 이메일을 구분해 알려 주지 않는다.
+        if proof is None or normalize_email(proof.email) != account.email:
+            data.email_verify_failures.record_failure()
+            logger.warning("이메일 인증 실패 guardian_id=%s", guardian_id)
+            raise HTTPException(status_code=401, detail=BAD_EMAIL_PROOF)
+        data.accounts.mark_email_verified(guardian_id)
+        logger.info("이메일 인증을 마쳤다 guardian_id=%s", guardian_id)
+        return {"email_verified": True}
 
     @app.post("/v1/guardian/password")
     @guarded
