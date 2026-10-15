@@ -484,9 +484,9 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildElderlyItem('김할머니', '78세', '정상'),
+                    _buildElderlyItem('김할머니', '78세'),
                     const Divider(color: eLine, height: 20),
-                    _buildElderlyItem('이할아버지', '82세', '주의'),
+                    _buildElderlyItem('이할아버지', '82세'),
                   ],
                 ),
               ),
@@ -664,13 +664,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     );
   }
 
-  Widget _buildElderlyItem(String name, String age, String status) {
-    final statusColor = status == '정상'
-        ? const Color(0xFF4CAF50)
-        : const Color(0xFFFFA726);
-
+  Widget _buildElderlyItem(String name, String age) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,21 +681,6 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             const SizedBox(height: 2),
             Text(age, style: const TextStyle(fontSize: 12, color: eInkSoft)),
           ],
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            status,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: statusColor,
-            ),
-          ),
         ),
       ],
     );
