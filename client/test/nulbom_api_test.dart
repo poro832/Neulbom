@@ -331,6 +331,47 @@ void main() {
     expect(fresh.emailVerified, isFalse);
   });
 
+  test('월간 통계: 달을 지정하면 month로 실어 보내고, 없으면 붙이지 않는다', () async {
+    final seen = <http.Request>[];
+    NulbomApi.client = MockClient((request) async {
+      seen.add(request);
+      return json({
+        'month': '2026-10',
+        'days': [
+          {'date': '2026-10-01', 'calls': 1, 'avg_score': 40.0}
+        ],
+        'total_calls': 1,
+        'avg_score': 40.0,
+        'baseline_calls': 7,
+      });
+    });
+
+    final m = await NulbomApi.monthly(12, month: '2026-10', key: 'nlb_test');
+    await NulbomApi.monthly(12, key: 'nlb_test');
+
+    expect(seen[0].url.path, '/v1/elders/12/monthly');
+    expect(seen[0].url.query, 'month=2026-10');
+    expect(seen[0].headers['Authorization'], 'Bearer nlb_test');
+    expect(seen[1].url.toString(), endsWith('/v1/elders/12/monthly'));
+    expect(m.days.single.avgScore, 40.0);
+    expect(m.baselineCalls, 7);
+  });
+
+  test('월간 통계: 열쇠가 없으면 서버를 부르지 않는다', () async {
+    NulbomApi.guardianKey = '';
+    var called = false;
+    NulbomApi.client = MockClient((request) async {
+      called = true;
+      return json({});
+    });
+
+    await expectLater(
+      NulbomApi.monthly(12, month: '2026-10'),
+      throwsA(isA<ApiException>().having((e) => e.statusCode, 'status', 401)),
+    );
+    expect(called, isFalse);
+  });
+
   test('건강·기분 언급: 주를 지정해 읽고 분류별 개수와 어르신 말을 받는다', () async {
     late http.Request seen;
     NulbomApi.client = MockClient((request) async {

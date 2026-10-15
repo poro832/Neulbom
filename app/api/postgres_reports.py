@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.analysis.baseline import BASELINE_WINDOW
 from app.api.reports import CallLine, DayStat, ElderSummary, week_bounds
 
 _FINISHED = ["completed", "no_answer", "failed"]
@@ -82,3 +83,19 @@ class PostgresReports:
             )
             for row in rows
         ]
+
+    def baseline_calls(self, elder_id: int) -> int:
+        # 창(최신 받은 통화 N통)을 먼저 자르고 그 안에서 거른다. 지표 없는 통화는 JOIN에서 빠진다.
+        with self._pool.connection() as conn:
+            (count,) = conn.execute(
+                """
+                SELECT count(*)
+                FROM (SELECT c.call_id FROM calls c
+                       WHERE c.elder_id = %s AND c.status = 'completed'
+                       ORDER BY c.call_id DESC LIMIT %s) w
+                JOIN call_metrics m ON m.call_id = w.call_id
+                WHERE NOT m.degraded
+                """,
+                (elder_id, BASELINE_WINDOW),
+            ).fetchone()
+        return count

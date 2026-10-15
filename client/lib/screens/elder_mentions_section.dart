@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../main.dart' show eAccent, eCard, eInk, eInkSoft, eLine;
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../utils/kst.dart';
 
 /// 보호자: 어르신이 통화에서 직접 하신 건강·기분 이야기를 한 주씩 모아 보여 준다.
 ///
@@ -16,7 +17,7 @@ class ElderMentionsSection extends StatefulWidget {
   /// 테스트에서 바꾼다. 기본은 [NulbomApi.elderMentions].
   final Future<ElderMentions> Function(int elderId, {String? weekStart})? fetch;
 
-  /// 테스트에서 바꾼다. 기본은 [DateTime.now].
+  /// 테스트에서 바꾼다. 기본은 [kstNow] — 필드를 한국 날짜로 읽어 서버의 주 경계와 같게 한다.
   final DateTime Function()? now;
 
   const ElderMentionsSection({super.key, required this.elderId, this.fetch, this.now});
@@ -46,7 +47,7 @@ class _ElderMentionsSectionState extends State<ElderMentionsSection> {
 
   /// 지금 보는 주의 일요일. 오늘이 속한 주의 일요일에서 `7 * _weeksBack`일 앞이다.
   DateTime _shownWeekStart() {
-    final today = (widget.now ?? DateTime.now)();
+    final today = (widget.now ?? kstNow)();
     // 날짜 생성자로 빼서 서머타임이 있는 시간대에서도 자정이 밀리지 않게 한다.
     return DateTime(today.year, today.month, today.day - today.weekday % 7 - 7 * _weeksBack);
   }

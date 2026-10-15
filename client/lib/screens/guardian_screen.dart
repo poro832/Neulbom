@@ -11,6 +11,7 @@ import 'guardian_account_screen.dart';
 import 'connection_code_section.dart';
 import 'role_selection_screen.dart';
 import '../services/auth_service.dart';
+import '../utils/kst.dart';
 
 // 색상
 const Color eBg = Color(0xFFEFF6FF);
@@ -165,9 +166,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
       '${date.year}년 ${date.month}월 ${date.day}일';
 
   String _currentWeekRange() {
-    final today = DateTime.now();
-    final sunday = today.subtract(Duration(days: today.weekday % 7));
-    final saturday = sunday.add(const Duration(days: 6));
+    // 이번 주는 한국 날짜로 정한다(서버의 주간 통계와 같은 주). 필드만 읽는다.
+    final today = kstNow();
+    final sunday = DateTime(today.year, today.month, today.day - today.weekday % 7);
+    final saturday = DateTime(sunday.year, sunday.month, sunday.day + 6);
     return '${_formatDate(sunday)} ~ ${_formatDate(saturday)}';
   }
 

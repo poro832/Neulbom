@@ -59,6 +59,44 @@ void main() {
     expect(w.days[1].avgScore, 10.0);
     expect(w.days[0].avgScore, isNull);
     expect(w.avgScore, 10.0);
+    expect(w.baselineCalls, isNull); // 옛 서버는 이 필드가 없다
+  });
+
+  test('주간 통계: 평소 기준 통화 수를 읽는다', () {
+    final w = WeeklyStats.fromJson({
+      'week_start': '2026-10-04',
+      'days': [],
+      'total_calls': 0,
+      'avg_score': null,
+      'baseline_calls': 5,
+    });
+    expect(w.baselineCalls, 5);
+  });
+
+  test('월간 통계: 그 달의 날과 합계, 평소 기준 통화 수를 읽는다', () {
+    final m = MonthlyStats.fromJson({
+      'month': '2026-10',
+      'days': [
+        for (var i = 1; i <= 31; i++)
+          {'date': '2026-10-${i.toString().padLeft(2, '0')}', 'calls': i == 5 ? 2 : 0, 'avg_score': i == 5 ? 15 : null},
+      ],
+      'total_calls': 2,
+      'avg_score': 15,
+      'baseline_calls': 2,
+    });
+    expect(m.month, '2026-10');
+    expect(m.days.length, 31);
+    expect(m.days[4].calls, 2);
+    expect(m.days[4].avgScore, 15.0); // 정수로 와도 double
+    expect(m.days[0].avgScore, isNull);
+    expect(m.totalCalls, 2);
+    expect(m.avgScore, 15.0);
+    expect(m.baselineCalls, 2);
+
+    final empty = MonthlyStats.fromJson(
+        {'month': '2026-11', 'days': [], 'total_calls': 0, 'avg_score': null, 'baseline_calls': null});
+    expect(empty.avgScore, isNull);
+    expect(empty.baselineCalls, isNull); // 서버가 기준 수를 못 읽으면 null이다
   });
 
   test('알림과 통화 줄과 연락처', () {
