@@ -189,7 +189,7 @@ def test_me_returns_the_profile_and_needs_a_key():
     kit = make_app_kit()
     key = sign_up(kit).json()["key"]
     r = kit.client.get("/v1/guardian/me", headers=bearer(key))
-    assert r.json() == {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "activated": False}
+    assert r.json() == {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "activated": False, "email_verified": False}
     assert kit.client.get("/v1/guardian/me").status_code == 401
 
 
@@ -279,6 +279,7 @@ def test_a_new_signup_is_pending_and_cannot_issue_invites_or_approve():
     body = sign_up(kit).json()
     assert body["activated"] is False
     assert kit.client.get("/v1/guardian/me", headers=bearer(body["key"])).json()["activated"] is False
+    kit.data.accounts.mark_email_verified(kit.data.accounts.find_by_email("kim@example.com").guardian_id)
 
     invite = kit.client.post("/v1/guardian/invite", headers=bearer(body["key"]))
     assert invite.status_code == 403 and invite.json() == {"detail": "운영자 확인 후 사용할 수 있어요"}
@@ -290,6 +291,7 @@ def test_an_activated_guardian_can_issue_invites():
     kit = make_app_kit()
     body = sign_up(kit).json()
     kit.data.accounts.activate(kit.data.accounts.find_by_email("kim@example.com").guardian_id)
+    kit.data.accounts.mark_email_verified(kit.data.accounts.find_by_email("kim@example.com").guardian_id)
 
     assert kit.client.post("/v1/guardian/invite", headers=bearer(body["key"])).status_code == 200
     assert kit.client.get("/v1/guardian/me", headers=bearer(body["key"])).json()["activated"] is True
