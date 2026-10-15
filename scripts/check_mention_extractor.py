@@ -5,7 +5,7 @@
 판정: **금지 위반**(있으면 안 되는 분류가 나옴 — 가장 나쁨)과 **놓침**(있어야 할 분류가 안 나옴).
 금지 항목은 분류 이름이거나 (분류, 느낌) 쌍이다. 통과 기준은 금지 위반 0건이다. 놓침은 보고만 한다.
 인용이 어르신 말에 그대로 있는지는 서버 검증(parse_mentions)이 보장하므로 사례 판정에 쓰지 않는다.
-저장되는 글은 어르신의 한 문장(80자 이하)이라, 그보다 긴 문장에서만 나온 언급은 통째로 버려진다.
+저장되는 글은 모델이 번호로 가리킨 어르신 발화 원문(3~80자)이라, 80자를 넘는 발화의 언급은 통째로 버려진다.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(".env")
 
 from app.api.call_content import MAX_MENTION_QUOTE  # noqa: E402
-from app.media.mention_extract import _SENTENCE_END, extractor_from_env  # noqa: E402
+from app.media.mention_extract import extractor_from_env  # noqa: E402
 
 ALL = {"body", "sleep", "meal", "mood", "activity"}
 CASES = [
@@ -45,11 +45,9 @@ CASES = [
     ("여러 가지", [("ai", "요즘 어떠세요?"), ("elder", "밥은 잘 먹는데 밤에 자꾸 깨고, 허리도 아프고, 적적해요.")], {"meal", "sleep", "body", "mood"}, set()),
     # 부정 표현: 하드 기준은 body+bad가 나오지 않는 것
     ("부정 표현", [("ai", "몸은 어떠세요?"), ("elder", "하나도 안 아파요.")], set(), {("body", "bad")}),
-    # 두 문장: body에 저장된 문장은 둘째 문장이어야 한다
+    # 두 문장이 한 발화에: body만 기대(발화가 통째로 저장된다)
     ("서로 다른 두 문장", [("ai", "어떠세요?"), ("elder", "다리는 하나도 안 아파요. 근데 허리가 좀 아파요.")], {"body"}, set()),
 ]
-
-SECOND_SENTENCE = "근데 허리가 좀 아파요."
 
 
 def _forbidden_hit(mentions, forbidden) -> list:
@@ -66,10 +64,7 @@ def _forbidden_hit(mentions, forbidden) -> list:
 
 def _has_long_sentence(turns) -> bool:
     return any(
-        len(s.strip()) > MAX_MENTION_QUOTE
-        for who, text in turns
-        if who == "elder"
-        for s in _SENTENCE_END.split(text)
+        len(text.strip()) > MAX_MENTION_QUOTE for who, text in turns if who == "elder"
     )
 
 
@@ -107,12 +102,6 @@ def main() -> int:
         if missing:
             misses.append(f"{name}: 놓침 {missing}")
             print(f"      놓침: {missing}")
-        if name == "서로 다른 두 문장":
-            bodies = [m.quote for m in got if m.category == "body"]
-            ok = bool(bodies) and all(q == SECOND_SENTENCE for q in bodies)
-            print(f"      저장 문장이 둘째 문장인가: {'예' if ok else '아니오'}")
-            if bodies and not ok:
-                violations.append(f"{name}: 저장 문장이 둘째 문장이 아님 {bodies}")
     print(f"\n전체 사례: {len(CASES)}")
     print(f"금지 위반: {len(violations)}건")
     for v in violations:

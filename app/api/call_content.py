@@ -27,7 +27,7 @@ MAX_MENTION_QUOTE = 80
 class Mention:
     category: str  # MENTION_CATEGORIES 중 하나
     said: str  # 어르신이 스스로 한 표현: bad | ok | good
-    quote: str  # 어르신 말 그대로(어르신이 한 한 문장, 80자 이하)
+    quote: str  # 통화 기록의 어르신 발화 원문(80자 이하)
 
 
 def check_mentions(mentions: Sequence[Mention]) -> None:
