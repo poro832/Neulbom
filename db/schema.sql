@@ -254,7 +254,7 @@ CREATE TABLE call_medication (
 COMMENT ON TABLE call_medication IS
     '어르신이 약을 먹었다고 말했는지(통화별). LLM이 어르신의 말을 셋으로 나눈 것일 뿐 점수·경보에는 쓰지 않는다.';
 
--- 통화 속 건강·기분 언급. quote는 통화 기록의 어르신 발화 한 토막(원문 그대로)이고, 그 발화가 누구 이야기인지와
+-- 통화 속 건강·기분 언급. quote는 통화 기록의 어르신 발화 한 번 전체(원문 그대로)이고, 그 발화가 누구 이야기인지와
 -- 느낌(said)은 모델이 정한다. 점수·경보에는 쓰지 않는다. 30일 뒤 지운다.
 CREATE TABLE call_mentions (
     mention_id BIGSERIAL PRIMARY KEY,

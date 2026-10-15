@@ -7,7 +7,7 @@ import '../services/nulbom_api.dart';
 
 /// 보호자: 어르신이 통화에서 직접 하신 건강·기분 이야기를 한 주씩 모아 보여 준다.
 ///
-/// 서버는 어르신 말에 그대로 있는 문장만 저장한다. 이 구역은 그 말을 옮길 뿐 판단하지 않는다 —
+/// 서버는 통화 기록의 어르신이 한 번에 말씀하신 말을 그대로 저장한다. 이 구역은 그 말을 옮길 뿐 판단하지 않는다 —
 /// 그래서 "진단이 아니에요" 안내가 늘 함께 보인다.
 class ElderMentionsSection extends StatefulWidget {
   final int elderId;
