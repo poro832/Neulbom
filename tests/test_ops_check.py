@@ -28,6 +28,7 @@ GOOD_ENV = {
     "CLAWOPS_API_KEY": "SECRET-CLAWOPS",
     "CLAWOPS_FROM_NUMBER": "070",
     "PUBLIC_BASE_URL": "https://a",
+    "FIREBASE_PROJECT_ID": "demo-project",
     "STREAM_BASE_URL": "wss://a",
     "RECORDINGS_BUCKET": "b",
 }
@@ -48,6 +49,12 @@ def test_missing_settings_fail_and_name_what_breaks():
     checks = by_name(check_environment(env))
     c = checks["대화·요약·복용 확인(CLOVA Studio)"]
     assert c.level == FAIL and "CLOVA_STUDIO_API_KEY" in c.detail
+
+
+def test_a_missing_firebase_project_id_fails_and_names_what_breaks():
+    env = {k: v for k, v in GOOD_ENV.items() if k != "FIREBASE_PROJECT_ID"}
+    c = by_name(check_environment(env))["이메일 인증(Firebase)"]
+    assert c.level == FAIL and "FIREBASE_PROJECT_ID" in c.detail
 
 
 def test_push_key_file_states():
@@ -129,6 +136,12 @@ def test_a_missing_elder_link_table_names_its_migration():
     checks = by_name(check_database(FakePool(FULL_TABLES - {"elder_link_codes"}, FULL_COLUMNS)))
     assert checks["표 elder_link_codes"].level == FAIL
     assert "2026-10-14-elder-link.sql" in checks["표 elder_link_codes"].detail
+
+
+def test_a_missing_email_verified_column_names_its_migration():
+    checks = by_name(check_database(FakePool(FULL_TABLES, FULL_COLUMNS - {("guardians", "email_verified_at")})))
+    assert checks["칸 guardians.email_verified_at"].level == FAIL
+    assert "2026-10-15-email-verified.sql" in checks["칸 guardians.email_verified_at"].detail
 
 
 def test_no_guardian_with_a_login_is_a_warning():

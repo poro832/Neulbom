@@ -75,6 +75,7 @@ from app.media.stream_server import (
 )
 from app.media.call_summary import CallSummarizer, summarizer_from_env
 from app.media.medication_check import MedicationClassifier, classifier_from_env
+from app.firebase_verify import verifier_from_env
 from app.post_call import analyze_session
 from app.post_call_content import ConversationRecorder
 from app.push import PushNotifier, sender_from_env
@@ -750,7 +751,7 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
     return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
 
 
-def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppData, AlertRules]:
+def app_data_for(pool, *, guardian_auth, elders, push_sender=None, email_verifier=None) -> tuple[AppData, AlertRules]:
     """풀이 있으면 DB 저장소를, 없으면 빈 메모리 저장소를 묶는다.
 
     메모리 모드에는 열쇠도 연결 코드도 만들 방법이 없어 보호자·어르신 주소가 전부 401이다.
@@ -771,6 +772,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppD
             alerts=alerts,
             invites=InMemoryInviteStore(),
             devices=InMemoryDeviceStore(is_key_active=is_key_active),
+            email_verifier=email_verifier,
         )
         notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
         return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -802,6 +804,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None) -> tuple[AppD
         accounts=PostgresGuardianAccounts(pool=pool),
         devices=PostgresDeviceStore(pool=pool),
         links=PostgresLinkCodeStore(pool=pool),
+        email_verifier=email_verifier,
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -815,8 +818,15 @@ _guardian_auth, _elders = guardian_auth_for(_pool)
 _push_sender = sender_from_env()
 if _push_sender is None:
     logger.info("푸시 꺼짐 — FCM_SERVICE_ACCOUNT_FILE이 없거나 읽지 못했다")
+_email_verifier = verifier_from_env(os.environ)
+if _email_verifier is None:
+    logger.info("이메일 인증 꺼짐 — FIREBASE_PROJECT_ID가 없다")
 _app_data, _alert_rules = app_data_for(
-    _pool, guardian_auth=_guardian_auth, elders=_elders, push_sender=_push_sender
+    _pool,
+    guardian_auth=_guardian_auth,
+    elders=_elders,
+    push_sender=_push_sender,
+    email_verifier=_email_verifier,
 )
 
 app = build_server(

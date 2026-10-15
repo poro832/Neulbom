@@ -8,6 +8,7 @@
     guardian add --name ... --phone ...           열쇠 전용 보호자를 만든다
     guardian pending                              운영자 확인을 기다리는 가입자 목록
     guardian activate N                           가입자를 연다 (어르신 등록·승인이 가능해진다)
+    guardian verify N   보호자의 이메일을 수동으로 인증한 것으로 기록한다 (Firebase를 못 쓰는 사람용)
     check                                         서버 반영 점검 — DB 표·칸, 설정, 푸시 열쇠(비밀 값은 출력하지 않는다)
     guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
     elder assign --elder-id N --guardian-id M     어르신을 그 보호자에게 옮긴다
@@ -60,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     guardian.add_parser("pending", help="운영자 확인을 기다리는 보호자")
     activate = guardian.add_parser("activate", help="보호자를 연다")
     activate.add_argument("guardian_id", type=int)
+    verify = guardian.add_parser("verify", help="보호자의 이메일 인증을 수동으로 기록한다")
+    verify.add_argument("guardian_id", type=int)
     set_login = guardian.add_parser("set-login", help="보호자에게 이메일 로그인을 붙인다")
     set_login.add_argument("guardian_id", type=int)
     set_login.add_argument("--email", required=True)
@@ -157,10 +160,12 @@ def run(
         if not rows:
             out("확인을 기다리는 가입자가 없다.")
             return 0
-        out("보호자  이름        이메일                         전화번호")
+        out("보호자  이름        이메일                         전화번호        이메일 인증")
         for a in rows:
-            out(f"{a.guardian_id:<7} {a.name:<10} {a.email:<30} {a.phone}")
+            state = "이메일 인증됨" if a.email_verified else "이메일 인증 대기"
+            out(f"{a.guardian_id:<7} {a.name:<10} {a.email:<30} {a.phone:<15} {state}")
         out("전화번호로 본인을 확인한 뒤 `guardian activate <번호>`로 연다.")
+        out("이메일 인증이 대기면 `guardian verify <번호>`로 수동 인증을 기록할 수 있다.")
         return 0
 
     if (args.group, args.action) == ("guardian", "activate"):
@@ -171,6 +176,16 @@ def run(
             err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
             return 1
         out(f"보호자 {args.guardian_id}번을 열었다. 이제 어르신을 등록하고 승인할 수 있다.")
+        return 0
+
+    if (args.group, args.action) == ("guardian", "verify"):
+        if accounts is None:
+            err("계정 저장소가 없다.")
+            return 1
+        if not accounts.mark_email_verified(args.guardian_id):
+            err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
+            return 1
+        out(f"보호자 {args.guardian_id}번의 이메일을 인증된 것으로 기록했다.")
         return 0
 
     if (args.group, args.action) == ("guardian", "set-login"):

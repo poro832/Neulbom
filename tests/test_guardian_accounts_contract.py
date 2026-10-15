@@ -108,3 +108,39 @@ def test_set_login_opens_the_account(accounts):
     gid = accounts.create("가", "placeholder@no-login.invalid", "010-1", "not-a-login")
     accounts.set_login(gid, "real@example.com", "HASH")
     assert accounts.profile(gid).activated is True
+
+
+def test_a_new_app_account_is_unverified_until_marked(accounts):
+    gid = accounts.create("가", "v1@example.com", "010-1", "H")
+    assert accounts.profile(gid).email_verified is False
+
+    assert accounts.mark_email_verified(gid) is True
+
+    assert accounts.profile(gid).email_verified is True
+    assert accounts.find_by_email("v1@example.com").email_verified is True
+    assert accounts.mark_email_verified(999_999) is False
+
+
+def test_an_account_opened_by_the_operator_is_verified_by_default(accounts):
+    gid = accounts.create("가", "v2@example.com", "010-1", "H", activated=True)
+    assert accounts.profile(gid).email_verified is True
+
+
+def test_the_verified_flag_can_be_set_explicitly(accounts):
+    gid = accounts.create("가", "v3@example.com", "010-1", "H", activated=True, email_verified=False)
+    assert accounts.profile(gid).email_verified is False
+
+
+def test_set_login_marks_the_email_verified(accounts):
+    gid = accounts.create("가", "v4@example.com", "010-1", "H")
+    assert accounts.set_login(gid, "v4-new@example.com", "H2") is True
+    assert accounts.profile(gid).email_verified is True
+
+
+def test_pending_reports_the_real_verification_state(accounts):
+    gid = accounts.create("가", "v5@example.com", "010-1", "H")
+    assert [(a.guardian_id, a.email_verified) for a in accounts.pending() if a.guardian_id == gid] == [(gid, False)]
+
+    accounts.mark_email_verified(gid)
+
+    assert [(a.guardian_id, a.email_verified) for a in accounts.pending() if a.guardian_id == gid] == [(gid, True)]

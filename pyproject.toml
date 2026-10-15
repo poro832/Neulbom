@@ -38,6 +38,8 @@ dependencies = [
     # app/push.py가 FCM 서비스 계정 토큰을 받을 때만 쓴다. 그래도 런타임 의존성이다 — dev 그룹에 두면
     # 배포한 서버가 푸시 설정을 읽는 순간 ImportError로 죽는다(httpx·boto3와 같은 이유).
     "google-auth>=2.30",
+    # google-auth가 Firebase 공개키를 받을 때 쓰는 전송 계층이다(app/firebase_verify.py). 없으면 인증이 전부 실패한다.
+    "requests>=2.31",
 ]
 
 [tool.setuptools.packages.find]

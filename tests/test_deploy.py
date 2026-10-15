@@ -155,6 +155,7 @@ APP_PATHS = {
     "/v1/me/link-code",
     "/v1/guardian/link/preview",
     "/v1/guardian/link",
+    "/v1/guardian/email/verify",
 }
 
 
@@ -180,6 +181,7 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     assert client.post("/v1/me/link-code").status_code == 401
     assert client.post("/v1/guardian/link/preview", json={"code": "12345678"}).status_code == 401
     assert client.post("/v1/guardian/link", json={"code": "12345678"}).status_code == 401
+    assert client.post("/v1/guardian/email/verify", json={"id_token": "x" * 30}).status_code == 401
     assert client.post("/v1/guardian/logout").status_code == 401
     assert client.get("/v1/guardian/me").status_code == 401
     assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
