@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+
+import anyio.to_thread
 
 from app.api.passwords import NO_LOGIN
 from app.api.rate_limit import FailureLimiter
@@ -15,6 +20,8 @@ ME = "/v1/guardian/me"
 BAD_PROOF = {"detail": "이메일 인증을 확인하지 못했어요"}
 NEEDS_EMAIL = {"detail": "이메일 인증 후 사용할 수 있어요"}
 NEEDS_OPERATOR = {"detail": "운영자 확인 후 사용할 수 있어요"}
+TRY_LATER = {"detail": "잠시 뒤에 다시 해 주세요"}
+UNAVAILABLE = {"detail": "인증을 확인할 수 없습니다"}
 GOOD = {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "password": "correct-horse-1"}
 PROOF = "p" * 40
 
@@ -107,6 +114,166 @@ def test_an_already_verified_guardian_gets_200_without_calling_firebase():
 
     assert response.status_code == 200 and response.json() == {"email_verified": True}
     assert verifier.calls == 0
+
+
+# ------------------------------------------------ 동시에 몰려온 확인 (Firebase는 작업 스레드 안의 느린 바깥 호출이다)
+
+
+class BlockingVerifier:
+    """확인 중에 멈춰 서는 가짜 Firebase — `release`를 열기 전까지 들어온 요청을 붙잡아 둔다."""
+
+    def __init__(self, table=None):
+        self.table = dict(table or {})
+        self.release = threading.Event()
+        self.calls = 0
+        self._entered = threading.Condition()
+
+    def verify(self, id_token):
+        with self._entered:
+            self.calls += 1
+            self._entered.notify_all()
+        if not self.release.wait(timeout=10):
+            raise RuntimeError("시험이 확인기를 풀어 주지 않았다")
+        email = self.table.get(id_token)
+        return None if email is None else VerifiedEmail(email=email)
+
+    def wait_for_calls(self, count, timeout=5):
+        with self._entered:
+            return self._entered.wait_for(lambda: self.calls >= count, timeout)
+
+
+class RaisingVerifier:
+    def __init__(self):
+        self.calls = 0
+
+    def verify(self, id_token):
+        self.calls += 1
+        raise RuntimeError("Firebase 쪽 오류")
+
+
+def another_guardian(kit, verifier, n):
+    """같은 서버에 앱으로 가입한 n번째 보호자(인증 전)의 머리글과, 그 보호자 이메일이 적힌 증명서."""
+    email = f"guardian{n}@example.com"
+    token = f"proof-{n}-".ljust(40, "x")
+    verifier.table[token] = email
+    body = kit.client.post(SIGNUP, json={**GOOD, "email": email}).json()
+    return bearer(body["key"]), token
+
+
+def _set_worker_threads(count):
+    anyio.to_thread.current_default_thread_limiter().total_tokens = count
+
+
+@contextmanager
+def one_server(kit, verifier, *, worker_threads=None):
+    """요청을 한 서버(이벤트 루프 하나·작업 스레드 묶음 하나)에 동시에 보낸다 — 실서버(uvicorn)와 같은 모양.
+
+    끝날 때는 붙잡힌 확인을 모두 풀어 준다(실패한 시험이 스레드를 남기지 않게).
+    """
+    with kit.client as client, ThreadPoolExecutor(max_workers=32) as pool:
+        if worker_threads is not None:
+            client.portal.call(_set_worker_threads, worker_threads)
+
+        def send(headers, token=PROOF):
+            return pool.submit(client.post, VERIFY, json={"id_token": token}, headers=headers)
+
+        def get(path, headers):
+            return pool.submit(client.get, path, headers=headers)
+
+        try:
+            yield send, get
+        finally:
+            verifier.release.set()
+
+
+def test_concurrent_proofs_from_one_guardian_enter_firebase_one_at_a_time():
+    """끝난 실패만 세는 한도로는 한꺼번에 보낸 요청을 막지 못한다 — 두 번째부터는 확인기에 들어가지 않고 곧바로 429다."""
+    verifier = BlockingVerifier({PROOF: GOOD["email"]})
+    kit, _, headers = signed_up_kit(verifier)
+
+    with one_server(kit, verifier) as (send, _):
+        first = send(headers)
+        assert verifier.wait_for_calls(1)
+
+        rest = [send(headers) for _ in range(9)]
+        for response in (future.result(timeout=5) for future in rest):
+            assert (response.status_code, response.json()) == (429, TRY_LATER)
+        assert verifier.calls == 1  # 나머지는 확인기를 기다리지 않고 돌아왔다
+
+        verifier.release.set()
+        assert first.result(timeout=5).json() == {"email_verified": True}
+
+    assert kit.data.email_verify_slots.in_flight() == 0
+
+
+def test_at_most_four_proofs_are_checked_at_once_and_the_slots_come_back_after_success():
+    verifier = BlockingVerifier({PROOF: GOOD["email"]})
+    kit, _, headers = signed_up_kit(verifier)
+    guardians = [(headers, PROOF)] + [another_guardian(kit, verifier, n) for n in range(1, 6)]  # 6명
+
+    with one_server(kit, verifier) as (send, _):
+        inside = [send(h, token) for h, token in guardians[:4]]
+        assert verifier.wait_for_calls(4)
+
+        turned_away = [send(h, token).result(timeout=5) for h, token in guardians[4:]]
+        assert [(r.status_code, r.json()) for r in turned_away] == [(429, TRY_LATER)] * 2
+        assert verifier.calls == 4
+
+        verifier.release.set()
+        assert [future.result(timeout=5).status_code for future in inside] == [200] * 4
+
+        # 성공한 확인이 자리를 돌려줬다 — 돌려보냈던 보호자도 이제 들어간다.
+        late = [send(h, token).result(timeout=5) for h, token in guardians[4:]]
+        assert [r.status_code for r in late] == [200, 200]
+
+    assert verifier.calls == 6
+    assert kit.data.email_verify_slots.in_flight() == 0
+
+
+def test_waiting_on_firebase_never_ties_up_every_worker_thread():
+    """작업 스레드가 6개뿐인 서버에 27개를 한꺼번에 보내도, 붙잡히는 것은 4개까지라 다른 주소가 답한다."""
+    verifier = BlockingVerifier({PROOF: GOOD["email"]})
+    kit, _, headers = signed_up_kit(verifier)
+    guardians = [(headers, PROOF)] + [another_guardian(kit, verifier, n) for n in range(1, 9)]  # 9명
+
+    with one_server(kit, verifier, worker_threads=6) as (send, get):
+        flood = [send(h, token) for h, token in guardians for _ in range(3)]
+        assert verifier.wait_for_calls(4)
+
+        me = get(ME, headers).result(timeout=5)
+
+        assert me.status_code == 200
+        verifier.release.set()
+        statuses = sorted(future.result(timeout=5).status_code for future in flood)
+
+    assert verifier.calls <= 9  # 한 보호자는 한 번에 하나만 확인기에 들어간다
+    assert 200 in statuses and set(statuses) <= {200, 429}
+
+
+def test_a_failed_proof_gives_the_slot_back():
+    verifier = FakeVerifier()
+    kit, _, headers = signed_up_kit(verifier)
+
+    first = kit.client.post(VERIFY, json={"id_token": "q" * 40}, headers=headers)
+    second = kit.client.post(VERIFY, json={"id_token": "q" * 40}, headers=headers)
+
+    assert (first.status_code, first.json()) == (401, BAD_PROOF)
+    assert (second.status_code, second.json()) == (401, BAD_PROOF)  # 429가 아니다 — 자리가 돌아왔다
+    assert verifier.calls == 2
+    assert kit.data.email_verify_slots.in_flight() == 0
+
+
+def test_a_verifier_error_closes_with_503_and_gives_the_slot_back():
+    verifier = RaisingVerifier()
+    kit, _, headers = signed_up_kit(verifier)
+
+    first = kit.client.post(VERIFY, json={"id_token": PROOF}, headers=headers)
+    second = kit.client.post(VERIFY, json={"id_token": PROOF}, headers=headers)
+
+    assert (first.status_code, first.json()) == (503, UNAVAILABLE)
+    assert (second.status_code, second.json()) == (503, UNAVAILABLE)
+    assert verifier.calls == 2
+    assert kit.data.email_verify_slots.in_flight() == 0
 
 
 def test_verifying_needs_a_guardian_key_and_a_plausible_proof():
