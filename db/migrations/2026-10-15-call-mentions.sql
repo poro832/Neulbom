@@ -2,7 +2,7 @@
 -- 기존 서버(RDS)에 한 번 실행한다. 새 설치는 db/schema.sql에 같은 내용이 있다.
 -- 원격 DB에 쓰는 일이므로 실행 전에 내용을 확인하고 사용자가 psql로 직접 돌린다.
 
--- quote는 통화 기록의 어르신 발화 한 토막(원문 그대로)이다. 그 발화가 누구 이야기인지와
+-- quote는 통화 기록의 어르신 발화 한 번 전체(원문 그대로)이다. 그 발화가 누구 이야기인지와
 -- 느낌(said)은 모델이 정한다. 점수·경보에는 쓰지 않는다.
 CREATE TABLE IF NOT EXISTS call_mentions (
     mention_id BIGSERIAL PRIMARY KEY,
