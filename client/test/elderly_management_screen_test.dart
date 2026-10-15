@@ -61,8 +61,9 @@ void main() {
     expect(find.text('김영희'), findsOneWidget);
     expect(find.text('대기중'), findsOneWidget);
     expect(find.textContaining('이번 주 통화 3회'), findsOneWidget);
-    expect(find.textContaining('정상'), findsWidgets);
-    expect(find.textContaining('주의'), findsWidgets);
+    // 건강 상태(정상·주의) 표시는 팀원 화면이 목록에서 내렸다. 연결 상태만 남는다.
+    expect(find.textContaining('정상'), findsNothing);
+    expect(find.textContaining('주의'), findsNothing);
     expect(find.textContaining('승인 대기'), findsWidgets);
     expect(find.text('김할머니'), findsNothing); // 옛 예시 자료가 아니다
     expect(find.text('이할아버지'), findsNothing);

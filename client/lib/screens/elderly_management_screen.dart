@@ -57,15 +57,11 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
     );
   }
 
-  /// 낮을수록 평소와 같다: 30점부터 주의, 60점부터 경보.
-  static String _statusText(ElderSummary elder) {
+  /// 연결 상태만 적는다. 정상·주의 같은 건강 상태 표시는 팀원 화면(649a086)이 목록에서 내렸다.
+  static String? _linkText(ElderSummary elder) {
     if (elder.status == 'pending') return '승인 대기';
     if (elder.status != 'active') return '동의 전';
-    final score = elder.weekAvgScore;
-    if (score == null) return '기록 없음';
-    if (score >= 60) return '경보';
-    if (score >= 30) return '주의';
-    return '정상';
+    return null;
   }
 
   @override
@@ -178,11 +174,13 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                                           color: eInk,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _statusText(elder),
-                                        style: const TextStyle(fontSize: 14, color: eInkSoft),
-                                      ),
+                                      if (_linkText(elder) case final link?) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          link,
+                                          style: const TextStyle(fontSize: 14, color: eInkSoft),
+                                        ),
+                                      ],
                                       const SizedBox(height: 6),
                                       Text(
                                         '이번 주 통화 ${elder.weekCalls}회',
