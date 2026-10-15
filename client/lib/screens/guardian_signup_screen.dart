@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/email_proof.dart';
+import 'email_verification_screen.dart';
 import 'guardian_home_page.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
@@ -11,7 +13,10 @@ const Color eLine = Color(0xFFD6E4FF);
 const Color eAccent = Color(0xFF1A6BFF);
 
 class GuardianSignupScreen extends StatefulWidget {
-  const GuardianSignupScreen({super.key});
+  const GuardianSignupScreen({super.key, this.emailProof});
+
+  /// 가입 뒤 여는 이메일 인증 화면에 넘긴다. 없으면 Firebase. 테스트에서 가짜로 바꾼다.
+  final EmailProof? emailProof;
 
   @override
   State<GuardianSignupScreen> createState() => _GuardianSignupScreenState();
@@ -95,6 +100,21 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     });
 
     if (result['success']) {
+      // 앱에서 가입한 보호자는 이메일 인증 전이다. 입력한 이메일·비밀번호로 인증 화면을 먼저 열고,
+      // 돌아오면(인증했든 나중에 하든) 완료 화면으로 이어 간다. 비밀번호는 넘기기만 하고 저장하지 않는다.
+      if (result['data']?['emailVerified'] == false) {
+        await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EmailVerificationScreen(
+              email: _emailController.text.trim(),
+              password: _passwordController.text,
+              proof: widget.emailProof,
+            ),
+          ),
+        );
+        if (!mounted) return;
+      }
       // 가입하면 바로 로그인된 상태다(서버가 이 폰 열쇠를 줬다). 완료 화면에서 보호자 홈으로 간다.
       setState(() {
         _isSignupComplete = true;

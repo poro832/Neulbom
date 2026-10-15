@@ -114,6 +114,7 @@ class AuthService {
           'name': profile.name,
           'email': profile.email,
           'activated': profile.activated,
+          'emailVerified': profile.emailVerified, // false면 가입 화면이 이메일 인증 화면을 연다
         },
       };
     } on ApiException catch (e) {
