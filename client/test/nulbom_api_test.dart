@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:eldercare/models/nulbom_models.dart';
 import 'package:eldercare/services/nulbom_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -286,5 +287,47 @@ void main() {
       expect(await NulbomApi.loadGuardianKey(), '');
       expect(rejected, 1);
     });
+  });
+
+  test('이메일 인증: 증명서를 보내고 결과를 읽는다', () async {
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'email_verified': true});
+    });
+
+    final ok = await NulbomApi.verifyEmail('t' * 40, key: 'nlb_test');
+
+    expect(ok, isTrue);
+    expect(seen.url.path, '/v1/guardian/email/verify');
+    expect(seen.headers['Authorization'], 'Bearer nlb_test');
+    expect(jsonDecode(seen.body), {'id_token': 't' * 40});
+  });
+
+  test('이메일 인증이 거절되면 서버 문장을 예외로 내고 열쇠는 지우지 않는다', () async {
+    var rejected = 0;
+    NulbomApi.onGuardianKeyRejected = () => rejected++;
+    addTearDown(() => NulbomApi.onGuardianKeyRejected = null);
+    await NulbomApi.saveGuardianKey('nlb_test');
+    NulbomApi.client =
+        MockClient((request) async => json({'detail': '이메일 인증을 확인하지 못했어요'}, 401));
+
+    await expectLater(
+      NulbomApi.verifyEmail('t' * 40, key: 'nlb_test'),
+      throwsA(isA<ApiException>().having((e) => e.message, 'message', '이메일 인증을 확인하지 못했어요')),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(await NulbomApi.loadGuardianKey(), 'nlb_test');
+    expect(rejected, 0);
+  });
+
+  test('보호자 정보: email_verified가 없으면 인증된 것으로 읽는다', () {
+    final old = GuardianProfile.fromJson(
+        {'name': '가', 'email': 'a@b.co', 'phone': '010', 'activated': true});
+    final fresh = GuardianProfile.fromJson(
+        {'name': '가', 'email': 'a@b.co', 'phone': '010', 'activated': false, 'email_verified': false});
+
+    expect(old.emailVerified, isTrue);
+    expect(fresh.emailVerified, isFalse);
   });
 }

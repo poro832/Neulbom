@@ -42,6 +42,7 @@ COLUMN_MIGRATIONS = {
     ("calls", "requested_by_guardian_id"): "2026-10-08-guardian-keys.sql",
     ("elders", "share_agreed_at"): "2026-10-10-transcript-sharing.sql",
     ("guardians", "activated_at"): "2026-10-13-guardian-activation.sql",
+    ("guardians", "email_verified_at"): "2026-10-15-email-verified.sql",
 }
 
 NO_LOGIN_SUFFIX = "@no-login.invalid"
@@ -122,6 +123,7 @@ def check_environment(
     need(("CLOVA_STUDIO_BASE_URL", "CLOVA_STUDIO_API_KEY"), "대화·요약·복용 확인(CLOVA Studio)", "AI 대화와 요약·복용 확인이 꺼진다")
     need(("CLAWOPS_ACCOUNT_SID", "CLAWOPS_API_KEY", "CLAWOPS_FROM_NUMBER"), "전화(ClawOps)", "전화를 걸 수 없다")
     need(("PUBLIC_BASE_URL", "STREAM_BASE_URL"), "공개 주소", "전화 연결 주소를 만들 수 없다")
+    need(("FIREBASE_PROJECT_ID",), "이메일 인증(Firebase)", "새 보호자가 이메일 인증을 못 해 어르신을 연결할 수 없다")
     need(("RECORDINGS_BUCKET",), "녹음 보관(S3)", "녹음이 보관되지 않는다", level=WARN)
 
     path = env.get("FCM_SERVICE_ACCOUNT_FILE", "").strip()

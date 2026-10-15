@@ -11,7 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 
 
 class FailureLimiter:
@@ -101,3 +101,33 @@ class KeyedFailureLimiter:
     def tracked(self) -> int:
         with self._lock:
             return len(self._failures)
+
+
+class InFlightLimiter:
+    """지금 진행 중인 일을 키(보호자)마다 하나, 서버 전체 `limit`개까지만 들인다.
+
+    작업 스레드 안에서 느린 바깥 호출(Firebase 공개키 받기)을 하는 주소용이다. 실패 한도는 끝난
+    실패만 세므로, 한꺼번에 보낸 요청은 그 한도를 지나 작업 스레드를 모두 붙잡을 수 있다. 자리를
+    못 얻은 요청은 줄 세우지 않고 곧바로 False다 — 줄을 세우면 기다리는 동안 스레드가 묶인다.
+    얻은 자리는 반드시 `release`로 돌려준다(finally).
+    """
+
+    def __init__(self, *, limit: int = 4) -> None:
+        self._limit = limit
+        self._lock = threading.Lock()
+        self._keys: set[Hashable] = set()
+
+    def try_acquire(self, key: Hashable) -> bool:
+        with self._lock:
+            if key in self._keys or len(self._keys) >= self._limit:
+                return False
+            self._keys.add(key)
+            return True
+
+    def release(self, key: Hashable) -> None:
+        with self._lock:
+            self._keys.discard(key)
+
+    def in_flight(self) -> int:
+        with self._lock:
+            return len(self._keys)

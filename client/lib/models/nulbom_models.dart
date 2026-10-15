@@ -325,12 +325,14 @@ class GuardianProfile {
   final String email;
   final String phone;
   final bool activated; // false면 운영자 확인을 기다리는 중이다(어르신 등록·승인 불가)
+  final bool emailVerified; // 응답에 필드가 없는 옛 서버·옛 계정은 인증된 것으로 본다
 
   const GuardianProfile({
     required this.name,
     required this.email,
     required this.phone,
     this.activated = true,
+    this.emailVerified = true,
   });
 
   factory GuardianProfile.fromJson(Map<String, dynamic> json) => GuardianProfile(
@@ -338,5 +340,6 @@ class GuardianProfile {
         email: json['email'] as String,
         phone: json['phone'] as String,
         activated: (json['activated'] as bool?) ?? true,
+        emailVerified: (json['email_verified'] as bool?) ?? true,
       );
 }

@@ -1,9 +1,16 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/nulbom_models.dart';
+import 'email_proof.dart';
 import 'nulbom_api.dart';
 
 class AuthService {
+  /// 로그아웃 때 이 폰의 Firebase(이메일 인증) 세션도 끝낸다. 테스트에서 가짜로 바꾼다.
+  static EmailProof emailProof = FirebaseEmailProof();
+
+  /// Firebase 세션 끝내기를 기다리는 최대 시간 — 멈춰도 로그아웃을 붙잡지 않는다.
+  static const Duration _signOutWait = Duration(seconds: 2);
+
   static const String _userTypeKey = 'user_type';
   static const String _phoneKey = 'phone';
   static const String _nameKey = 'name';
@@ -114,6 +121,7 @@ class AuthService {
           'name': profile.name,
           'email': profile.email,
           'activated': profile.activated,
+          'emailVerified': profile.emailVerified, // false면 가입 화면이 이메일 인증 화면을 연다
         },
       };
     } on ApiException catch (e) {
@@ -153,6 +161,11 @@ class AuthService {
 
   // 로그아웃
   static Future<bool> logout() async {
+    // 같은 폰을 다른 보호자가 쓰면 앞 사람의 Firebase 세션이 남아 있으면 안 된다(서버가 남의 증명서로 401).
+    // 할 수 있는 만큼만 한다 — 실패하거나 멈춰도 로그아웃은 계속한다.
+    try {
+      await emailProof.signOut().timeout(_signOutWait);
+    } catch (_) {}
     try {
       // 보호자면 서버에서 이 폰의 열쇠도 폐기한다. 어르신 열쇠는 건드리지 않는다.
       if (NulbomApi.guardianKey.isNotEmpty) {
