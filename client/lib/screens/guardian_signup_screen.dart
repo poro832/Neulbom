@@ -36,6 +36,13 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   bool _obscurePassword = true;
   bool _obscurePasswordConfirm = true;
 
+  static const String _passwordMismatchMessage = '비밀번호가 동일하지 않습니다.';
+
+  // 확인 칸에 무언가 입력했는데 위 칸과 다르면 입력하는 동안 바로 알린다.
+  bool get _showsMismatch =>
+      _passwordConfirmController.text.isNotEmpty &&
+      _passwordConfirmController.text != _passwordController.text;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -77,7 +84,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
 
     if (_passwordController.text != _passwordConfirmController.text) {
       setState(() {
-        _errorMessage = '비밀번호가 일치하지 않습니다.';
+        _errorMessage = _passwordMismatchMessage;
       });
       return;
     }
@@ -288,6 +295,7 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                 controller: _passwordController,
                 enabled: !_isLoading,
                 obscureText: _obscurePassword,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: '8자 이상의 비밀번호',
                   hintStyle: const TextStyle(color: eInkSoft),
@@ -338,8 +346,18 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                 controller: _passwordConfirmController,
                 enabled: !_isLoading,
                 obscureText: _obscurePasswordConfirm,
+                onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: '비밀번호 다시 입력',
+                  errorText: _showsMismatch ? _passwordMismatchMessage : null,
+                  errorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFF44336)),
+                  ),
+                  focusedErrorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: Color(0xFFF44336), width: 2),
+                  ),
                   hintStyle: const TextStyle(color: eInkSoft),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
