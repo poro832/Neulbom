@@ -480,6 +480,7 @@ void emailPendingTests() {
       var verified = false;
       var meCalls = 0;
       NulbomApi.client = MockClient((request) async {
+        if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
         if (request.url.path == '/v1/guardian/email/verify') {
           expect(jsonDecode(request.body), {'id_token': 'firebase-id-token'});
           verified = true;
@@ -510,6 +511,7 @@ void emailPendingTests() {
     testWidgets('나중에 하기로 돌아와도 서버에서 새로 읽고, 인증 전이면 표시가 남는다', (tester) async {
       var meCalls = 0;
       NulbomApi.client = MockClient((request) async {
+        if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
         meCalls++;
         return json(me(emailVerified: false));
       });
@@ -527,6 +529,7 @@ void emailPendingTests() {
     testWidgets('돌아와 다시 읽기에 실패해도 이미 아는 인증 전 상태를 지켜 표시와 버튼이 남는다', (tester) async {
       var meCalls = 0;
       NulbomApi.client = MockClient((request) async {
+        if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
         meCalls++;
         if (meCalls == 1) return json(me(emailVerified: false));
         throw http.ClientException('down'); // 돌아온 뒤에는 서버에 닿지 못한다
