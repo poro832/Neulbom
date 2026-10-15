@@ -86,7 +86,7 @@ def parse_mentions(answer: str, elder_turns: Sequence[str]) -> list[Mention]:
 
     저장하는 글은 모델이 아니라 번호가 가리키는 어르신 발화 원문이다. 80자를 넘거나 3자 미만이면 버린다.
     """
-    seen: set[tuple[str, int]] = set()
+    seen: set[tuple[str, str]] = set()
     found: list[Mention] = []
     for line in answer.splitlines():
         cleaned = _BULLET.sub("", line.replace("**", "").replace("`", "").replace("｜", "|"))
@@ -106,9 +106,10 @@ def parse_mentions(answer: str, elder_turns: Sequence[str]) -> list[Mention]:
         text = elder_turns[index - 1].strip()
         if len(text) > MAX_MENTION_QUOTE or len(_squash(text)) < MIN_TURN_CHARS:
             continue
-        if (category, index) in seen:
+        key = (category, _squash(text))  # 같은 말이 두 발화에 있어도 한 번만 남기고 상한도 한 번만 쓴다
+        if key in seen:
             continue
-        seen.add((category, index))
+        seen.add(key)
         found.append(Mention(category, said, text))
         if len(found) >= MAX_MENTIONS_PER_CALL:
             break

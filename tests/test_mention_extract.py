@@ -258,3 +258,20 @@ def test_index_one_is_the_first_non_blank_elder_turn_end_to_end():
     got, chat = extractor("body|bad|1|self\nmeal|good|2|self")
     assert got.extract(turns) == [Mention("body", "bad", T1), Mention("meal", "good", T2)]
     assert f"어르신 발화 [1]: {T1}" in chat.seen[0][0].text
+
+
+def test_identical_sentence_in_two_turns_is_stored_once_per_category():
+    turns = [T1, "  " + T1 + " "]
+    assert parse_mentions("body|bad|1|self\nbody|bad|2|self", turns) == [Mention("body", "bad", T1)]
+    assert parse_mentions("body|bad|1|self\nsleep|bad|2|self", turns) == [
+        Mention("body", "bad", T1),
+        Mention("sleep", "bad", T1),
+    ]
+
+
+def test_duplicate_sentences_do_not_use_up_the_cap_twice():
+    turns = ["허리가 아파요."] * 4 + [f"{i}번째 아파요." for i in range(MAX_MENTIONS_PER_CALL + 2)]
+    answer = "\n".join(f"body|bad|{i + 1}|self" for i in range(len(turns)))
+    got = parse_mentions(answer, turns)
+    assert len(got) == MAX_MENTIONS_PER_CALL
+    assert [m.quote for m in got].count("허리가 아파요.") == 1

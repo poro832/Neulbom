@@ -85,9 +85,11 @@ def main() -> int:
             print(f"!! 오류({type(exc).__name__})  {name}")
             errors.append(f"{name}: {type(exc).__name__}")
             continue
-        got = mentions or []
-        if mentions is None:
-            print(f"   (분석 안 됨: 빈 답) {name}")
+        if mentions is None:  # 빈 답·제공자 오류: 분석 실패이지 "언급 없음"이 아니다
+            print(f"!! 분석 실패(None)  {name}")
+            errors.append(f"{name}: 분석 실패(None)")
+            continue
+        got = mentions
         cats = {m.category for m in got}
         hits = _forbidden_hit(got, forbidden)
         missing = sorted(want - cats)
@@ -97,7 +99,7 @@ def main() -> int:
         print(f"{status}{name}")
         for m in got:
             print(f"      {m.category}|{m.said}|{m.quote}")
-        if not got and mentions is not None:
+        if not got:
             print("      (언급 없음)")
         if hits:
             violations.append(f"{name}: 금지 {hits}")

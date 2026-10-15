@@ -56,6 +56,8 @@ NO_ELDER = "등록되지 않은 어르신입니다"
 BAD_PAIR = "연결 코드를 확인해 주세요"
 UNAVAILABLE = "인증을 확인할 수 없습니다"
 BAD_SIGNUP = "가입 코드를 확인해 주세요"
+# 언급은 30일 보관이라 한 주를 채울 만큼 통화를 넉넉히 가져와 주 경계로 거른다(많은 통화가 쌓여도 지난 주가 비지 않게).
+MENTION_CALL_FETCH_LIMIT = 500
 NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어요"
 TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
@@ -845,7 +847,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             return {"share_agreed": False, "week_start": week.isoformat(), "categories": []}
         lo, hi = week_bounds(week)
         lines = sorted(
-            (l for l in data.reports.call_lines(elder_id, 100) if lo <= l.started_at < hi),
+            (l for l in data.reports.call_lines(elder_id, MENTION_CALL_FETCH_LIMIT) if lo <= l.started_at < hi),
             key=lambda l: l.started_at,
             reverse=True,
         )
