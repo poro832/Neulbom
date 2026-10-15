@@ -173,7 +173,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
     return '${_formatDate(sunday)} ~ ${_formatDate(saturday)}';
   }
 
-  /// 어르신이 없거나 불러오지 못했을 때. 여기서도 코드를 만들고 로그아웃할 수 있어야 한다 —
+  /// 어르신이 없거나 불러오지 못했을 때. 여기서도 어르신을 연결하고 로그아웃할 수 있어야 한다 —
   /// 막다른 화면이 되면 새 계정은 어르신을 추가할 방법도, 나갈 방법도 없다.
   Widget _buildEmptyState() {
     final failed = _loadError != null;
@@ -197,22 +197,11 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   ),
                   if (!failed) ...[
                     const SizedBox(height: 8),
-                    Text(
-                      '아래 보호자 코드를 어르신께 알려 드리면, 어르신이 가입한 뒤 여기서 승인할 수 있어요.',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
-                    ),
-                    const ConnectionCodeSection(),
+                    ConnectionCodeSection(onLinked: (_) => _reload()),
                   ],
                   const SizedBox(height: 16),
                   OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _loading = true;
-                        _loadError = null;
-                      });
-                      _load();
-                    },
+                    onPressed: _reload,
                     child: const Text('다시 불러오기'),
                   ),
                   TextButton(
@@ -234,6 +223,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
         ),
       ),
     );
+  }
+
+  void _reload() {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
+    _load();
   }
 
   Future<void> _logout() async {

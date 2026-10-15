@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../main.dart' show eAccent, eBg, eInk, eInkSoft;
+import '../main.dart' show eAccent, eBg, eCard, eInk, eInkSoft, eLine;
 import '../models/nulbom_models.dart';
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
@@ -10,13 +10,18 @@ import 'elderly_login_screen.dart' show ElderlyLoginScreen;
 
 /// 어르신 홈으로 가는 문. 열 때마다 서버에 내 상태를 물어본다.
 ///
-/// 가입만 한 어르신(승인 대기)은 보호자가 승인할 때까지 대기 화면에 머문다 — 이 상태에서는
-/// 서버가 전화를 걸지 않고 통화 기록·연락처도 열어 주지 않는다. 승인됐으면 홈으로 들어간다.
+/// 먼저 가입한 어르신(연결 대기, unlinked)은 보호자가 연결 코드를 입력할 때까지, 보호자 코드로
+/// 가입한 어르신(승인 대기, pending)은 보호자가 승인할 때까지 대기 화면에 머문다 — 이 상태에서는
+/// 서버가 전화를 걸지 않고 통화 기록·연락처도 열어 주지 않는다. 연결·승인됐으면 홈으로 들어간다.
 class ElderlyGate extends StatefulWidget {
-  const ElderlyGate({super.key, this.homeBuilder});
+  const ElderlyGate({super.key, this.homeBuilder, this.linkCode});
 
   /// 활성 어르신이 들어갈 홈. 기본은 어르신 홈이고, 테스트는 가벼운 화면을 넣는다.
   final WidgetBuilder? homeBuilder;
+
+  /// 가입 화면이 방금 받은 연결 코드. 있으면 연결 대기 화면에 그대로 보여 준다 —
+  /// 새로 받으면 보호자에게 이미 알려 준 코드를 쓸 수 없게 되므로 저절로 새로 받지 않는다.
+  final PairingCode? linkCode;
 
   @override
   State<ElderlyGate> createState() => _ElderlyGateState();
@@ -26,11 +31,37 @@ class _ElderlyGateState extends State<ElderlyGate> {
   late Future<MyStatus> _status;
   bool _agreeing = false;
   String? _agreeError;
+  PairingCode? _linkCode;
+  bool _issuing = false;
+  String? _codeError;
 
   @override
   void initState() {
     super.initState();
     _status = NulbomApi.myStatus();
+    _linkCode = widget.linkCode;
+  }
+
+  /// 새 연결 코드(8자리, 24시간)를 받는다. 이전 코드는 서버에서 바로 못 쓰게 된다.
+  Future<void> _issueCode() async {
+    setState(() {
+      _issuing = true;
+      _codeError = null;
+    });
+    try {
+      final code = await NulbomApi.issueLinkCode();
+      if (!mounted) return;
+      setState(() {
+        _issuing = false;
+        _linkCode = code;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _issuing = false;
+        _codeError = _errorText(error);
+      });
+    }
   }
 
   void _reload() {
@@ -92,6 +123,15 @@ class _ElderlyGateState extends State<ElderlyGate> {
         if (me.status == 'active') {
           if (!me.shareAgreed) return _shareConsentScreen();
           return widget.homeBuilder?.call(context) ?? const ElderlyHomePage();
+        }
+        if (me.status == 'unlinked') {
+          return _screen(
+            title: '보호자 연결을 기다리고 있어요',
+            detail: '${me.name} 어르신, 보호자에게 연결 코드를 알려 주세요.\n'
+                '보호자가 코드를 입력해 연결하면 안부 전화가 시작돼요.\n연결이 끝났다면 새로고침을 눌러 주세요.',
+            retryLabel: '새로고침',
+            extra: _linkCodeBox(),
+          );
         }
         return _screen(
           title: '보호자 승인을 기다리고 있어요',
@@ -164,12 +204,95 @@ class _ElderlyGateState extends State<ElderlyGate> {
     );
   }
 
-  Widget _screen({required String title, String? detail, required String retryLabel}) {
+  static String _until(DateTime time) =>
+      '${time.month}월 ${time.day}일 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
+  /// 연결 대기 화면의 코드 칸. 코드를 보여 주고, 새 코드를 받을 수 있다.
+  Widget _linkCodeBox() {
+    final code = _linkCode;
+    final expired = code != null && code.expiresAt.isBefore(DateTime.now());
+    return Column(
+      children: [
+        const SizedBox(height: 24),
+        if (code != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            decoration: BoxDecoration(
+              color: eCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: eLine, width: 1.5),
+            ),
+            child: Column(
+              children: [
+                SelectableText(
+                  code.code,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 4,
+                    color: expired ? eInkSoft : eAccent,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  expired
+                      ? '이 코드는 만료됐어요. 새 코드를 받아 주세요.'
+                      : '${_until(code.expiresAt)}까지 쓸 수 있어요',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
+                ),
+              ],
+            ),
+          ),
+        if (_codeError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _codeError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, color: Color(0xFFD92D20)),
+          ),
+        ],
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: OutlinedButton(
+            onPressed: _issuing ? null : _issueCode,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: eAccent,
+              side: const BorderSide(color: eAccent, width: 1.5),
+            ),
+            child: Text(
+              code == null ? '연결 코드 보기' : '새 코드 받기',
+              style: const TextStyle(fontSize: 18),
+            ),
+          ),
+        ),
+        if (code != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            '새 코드를 받으면 이전 코드는 쓸 수 없어요.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.notoSansKr(fontSize: 13, color: eInkSoft),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _screen({
+    required String title,
+    String? detail,
+    required String retryLabel,
+    Widget? extra,
+  }) {
     return Scaffold(
       backgroundColor: eBg,
       body: SafeArea(
         child: Center(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -193,6 +316,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
                     style: GoogleFonts.notoSansKr(fontSize: 16, height: 1.6, color: eInkSoft),
                   ),
                 ],
+                ?extra,
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
