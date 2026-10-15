@@ -144,6 +144,12 @@ def test_a_missing_email_verified_column_names_its_migration():
     assert "2026-10-15-email-verified.sql" in checks["칸 guardians.email_verified_at"].detail
 
 
+def test_a_missing_call_mentions_table_names_its_migration():
+    checks = by_name(check_database(FakePool(FULL_TABLES - {"call_mentions"}, FULL_COLUMNS)))
+    assert checks["표 call_mentions"].level == FAIL
+    assert "2026-10-15-call-mentions.sql" in checks["표 call_mentions"].detail
+
+
 def test_no_guardian_with_a_login_is_a_warning():
     checks = by_name(check_database(FakePool(FULL_TABLES, FULL_COLUMNS, counts=(0, 2))))
     assert checks["로그인 보호자"].level == WARN

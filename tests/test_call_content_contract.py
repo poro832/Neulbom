@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from app.api.call_content import InMemoryCallContent
+from app.api.call_content import InMemoryCallContent, Mention
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 DAY = 86400.0
@@ -162,8 +162,9 @@ def test_purge_removes_old_medication_and_keeps_recent(setup):
 
 
 @pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다 — Postgres 규약 테스트를 건너뛴다.")
-def test_purge_still_deletes_turns_and_summaries_when_the_medication_table_is_missing():
-    """배포 순서가 어긋나 call_medication 표가 없어도 30일 보관 약속은 지켜진다.
+@pytest.mark.parametrize("missing", ["call_medication", "call_mentions"])
+def test_purge_still_deletes_turns_and_summaries_when_a_side_table_is_missing(missing):
+    """배포 순서가 어긋나 call_medication·call_mentions 표가 없어도 30일 보관 약속은 지켜진다.
 
     스키마는 건드리지 않는다. 풀 대리자가 SQL 속 표 이름만 없는 이름으로 바꿔 보낸다.
     """
@@ -178,7 +179,7 @@ def test_purge_still_deletes_turns_and_summaries_when_the_medication_table_is_mi
 
         def execute(self, sql, *args, **kwargs):
             return self._real.execute(
-                sql.replace("call_medication", "call_medication_absent"), *args, **kwargs
+                sql.replace(missing, missing + "_absent"), *args, **kwargs
             )
 
     class RenamingPool:
@@ -205,3 +206,51 @@ def test_purge_still_deletes_turns_and_summaries_when_the_medication_table_is_mi
         assert real.turns(CALL) == [] and real.summaries([CALL]) == {}
     finally:
         pool.close()
+
+
+M_BODY = Mention("body", "bad", "허리가 아파요")
+M_SLEEP = Mention("sleep", "bad", "잠을 못 잤어")
+M_MEAL = Mention("meal", "good", "밥 맛있게 먹었어")
+
+
+def test_mentions_round_trip_in_order_and_overwrite(setup):
+    store, _ = setup
+    store.save_mentions(CALL, [M_BODY, M_SLEEP], "m1")
+    assert store.mentions([CALL]) == {CALL: [M_BODY, M_SLEEP]}
+
+    store.save_mentions(CALL, [M_MEAL], "m2")  # 통째로 바뀐다
+    assert store.mentions([CALL]) == {CALL: [M_MEAL]}
+
+    store.save_mentions(CALL, [], "m2")  # 빈 목록은 지운다
+    assert store.mentions([CALL]) == {}
+
+
+def test_mentions_for_unknown_calls_and_no_ids(setup):
+    store, _ = setup
+    assert store.mentions([]) == {}
+    assert store.mentions([999]) == {}
+
+
+def test_mentions_reject_values_outside_the_rules_and_change_nothing(setup):
+    store, _ = setup
+    store.save_mentions(CALL, [M_BODY], "m1")
+    for bad in (
+        Mention("heart", "bad", "x"),
+        Mention("body", "awful", "x"),
+        Mention("body", "bad", ""),
+        Mention("body", "bad", "가" * 81),
+    ):
+        with pytest.raises(ValueError):
+            store.save_mentions(CALL, [M_SLEEP, bad], "m2")
+    assert store.mentions([CALL]) == {CALL: [M_BODY]}
+
+
+def test_purge_removes_old_mentions_and_keeps_recent(setup):
+    store, clock = setup
+    store.save_mentions(CALL, [M_BODY, M_SLEEP], "m")
+    clock.now += 10 * DAY
+    assert store.purge_older_than(clock.now - 30 * DAY) == 0
+    assert store.mentions([CALL]) != {}
+    clock.now += 21 * DAY
+    assert store.purge_older_than(clock.now - 30 * DAY) == 2
+    assert store.mentions([CALL]) == {}

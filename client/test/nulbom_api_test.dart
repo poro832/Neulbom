@@ -330,4 +330,36 @@ void main() {
     expect(old.emailVerified, isTrue);
     expect(fresh.emailVerified, isFalse);
   });
+
+  test('건강·기분 언급: 주를 지정해 읽고 분류별 개수와 어르신 말을 받는다', () async {
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({
+        'share_agreed': true,
+        'week_start': '2026-10-04',
+        'categories': [
+          {
+            'category': 'body',
+            'negative': 2,
+            'neutral': 1,
+            'positive': 0,
+            'items': [
+              {'call_id': 5, 'date': '2026-10-08T09:00:00+09:00', 'said': 'bad', 'quote': '허리가 아파요'}
+            ],
+          },
+        ],
+      });
+    });
+
+    final m = await NulbomApi.elderMentions(12, weekStart: '2026-10-04', key: 'nlb_test');
+
+    expect(seen.url.path, '/v1/elders/12/mentions');
+    expect(seen.url.queryParameters['week_start'], '2026-10-04');
+    expect(seen.headers['Authorization'], 'Bearer nlb_test');
+    expect(m.shareAgreed, isTrue);
+    expect(m.categories.single.label, '몸이 아프거나 불편함');
+    expect(m.categories.single.total, 3);
+    expect(m.categories.single.items.single.quote, '허리가 아파요');
+  });
 }
