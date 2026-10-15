@@ -44,7 +44,7 @@ from app.api.passwords import DUMMY_HASH, hash_password, verify_password
 from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeStore
 from app.api.pairing import PairingStore, hash_code, new_code
-from app.api.rate_limit import FailureLimiter, KeyedFailureLimiter
+from app.api.rate_limit import FailureLimiter, InFlightLimiter, KeyedFailureLimiter
 from app.api.reports import Reports, kst_week_start, sunday_on_or_before
 from app.firebase_verify import EmailVerifier
 from app.scheduler import KST
@@ -112,9 +112,11 @@ class AppData:
     links: LinkCodeStore = field(default_factory=InMemoryLinkCodeStore)
     elder_signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
     link_attempts: FailureLimiter = field(default_factory=FailureLimiter)
-    # 보호자 이메일 인증: Firebase 증명서 확인기(없으면 인증 주소는 닫힌다) / 서버 전체 분당 20회 실패 한도
+    # 보호자 이메일 인증: Firebase 증명서 확인기(없으면 인증 주소는 닫힌다) / 서버 전체 분당 20회 실패 한도 /
+    # 동시에 확인하는 수(보호자마다 하나, 서버 전체 4개 — 넘으면 기다리지 않고 429)
     email_verifier: EmailVerifier | None = None
     email_verify_failures: FailureLimiter = field(default_factory=FailureLimiter)
+    email_verify_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
 
 
 def iso_kst(epoch: float) -> str:
@@ -557,13 +559,20 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             raise HTTPException(status_code=503, detail=EMAIL_VERIFY_OFF)
         if data.email_verify_failures.blocked():
             raise HTTPException(status_code=429, detail=TRY_LATER)
-        proof = data.email_verifier.verify(body.id_token)
-        # 틀린 증명서, 미인증 이메일, 남의 이메일을 구분해 알려 주지 않는다.
-        if proof is None or normalize_email(proof.email) != account.email:
-            data.email_verify_failures.record_failure()
-            logger.warning("이메일 인증 실패 guardian_id=%s", guardian_id)
-            raise HTTPException(status_code=401, detail=BAD_EMAIL_PROOF)
-        data.accounts.mark_email_verified(guardian_id)
+        # 확인은 작업 스레드 안에서 구글에 닿는 느린 일이다. 자리를 먼저 얻는다 — 못 얻으면 기다리지
+        # 않고 바로 429(한꺼번에 보낸 요청이 실패 한도를 지나 스레드를 모두 붙잡지 못하게).
+        if not data.email_verify_slots.try_acquire(guardian_id):
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        try:
+            proof = data.email_verifier.verify(body.id_token)
+            # 틀린 증명서, 미인증 이메일, 남의 이메일을 구분해 알려 주지 않는다.
+            if proof is None or normalize_email(proof.email) != account.email:
+                data.email_verify_failures.record_failure()
+                logger.warning("이메일 인증 실패 guardian_id=%s", guardian_id)
+                raise HTTPException(status_code=401, detail=BAD_EMAIL_PROOF)
+            data.accounts.mark_email_verified(guardian_id)
+        finally:
+            data.email_verify_slots.release(guardian_id)
         logger.info("이메일 인증을 마쳤다 guardian_id=%s", guardian_id)
         return {"email_verified": True}
 

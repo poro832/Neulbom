@@ -112,3 +112,28 @@ def test_keyed_limiter_does_not_grow_without_bound():
         clock.now += 0.001
         limiter.record_failure(f"k{i}")
     assert limiter.tracked() <= 100
+
+
+def test_in_flight_limiter_admits_one_per_key_and_a_few_overall_without_waiting():
+    from app.api.rate_limit import InFlightLimiter
+
+    limiter = InFlightLimiter(limit=2)
+
+    assert limiter.try_acquire(1) is True
+    assert limiter.try_acquire(1) is False  # 같은 키는 하나만
+    assert limiter.try_acquire(2) is True
+    assert limiter.try_acquire(3) is False  # 전체 상한
+    assert limiter.in_flight() == 2
+
+    limiter.release(1)
+    assert limiter.try_acquire(3) is True
+    limiter.release(99)  # 얻지 않은 키를 돌려줘도 아무 일 없다
+    assert limiter.in_flight() == 2
+
+
+def test_in_flight_limiter_defaults_to_four_at_once():
+    from app.api.rate_limit import InFlightLimiter
+
+    limiter = InFlightLimiter()
+
+    assert [limiter.try_acquire(key) for key in range(5)] == [True, True, True, True, False]
