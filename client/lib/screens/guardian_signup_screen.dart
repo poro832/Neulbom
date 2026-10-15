@@ -25,6 +25,8 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
   final TextEditingController _passwordConfirmController =
       TextEditingController();
   bool _isLoading = false;
+  bool _isSignupComplete = false;
+  bool _activated = false;
   String? _errorMessage;
   bool _obscurePassword = true;
   bool _obscurePasswordConfirm = true;
@@ -93,11 +95,11 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
     });
 
     if (result['success']) {
-      // 가입하면 바로 로그인된 상태다(서버가 이 폰 열쇠를 줬다).
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const GuardianHomePage()),
-        (route) => false,
-      );
+      // 가입하면 바로 로그인된 상태다(서버가 이 폰 열쇠를 줬다). 완료 화면에서 보호자 홈으로 간다.
+      setState(() {
+        _isSignupComplete = true;
+        _activated = result['data']?['activated'] == true;
+      });
     } else {
       setState(() {
         _errorMessage = result['message'];
@@ -107,6 +109,10 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isSignupComplete) {
+      return _buildSignupCompleteScreen();
+    }
+
     return Scaffold(
       backgroundColor: eBg,
       appBar: AppBar(
@@ -404,6 +410,82 @@ class _GuardianSignupScreenState extends State<GuardianSignupScreen> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignupCompleteScreen() {
+    return Scaffold(
+      backgroundColor: eBg,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 32),
+            child: Column(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: eAccent,
+                  size: 72,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  '회원가입이 완료되었습니다',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w700,
+                    color: eInk,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  // 새 보호자는 운영자가 확인하기 전까지 어르신을 연결할 수 없다(서버 403).
+                  _activated
+                      ? '어르신이 앱에서 받은 연결 코드를 입력하면 어르신과 연결돼요.'
+                      : '운영자 확인 후 어르신을 연결할 수 있어요.\n어르신이 앱에서 가입하고 받은 연결 코드를 준비해 주세요.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 16,
+                    height: 1.6,
+                    color: eInkSoft,
+                  ),
+                ),
+                const SizedBox(height: 36),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      // 이미 로그인된 상태라(열쇠가 폰에 있다) 로그인 화면 대신 보호자 홈으로 간다.
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const GuardianHomePage(),
+                        ),
+                        (route) => false,
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: eAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      '시작하기',
+                      style: GoogleFonts.notoSansKr(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
