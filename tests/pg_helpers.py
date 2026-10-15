@@ -52,8 +52,9 @@ def insert_call(
     score: int | None = None,
     level: str | None = None,
     duration_ms: int | None = None,
+    degraded: bool = False,
 ) -> None:
-    """끝난 통화 한 건을 직접 심는다. 점수를 주면 call_metrics도 심는다."""
+    """끝난 통화 한 건을 직접 심는다. 점수·길이를 주거나 degraded면 call_metrics도 심는다."""
     audio_key = "t.wav" if status == "completed" else None
     with pool.connection() as conn:
         conn.execute(
@@ -61,9 +62,9 @@ def insert_call(
             "VALUES (%s, %s, %s, %s, %s, to_timestamp(%s))",
             (call_id, elder_id, trigger_type, status, audio_key, created_at),
         )
-        if score is not None or duration_ms is not None:
+        if score is not None or duration_ms is not None or degraded:
             conn.execute(
                 "INSERT INTO call_metrics (call_id, risk_score, risk_level, call_duration_ms, "
-                "calculator_version) VALUES (%s, %s, %s, %s, '2.0.0')",
-                (call_id, score, level if score is not None else None, duration_ms),
+                "degraded, calculator_version) VALUES (%s, %s, %s, %s, %s, '2.0.0')",
+                (call_id, score, level if score is not None else None, duration_ms, degraded),
             )

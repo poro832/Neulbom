@@ -157,6 +157,7 @@ APP_PATHS = {
     "/v1/guardian/link",
     "/v1/guardian/email/verify",
     "/v1/elders/*/mentions",
+    "/v1/elders/*/monthly",
 }
 
 
@@ -171,7 +172,7 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
 
     client = TestClient(main.app)
     for path in ("/v1/guardian/elders", "/v1/guardian/alerts", "/v1/elders/1/weekly",
-                 "/v1/me/calls", "/v1/me/contacts"):
+                 "/v1/elders/1/monthly", "/v1/me/calls", "/v1/me/contacts"):
         assert client.get(path).status_code == 401, path
     assert client.post("/v1/elders/1/pairing-code").status_code == 401
     assert client.post("/v1/me/contacts", json={"name": "가", "phone": "111-1111"}).status_code == 401
