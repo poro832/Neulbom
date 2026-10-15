@@ -14,6 +14,7 @@ from collections.abc import Callable, Sequence
 from app.api.call_content import CallContentStore
 from app.media.call_summary import CallSummarizer
 from app.media.medication_check import MedicationClassifier
+from app.media.mention_extract import MentionExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,13 @@ class ConversationRecorder:
         summarizer: CallSummarizer | None,
         *,
         classifier: MedicationClassifier | None = None,
+        extractor: MentionExtractor | None = None,
         spawn: Callable[[Callable[[], None]], None] = _spawn_thread,
     ) -> None:
         self._content = content
         self._summarizer = summarizer
         self._classifier = classifier
+        self._extractor = extractor
         self._spawn = spawn
 
     def record(self, call_id: int, turns: Sequence[tuple[str, str]]) -> None:
@@ -44,7 +47,7 @@ class ConversationRecorder:
         except Exception:
             logger.exception("대화 턴을 저장하지 못했다 call_id=%s", call_id)
             return
-        if self._summarizer is None and self._classifier is None:
+        if self._summarizer is None and self._classifier is None and self._extractor is None:
             return
         if not any(speaker == "elder" and text.strip() for speaker, text in turns):
             return
@@ -57,6 +60,8 @@ class ConversationRecorder:
             self._summarize(call_id, turns)
         if self._classifier is not None:
             self._check_medication(call_id, turns)
+        if self._extractor is not None:
+            self._extract_mentions(call_id, turns)
 
     def _check_medication(self, call_id: int, turns: list[tuple[str, str]]) -> None:
         try:
@@ -68,6 +73,17 @@ class ConversationRecorder:
             logger.info("복용 확인을 저장했다 call_id=%s 결과=%s", call_id, status)
         except Exception:
             logger.exception("복용 확인을 하지 못했다 call_id=%s", call_id)
+
+    def _extract_mentions(self, call_id: int, turns: list[tuple[str, str]]) -> None:
+        try:
+            mentions = self._extractor.extract(turns)
+            if mentions is None:
+                logger.info("건강·기분 언급을 뽑지 않았다 call_id=%s", call_id)
+                return
+            self._content.save_mentions(call_id, mentions, self._extractor.model_id)
+            logger.info("건강·기분 언급을 저장했다 call_id=%s 개수=%d", call_id, len(mentions))
+        except Exception:
+            logger.exception("건강·기분 언급을 저장하지 못했다 call_id=%s", call_id)
 
     def _summarize(self, call_id: int, turns: list[tuple[str, str]]) -> None:
         try:

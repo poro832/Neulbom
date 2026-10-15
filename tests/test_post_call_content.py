@@ -1,6 +1,6 @@
 import logging
 
-from app.api.call_content import InMemoryCallContent
+from app.api.call_content import InMemoryCallContent, Mention
 from app.main import _end_of_call
 from app.post_call_content import ConversationRecorder
 
@@ -197,3 +197,70 @@ def test_summary_failure_does_not_block_the_classifier():
     )
     rec.record(1, TURNS)
     assert content.medication([1]) == {1: "taken"}
+
+
+class FakeExtractor:
+    model_id = "mention-model"
+
+    def __init__(self, result=None, error=None):
+        self.result, self.error = result, error
+
+    def extract(self, turns):
+        if self.error:
+            raise self.error
+        return self.result
+
+
+MENTION_TURNS = [("ai", "어떠세요?"), ("elder", "허리가 아파요")]
+
+
+def test_mentions_are_saved_even_without_a_summarizer_or_classifier():
+    content = InMemoryCallContent()
+    wanted = [Mention("body", "bad", "허리가 아파요")]
+    recorder = ConversationRecorder(content, None, extractor=FakeExtractor(wanted), spawn=run_now)
+
+    recorder.record(1, MENTION_TURNS)
+
+    assert content.mentions([1]) == {1: wanted}
+
+
+def test_an_extractor_failure_does_not_stop_the_summary():
+    content = InMemoryCallContent()
+    recorder = ConversationRecorder(
+        content, FakeSummarizer("요약"), extractor=FakeExtractor(error=RuntimeError("boom")), spawn=run_now
+    )
+
+    recorder.record(1, MENTION_TURNS)
+
+    assert content.summaries([1]) == {1: "요약"}
+    assert content.mentions([1]) == {}
+
+
+def test_a_summary_failure_does_not_stop_the_mentions():
+    content = InMemoryCallContent()
+    wanted = [Mention("body", "bad", "허리가 아파요")]
+    recorder = ConversationRecorder(
+        content, FakeSummarizer(error=RuntimeError("boom")), extractor=FakeExtractor(wanted), spawn=run_now
+    )
+
+    recorder.record(1, MENTION_TURNS)
+
+    assert content.mentions([1]) == {1: wanted}
+
+
+def test_none_from_the_extractor_saves_nothing():
+    content = InMemoryCallContent()
+    recorder = ConversationRecorder(content, None, extractor=FakeExtractor(None), spawn=run_now)
+    recorder.record(1, MENTION_TURNS)
+    assert content.mentions([1]) == {}
+
+
+def test_mentions_are_never_logged(caplog):
+    content = InMemoryCallContent()
+    wanted = [Mention("body", "bad", "허리가 아파요")]
+    recorder = ConversationRecorder(content, None, extractor=FakeExtractor(wanted), spawn=run_now)
+
+    with caplog.at_level(logging.DEBUG):
+        recorder.record(1, MENTION_TURNS)
+
+    assert "허리가 아파요" not in caplog.text

@@ -75,6 +75,7 @@ from app.media.stream_server import (
 )
 from app.media.call_summary import CallSummarizer, summarizer_from_env
 from app.media.medication_check import MedicationClassifier, classifier_from_env
+from app.media.mention_extract import MentionExtractor, extractor_from_env
 from app.firebase_verify import verifier_from_env
 from app.post_call import analyze_session
 from app.post_call_content import ConversationRecorder
@@ -441,6 +442,7 @@ def build_server(
     call_content: CallContentStore | None = None,
     summarizer: CallSummarizer | None = None,
     medication: MedicationClassifier | None = None,
+    mentions: MentionExtractor | None = None,
 ) -> FastAPI:
     """트리거 API와 스트림 소켓을 한 앱에 올린다."""
     # 기본 조립은 실제 위험 판정을 단다. 테스트가 sink를 직접 넣으면 그쪽이
@@ -521,7 +523,9 @@ def build_server(
         app.router.add_event_handler("shutdown", archiver.stop)
 
     recorder = (
-        None if call_content is None else ConversationRecorder(call_content, summarizer, classifier=medication)
+        None if call_content is None else ConversationRecorder(
+            call_content, summarizer, classifier=medication, extractor=mentions
+        )
     )
 
     add_stream_route(
@@ -849,6 +853,7 @@ app = build_server(
     call_content=_app_data.content,
     summarizer=summarizer_from_env(),
     medication=classifier_from_env(),
+    mentions=extractor_from_env(),
 )
 
 # 풀은 build_server가 만든 게 아니라 여기서 만들었으므로 여기서 닫는다.
