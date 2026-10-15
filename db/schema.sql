@@ -18,7 +18,9 @@ CREATE TABLE guardians (
     phone_number  TEXT NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- 비어 있으면 운영자 확인 대기(앱에서 가입한 보호자). 기본값 now()라 운영 도구·시드가 만든 보호자는 열려 있다.
-    activated_at  TIMESTAMPTZ DEFAULT now()
+    activated_at  TIMESTAMPTZ DEFAULT now(),
+    -- 비어 있으면 이메일 인증 전(앱에서 가입한 보호자). 기본값 now()라 기존·운영 도구가 만든 보호자는 인증됨.
+    email_verified_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- ============================================================
