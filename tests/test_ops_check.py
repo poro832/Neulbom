@@ -28,6 +28,7 @@ GOOD_ENV = {
     "CLAWOPS_API_KEY": "SECRET-CLAWOPS",
     "CLAWOPS_FROM_NUMBER": "070",
     "PUBLIC_BASE_URL": "https://a",
+    "FIREBASE_PROJECT_ID": "demo-project",
     "STREAM_BASE_URL": "wss://a",
     "RECORDINGS_BUCKET": "b",
 }
@@ -48,6 +49,12 @@ def test_missing_settings_fail_and_name_what_breaks():
     checks = by_name(check_environment(env))
     c = checks["대화·요약·복용 확인(CLOVA Studio)"]
     assert c.level == FAIL and "CLOVA_STUDIO_API_KEY" in c.detail
+
+
+def test_a_missing_firebase_project_id_fails_and_names_what_breaks():
+    env = {k: v for k, v in GOOD_ENV.items() if k != "FIREBASE_PROJECT_ID"}
+    c = by_name(check_environment(env))["이메일 인증(Firebase)"]
+    assert c.level == FAIL and "FIREBASE_PROJECT_ID" in c.detail
 
 
 def test_push_key_file_states():
