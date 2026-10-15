@@ -38,3 +38,6 @@ recordings/
 # OS
 .DS_Store
 Thumbs.db
+
+# Firebase 클라이언트 설정(API 키 포함). 각자 로컬에서 firebase_options.example.dart를 복사해 만든다.
+client/lib/firebase_options.dart
