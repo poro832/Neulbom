@@ -19,7 +19,7 @@ from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.alerts import AlertStore
-from app.api.call_content import CallContentStore, InMemoryCallContent
+from app.api.call_content import CallContentStore, InMemoryCallContent, MENTION_CATEGORIES
 from app.api.calls import MAX_ELDER_ID
 from app.api.contacts import ContactStore, TooManyContacts
 from app.api.devices import DeviceStore, InMemoryDeviceStore
@@ -45,7 +45,7 @@ from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeStore
 from app.api.pairing import PairingStore, hash_code, new_code
 from app.api.rate_limit import FailureLimiter, InFlightLimiter, KeyedFailureLimiter
-from app.api.reports import Reports, kst_week_start, sunday_on_or_before
+from app.api.reports import Reports, kst_week_start, sunday_on_or_before, week_bounds
 from app.firebase_verify import EmailVerifier
 from app.scheduler import KST
 
@@ -56,6 +56,8 @@ NO_ELDER = "등록되지 않은 어르신입니다"
 BAD_PAIR = "연결 코드를 확인해 주세요"
 UNAVAILABLE = "인증을 확인할 수 없습니다"
 BAD_SIGNUP = "가입 코드를 확인해 주세요"
+# 언급은 30일 보관이라 한 주를 채울 만큼 통화를 넉넉히 가져와 주 경계로 거른다(많은 통화가 쌓여도 지난 주가 비지 않게).
+MENTION_CALL_FETCH_LIMIT = 500
 NEEDS_AGREEMENT = "안부 전화를 받는 데 동의해야 가입할 수 있어요"
 TRY_LATER = "잠시 뒤에 다시 해 주세요"
 WAITING = "보호자 승인을 기다리고 있어요"
@@ -826,6 +828,62 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 for line in lines
             ],
         }
+
+    @app.get("/v1/elders/{elder_id}/mentions")
+    @guarded
+    def elder_mentions(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        week_start: date | None = Query(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        week = (
+            kst_week_start(data.wall_clock())
+            if week_start is None
+            else sunday_on_or_before(week_start)
+        )
+        if not data.content.share_agreed(elder_id):
+            return {"share_agreed": False, "week_start": week.isoformat(), "categories": []}
+        lo, hi = week_bounds(week)
+        lines = sorted(
+            (l for l in data.reports.call_lines(elder_id, MENTION_CALL_FETCH_LIMIT) if lo <= l.started_at < hi),
+            key=lambda l: l.started_at,
+            reverse=True,
+        )
+        try:
+            found = data.content.mentions([line.call_id for line in lines])
+        except Exception:
+            # 언급은 덤이다. 조회가 터져도 화면은 막지 않는다(표가 아직 없는 배포 순서 포함).
+            logger.exception("건강·기분 언급 조회에 실패했다")
+            found = {}
+        categories = []
+        for category in MENTION_CATEGORIES:
+            counts = {"bad": 0, "ok": 0, "good": 0}
+            items = []
+            for line in lines:  # 최신 통화부터
+                for mention in found.get(line.call_id, []):
+                    if mention.category != category:
+                        continue
+                    counts[mention.said] += 1
+                    items.append(
+                        {
+                            "call_id": line.call_id,
+                            "date": iso_kst(line.started_at),
+                            "said": mention.said,
+                            "quote": mention.quote,
+                        }
+                    )
+            categories.append(
+                {
+                    "category": category,
+                    "negative": counts["bad"],
+                    "neutral": counts["ok"],
+                    "positive": counts["good"],
+                    "items": items,
+                }
+            )
+        return {"share_agreed": True, "week_start": week.isoformat(), "categories": categories}
 
     @app.get("/v1/calls/{call_id}/turns")
     @guarded

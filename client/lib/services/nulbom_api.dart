@@ -400,6 +400,13 @@ class NulbomApi {
     return ElderCalls.fromJson(json);
   }
 
+  /// 보호자: 어르신이 통화에서 직접 한 건강·기분 이야기를 주간으로 모은 것. 어르신이 동의하기 전에는 비어 있다.
+  static Future<ElderMentions> elderMentions(int elderId, {String? weekStart, String? key}) async {
+    final query = weekStart == null ? '' : '?week_start=$weekStart';
+    final json = await _send('GET', '/v1/elders/$elderId/mentions$query', key: _guardianKeyOrThrow(key));
+    return ElderMentions.fromJson(json);
+  }
+
   /// 보호자: 통화 한 건의 AI/어르신 대화 원문. 열 때마다 서버에 열람 기록이 남는다.
   static Future<List<CallTurn>> callTurns(int callId, {String? key}) async {
     final json = await _send('GET', '/v1/calls/$callId/turns', key: _guardianKeyOrThrow(key));
