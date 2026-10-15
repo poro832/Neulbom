@@ -106,3 +106,14 @@ def test_quotes_are_never_logged(caplog):
     with caplog.at_level(logging.DEBUG):
         get(kit)
     assert "허리가 아파요" not in caplog.text
+
+
+def test_an_older_week_still_has_its_mentions_when_more_than_a_hundred_newer_calls_exist():
+    kit = make_app_kit(NOW)
+    for i in range(120):
+        call(kit, 100 + i, NOW - 60 * (i + 1))  # 이번 주 120통
+    call(kit, 1, NOW - 8 * 86400)  # 지난 주 한 통
+    kit.data.content.save_mentions(1, [Mention("mood", "bad", "외로워요")], "m")
+    kit.data.content.agree_share(12)
+    mood = {c["category"]: c for c in get(kit, week_start="2026-09-27").json()["categories"]}["mood"]
+    assert [i["quote"] for i in mood["items"]] == ["외로워요"]
