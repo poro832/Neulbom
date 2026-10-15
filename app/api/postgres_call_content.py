@@ -11,7 +11,7 @@ import logging
 import time
 from collections.abc import Callable, Sequence
 
-from app.api.call_content import MEDICATION_STATUSES, StoredTurn
+from app.api.call_content import MEDICATION_STATUSES, Mention, StoredTurn, check_mentions
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,32 @@ class PostgresCallContent:
             ).fetchall()
         return {c: s for c, s in rows}
 
+    def save_mentions(self, call_id: int, mentions: Sequence[Mention], model_id: str) -> None:
+        check_mentions(mentions)  # 규칙 밖이면 DB를 건드리기 전에 거절한다
+        with self._pool.connection() as conn:
+            # 한 연결 안에서 지우고 넣는다 — 중간에 실패하면 둘 다 되돌아간다.
+            conn.execute("DELETE FROM call_mentions WHERE call_id = %s", (call_id,))
+            for m in mentions:
+                conn.execute(
+                    "INSERT INTO call_mentions (call_id, category, said, quote, model_id, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, to_timestamp(%s))",
+                    (call_id, m.category, m.said, m.quote, model_id, self._clock()),
+                )
+
+    def mentions(self, call_ids: Sequence[int]) -> dict[int, list[Mention]]:
+        if not call_ids:
+            return {}
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT call_id, category, said, quote FROM call_mentions "
+                "WHERE call_id = ANY(%s) ORDER BY mention_id",
+                (list(call_ids),),
+            ).fetchall()
+        found: dict[int, list[Mention]] = {}
+        for call_id, category, said, quote in rows:
+            found.setdefault(call_id, []).append(Mention(category, said, quote))
+        return found
+
     def calls_with_turns(self, call_ids: Sequence[int]) -> set[int]:
         if not call_ids:
             return set()
@@ -146,4 +172,13 @@ class PostgresCallContent:
                 ).rowcount
         except Exception:
             logger.exception("약 복용 확인 기록 삭제에 실패했다")
-        return turns + reports + medication
+        # 건강·기분 언급 표도 같은 이유로 따로 지운다.
+        mentions_removed = 0
+        try:
+            with self._pool.connection() as conn:
+                mentions_removed = conn.execute(
+                    "DELETE FROM call_mentions WHERE created_at < to_timestamp(%s)", (cutoff,)
+                ).rowcount
+        except Exception:
+            logger.exception("건강·기분 언급 삭제에 실패했다")
+        return turns + reports + medication + mentions_removed

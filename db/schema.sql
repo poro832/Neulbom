@@ -254,6 +254,22 @@ CREATE TABLE call_medication (
 COMMENT ON TABLE call_medication IS
     '어르신이 약을 먹었다고 말했는지(통화별). LLM이 어르신의 말을 셋으로 나눈 것일 뿐 점수·경보에는 쓰지 않는다.';
 
+-- 통화 속 건강·기분 언급(어르신 말 그대로). 점수·경보에는 쓰지 않는다. 30일 뒤 지운다.
+CREATE TABLE call_mentions (
+    mention_id BIGSERIAL PRIMARY KEY,
+    call_id    BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
+    category   TEXT NOT NULL CHECK (category IN ('body', 'sleep', 'meal', 'mood', 'activity')),
+    said       TEXT NOT NULL CHECK (said IN ('bad', 'ok', 'good')),
+    quote      TEXT NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 40),
+    model_id   TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX call_mentions_call_idx ON call_mentions (call_id);
+
+COMMENT ON TABLE call_mentions IS
+    '어르신이 통화에서 직접 한 건강·기분 이야기. quote는 어르신 말 그대로(서버가 기록에 있는지 확인). 진단이 아니며 점수·경보에는 쓰지 않는다.';
+
 -- 보호자가 원문을 열 때마다 한 행. 앱에는 보이지 않고 DB에서만 본다.
 CREATE TABLE transcript_views (
     view_id     BIGSERIAL PRIMARY KEY,

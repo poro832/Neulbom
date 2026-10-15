@@ -17,6 +17,28 @@ from typing import Protocol
 # 통화별 약 복용 확인 결과. 어르신이 한 말을 셋으로만 나눈다 (설계: 약 복용 확인).
 MEDICATION_STATUSES = ("taken", "not_taken", "unknown")
 
+# 통화 속 건강·기분 언급 (설계: 통화 속 건강·기분 언급 모으기). 어르신이 한 말을 그대로 옮기며 진단이 아니다.
+MENTION_CATEGORIES = ("body", "sleep", "meal", "mood", "activity")
+MENTION_SAID = ("bad", "ok", "good")
+MAX_MENTION_QUOTE = 40
+
+
+@dataclass(frozen=True)
+class Mention:
+    category: str  # MENTION_CATEGORIES 중 하나
+    said: str  # 어르신이 스스로 한 표현: bad | ok | good
+    quote: str  # 어르신 말 그대로(40자 이하)
+
+
+def check_mentions(mentions: Sequence[Mention]) -> None:
+    for m in mentions:
+        if m.category not in MENTION_CATEGORIES:
+            raise ValueError(f"알 수 없는 언급 분류: {m.category!r}")
+        if m.said not in MENTION_SAID:
+            raise ValueError(f"알 수 없는 언급 느낌: {m.said!r}")
+        if not m.quote.strip() or len(m.quote) > MAX_MENTION_QUOTE:
+            raise ValueError("언급 인용은 1~40자여야 한다")
+
 
 @dataclass(frozen=True)
 class StoredTurn:
@@ -36,6 +58,12 @@ class CallContentStore(Protocol):
     def save_medication(self, call_id: int, status: str, model_id: str) -> None: ...
 
     def medication(self, call_ids: Sequence[int]) -> dict[int, str]: ...
+
+    def save_mentions(self, call_id: int, mentions: Sequence[Mention], model_id: str) -> None:
+        """그 통화의 건강·기분 언급을 통째로 바꾼다(빈 목록이면 지운다). 값이 규칙 밖이면 ValueError."""
+        ...
+
+    def mentions(self, call_ids: Sequence[int]) -> dict[int, list[Mention]]: ...
 
     def calls_with_turns(self, call_ids: Sequence[int]) -> set[int]: ...
 
@@ -61,6 +89,7 @@ class InMemoryCallContent:
         self._turns: dict[int, tuple[list[StoredTurn], float]] = {}
         self._summaries: dict[int, tuple[str, float]] = {}
         self._medication: dict[int, tuple[str, float]] = {}
+        self._mentions: dict[int, tuple[list[Mention], float]] = {}
         self._owners: dict[int, int] = {}
         self._views: dict[int, int] = {}
         self._shared: set[int] = set()
@@ -96,6 +125,18 @@ class InMemoryCallContent:
         with self._lock:
             return {c: self._medication[c][0] for c in call_ids if c in self._medication}
 
+    def save_mentions(self, call_id: int, mentions: Sequence[Mention], model_id: str) -> None:
+        check_mentions(mentions)
+        with self._lock:
+            if mentions:
+                self._mentions[call_id] = (list(mentions), self._clock())
+            else:
+                self._mentions.pop(call_id, None)
+
+    def mentions(self, call_ids: Sequence[int]) -> dict[int, list[Mention]]:
+        with self._lock:
+            return {c: list(self._mentions[c][0]) for c in call_ids if c in self._mentions}
+
     def calls_with_turns(self, call_ids: Sequence[int]) -> set[int]:
         with self._lock:
             return {c for c in call_ids if c in self._turns and self._turns[c][0]}
@@ -128,4 +169,6 @@ class InMemoryCallContent:
             for call_id in [c for c, (_, at) in self._medication.items() if at < cutoff]:
                 del self._medication[call_id]
                 removed += 1
+            for call_id in [c for c, (_, at) in self._mentions.items() if at < cutoff]:
+                removed += len(self._mentions.pop(call_id)[0])
         return removed
