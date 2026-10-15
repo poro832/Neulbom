@@ -12,6 +12,13 @@ abstract class EmailProof {
   /// 이 폰에 Firebase 로그인 세션이 있는가(없으면 재발송에 비밀번호가 필요하다).
   bool get hasSession;
 
+  /// 이 폰의 Firebase 세션 주인 이메일(세션이 없거나 알 수 없으면 null). 같은 폰을 다른
+  /// 보호자가 썼다면 앞 사람의 것일 수 있다 — 화면은 자기 이메일과 다르면 세션이 없는 것으로 본다.
+  String? get sessionEmail;
+
+  /// 이 폰의 Firebase 세션을 끝낸다(앱에서 로그아웃할 때). Firebase가 없거나 실패해도 던지지 않는다.
+  Future<void> signOut();
+
   /// Firebase 계정을 만들거나(이미 있으면 로그인하고) 인증 메일을 보낸다.
   Future<void> sendVerification({required String email, required String password});
 
@@ -26,6 +33,24 @@ class FirebaseEmailProof implements EmailProof {
 
   @override
   bool get hasSession => _auth.currentUser != null;
+
+  @override
+  String? get sessionEmail {
+    try {
+      return _auth.currentUser?.email;
+    } catch (_) {
+      return null; // Firebase가 초기화되지 않은 폰
+    }
+  }
+
+  @override
+  Future<void> signOut() async {
+    try {
+      await _auth.signOut();
+    } catch (_) {
+      // Firebase가 초기화되지 않았거나 세션이 이미 없다 — 앱 로그아웃은 그대로 끝난다.
+    }
+  }
 
   String _message(FirebaseAuthException e) {
     switch (e.code) {

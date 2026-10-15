@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:eldercare/models/nulbom_models.dart';
@@ -34,7 +35,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     NulbomApi.guardianKey = '';
   });
-  tearDown(() => NulbomApi.guardianKey = '');
+  tearDown(() {
+    NulbomApi.guardianKey = '';
+    AuthService.emailProof = FirebaseEmailProof();
+  });
 
   group('NulbomApi / AuthService', () {
     test('가입하면 서버가 준 열쇠를 폰에 저장한다', () async {
@@ -143,6 +147,57 @@ void main() {
       await AuthService.logout();
 
       expect(await NulbomApi.loadGuardianKey(), isEmpty);
+    });
+
+    test('로그아웃: 이 폰의 Firebase 세션도 끝낸다 — 같은 폰의 다음 보호자가 앞 사람 세션을 쓰지 않게', () async {
+      final proof = FakeProof();
+      AuthService.emailProof = proof;
+      await NulbomApi.saveGuardianKey('nlb_old');
+      NulbomApi.client = MockClient((request) async => http.Response('', 204));
+
+      expect(await AuthService.logout(), isTrue);
+
+      expect(proof.signedOut, 1);
+      expect(await NulbomApi.loadGuardianKey(), isEmpty);
+    });
+
+    test('로그아웃: Firebase 세션 끝내기가 실패해도 로그아웃은 끝난다', () async {
+      AuthService.emailProof = FakeProof(signOutError: StateError('Firebase 없음'));
+      await NulbomApi.saveGuardianKey('nlb_old');
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return http.Response('', 204);
+      });
+
+      expect(await AuthService.logout(), isTrue);
+
+      expect(seen.url.path, '/v1/guardian/logout');
+      expect(await NulbomApi.loadGuardianKey(), isEmpty);
+      expect(await AuthService.isLoggedIn(), isFalse);
+    });
+
+    testWidgets('로그아웃: Firebase 세션 끝내기가 멈춰도 오래 기다리지 않고 로그아웃이 끝난다', (tester) async {
+      final proof = FakeProof(signOutHangs: true);
+      AuthService.emailProof = proof;
+      await NulbomApi.saveGuardianKey('nlb_old');
+      NulbomApi.client = MockClient((request) async => http.Response('', 204));
+
+      bool? loggedOut;
+      unawaited(AuthService.logout().then((ok) => loggedOut = ok));
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+
+      expect(proof.signedOut, 1);
+      expect(loggedOut, isTrue);
+      expect(await NulbomApi.loadGuardianKey(), isEmpty);
+    });
+
+    test('Firebase가 초기화되지 않은 폰에서도 진짜 감싸기의 세션 끝내기·세션 이메일은 조용히 넘어간다', () async {
+      final proof = FirebaseEmailProof();
+
+      await proof.signOut(); // 던지지 않는다
+      expect(proof.sessionEmail, isNull);
     });
 
     test('저장된 열쇠를 시작할 때 불러온다', () async {
@@ -348,13 +403,27 @@ void pendingTests() {
   });
 }
 
-/// Firebase 대신 쓰는 가짜 — 이 폰에 세션이 있고, 링크를 눌렀으면 [token]을 준다.
+/// Firebase 대신 쓰는 가짜 — 이 폰에 kim@example.com의 세션이 있고, 링크를 눌렀으면 [token]을 준다.
 class FakeProof implements EmailProof {
-  FakeProof({this.token});
+  FakeProof({this.token, this.signOutError, this.signOutHangs = false});
   final String? token;
+  final Object? signOutError;
+  final bool signOutHangs;
+  int signedOut = 0;
 
   @override
   bool get hasSession => true;
+
+  @override
+  String? get sessionEmail => 'kim@example.com';
+
+  @override
+  Future<void> signOut() {
+    signedOut++;
+    if (signOutError != null) throw signOutError!; // 기다리기 전에 바로 터지는 경우
+    if (signOutHangs) return Completer<void>().future; // 끝나지 않는 경우
+    return Future.value();
+  }
 
   @override
   Future<void> sendVerification({required String email, required String password}) async {}
@@ -453,6 +522,31 @@ void emailPendingTests() {
 
       expect(meCalls, 2);
       expect(find.text('이메일 인증 대기 중'), findsOneWidget);
+    });
+
+    testWidgets('돌아와 다시 읽기에 실패해도 이미 아는 인증 전 상태를 지켜 표시와 버튼이 남는다', (tester) async {
+      var meCalls = 0;
+      NulbomApi.client = MockClient((request) async {
+        meCalls++;
+        if (meCalls == 1) return json(me(emailVerified: false));
+        throw http.ClientException('down'); // 돌아온 뒤에는 서버에 닿지 못한다
+      });
+
+      await pump(tester, GuardianAccountScreen(emailProof: FakeProof()));
+      await tester.tap(find.text('이메일 인증하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('나중에 하기'));
+      await tester.pumpAndSettle();
+
+      expect(meCalls, 2);
+      expect(find.text('이메일 인증 대기 중'), findsOneWidget);
+      expect(find.text('이메일 인증하기'), findsOneWidget);
+      expect(find.text('kim@example.com'), findsWidgets);
+
+      // 이메일도 그대로라 버튼을 다시 누르면 인증 화면이 열린다.
+      await tester.tap(find.text('이메일 인증하기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(EmailVerificationScreen), findsOneWidget);
     });
   });
 }

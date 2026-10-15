@@ -51,7 +51,12 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       info['activated'] = me.activated;
       info['emailVerified'] = me.emailVerified;
     } catch (_) {
-      // 서버에 닿지 못하면 저장된 값을 그대로 쓴다.
+      // 서버에 닿지 못하면 저장된 값을 쓰되, 이 화면이 이미 서버에서 받아 둔 값은 지킨다 —
+      // 인증 화면에서 돌아와 다시 읽다 실패해도 인증 대기 표시와 버튼이 사라지지 않게.
+      for (final key in const ['name', 'email', 'phone', 'activated', 'emailVerified']) {
+        final known = _guardianInfo[key];
+        if (known != null) info[key] = known;
+      }
     }
     if (!mounted) return;
     setState(() {
