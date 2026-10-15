@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +8,7 @@ import 'firebase_options.dart';
 import 'services/fcm_service.dart';
 import 'services/auth_service.dart';
 import 'services/nulbom_api.dart';
+import 'services/push_registration.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/elderly_login_screen.dart';
 import 'screens/elderly_gate.dart';
@@ -79,6 +82,8 @@ class _ElderCareAppState extends State<ElderCareApp> {
         if ((await NulbomApi.loadGuardianKey()).isEmpty) {
           return const GuardianLoginScreen();
         }
+        // 앱을 켤 때 로그인한 보호자 폰의 푸시 토큰을 다시 등록해 둔다(실패는 조용히 넘어간다).
+        unawaited(PushRegistration.registerIfGuardian());
         return const GuardianHomePage();
       }
     }

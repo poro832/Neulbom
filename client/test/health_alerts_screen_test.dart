@@ -44,6 +44,7 @@ void main() {
   testWidgets('건강 경고 탭은 서버의 실제 알림을 종류별로 보여 준다', (tester) async {
     late http.Request seen;
     NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
       seen = request;
       return json({
         'alerts': [

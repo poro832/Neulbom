@@ -62,27 +62,6 @@ class ApiService {
     }
   }
 
-  // FCM 토큰 등록
-  static Future<void> registerFcmToken(String token) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/fcm/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'token': token}),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('요청 시간 초과'),
-      );
-
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        throw Exception('FCM 토큰 등록 실패: ${response.statusCode}');
-      }
-      print('FCM 토큰 등록 완료: $token');
-    } catch (e) {
-      print('API 에러: $e');
-    }
-  }
-
   // Mock AI 응답 데이터
   static const Map<String, String> _mockResponses = {
     '안녕': '안녕하세요! 저도 반갑습니다. 오늘은 어떤 하루를 보내셨나요?',
