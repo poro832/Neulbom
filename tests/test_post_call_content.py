@@ -264,3 +264,13 @@ def test_mentions_are_never_logged(caplog):
         recorder.record(1, MENTION_TURNS)
 
     assert "허리가 아파요" not in caplog.text
+
+
+def test_an_empty_list_from_the_extractor_clears_earlier_mentions():
+    content = InMemoryCallContent()
+    content.save_mentions(1, [Mention("body", "bad", "허리가 아파요")], "old")
+    recorder = ConversationRecorder(content, None, extractor=FakeExtractor([]), spawn=run_now)
+
+    recorder.record(1, MENTION_TURNS)
+
+    assert content.mentions([1]) == {}

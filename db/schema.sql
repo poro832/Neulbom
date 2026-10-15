@@ -254,13 +254,14 @@ CREATE TABLE call_medication (
 COMMENT ON TABLE call_medication IS
     '어르신이 약을 먹었다고 말했는지(통화별). LLM이 어르신의 말을 셋으로 나눈 것일 뿐 점수·경보에는 쓰지 않는다.';
 
--- 통화 속 건강·기분 언급(어르신 말 그대로). 점수·경보에는 쓰지 않는다. 30일 뒤 지운다.
+-- 통화 속 건강·기분 언급. quote는 어르신 발화에서 그대로 가져온 한 문장이고, 그 문장이 누구 이야기인지와
+-- 느낌(said)은 모델이 정한다. 점수·경보에는 쓰지 않는다. 30일 뒤 지운다.
 CREATE TABLE call_mentions (
     mention_id BIGSERIAL PRIMARY KEY,
     call_id    BIGINT NOT NULL REFERENCES calls(call_id) ON DELETE CASCADE,
     category   TEXT NOT NULL CHECK (category IN ('body', 'sleep', 'meal', 'mood', 'activity')),
     said       TEXT NOT NULL CHECK (said IN ('bad', 'ok', 'good')),
-    quote      TEXT NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 40),
+    quote      TEXT NOT NULL CHECK (char_length(quote) BETWEEN 1 AND 80),
     model_id   TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

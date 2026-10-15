@@ -55,7 +55,7 @@ class ConversationRecorder:
         self._spawn(lambda: self._analyze(call_id, snapshot))
 
     def _analyze(self, call_id: int, turns: list[tuple[str, str]]) -> None:
-        # 둘은 서로 막지 않는다 — 요약이 실패해도 복용 확인을, 그 반대도 계속한다.
+        # 세 분석은 서로 막지 않는다 — 하나가 실패해도 나머지는 계속한다.
         if self._summarizer is not None:
             self._summarize(call_id, turns)
         if self._classifier is not None:
