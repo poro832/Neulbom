@@ -45,7 +45,14 @@ from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeStore
 from app.api.pairing import PairingStore, hash_code, new_code
 from app.api.rate_limit import FailureLimiter, InFlightLimiter, KeyedFailureLimiter
-from app.api.reports import Reports, kst_week_start, sunday_on_or_before, week_bounds
+from app.api.reports import (
+    DayStat,
+    Reports,
+    kst_week_start,
+    month_week_starts,
+    sunday_on_or_before,
+    week_bounds,
+)
 from app.firebase_verify import EmailVerifier
 from app.scheduler import KST
 
@@ -77,6 +84,7 @@ LINK_WAITING = "보호자 연결을 기다리고 있어요"
 ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
 TOO_MANY_ELDERS = "더 이상 어르신을 연결할 수 없어요"
 PHONE_USED = "이미 등록된 번호예요"
+BAD_MONTH = "달을 확인해 주세요"
 
 # 한 보호자가 연결할 수 있는 어르신 수. 코드를 가진 사람이 한 보호자에게 어르신을 무한히 붙이지 못하게 한다.
 MAX_ELDERS_PER_GUARDIAN = 10
@@ -123,6 +131,16 @@ class AppData:
 
 def iso_kst(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, KST).isoformat(timespec="seconds")
+
+
+def days_json(days: list[DayStat]) -> list[dict]:
+    return [{"date": d.date, "calls": d.calls, "avg_score": d.avg_score} for d in days]
+
+
+def mean_of_day_means(days: list[DayStat]) -> float | None:
+    """점수가 있는 날들의 평균의 평균. 주간·월간이 같은 식을 쓴다(통화가 많은 날이 기간 평균을 끌고 가지 않게)."""
+    scored = [d.avg_score for d in days if d.avg_score is not None]
+    return None if not scored else sum(scored) / len(scored)
 
 
 class SignupRequest(BaseModel):
@@ -323,13 +341,54 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             else sunday_on_or_before(week_start)
         )
         days = data.reports.weekly(elder_id, week)
-        scored = [d.avg_score for d in days if d.avg_score is not None]
         return {
             "week_start": week.isoformat(),
-            "days": [{"date": d.date, "calls": d.calls, "avg_score": d.avg_score} for d in days],
+            "days": days_json(days),
             "total_calls": sum(d.calls for d in days),
-            "avg_score": None if not scored else sum(scored) / len(scored),
+            "avg_score": mean_of_day_means(days),
+            "baseline_calls": baseline_calls_of(elder_id),
         }
+
+    @app.get("/v1/elders/{elder_id}/monthly")
+    @guarded
+    def elder_monthly(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        try:
+            first = (
+                datetime.fromtimestamp(data.wall_clock(), KST).date().replace(day=1)
+                if month is None
+                else date(int(month[:4]), int(month[5:]), 1)
+            )
+            weeks = month_week_starts(first)
+        except (ValueError, OverflowError):
+            # 형식은 맞아도 날짜로 셀 수 없는 달(0000-01, 9999-12)이다.
+            raise HTTPException(status_code=422, detail=BAD_MONTH)
+        # 서버의 날짜별 통계는 주 단위다. 그 달에 걸친 주들을 읽어 그 달의 날만 모은다(주는 겹치지 않는다).
+        prefix = f"{first.year:04d}-{first.month:02d}-"
+        days = sorted(
+            (d for week in weeks for d in data.reports.weekly(elder_id, week) if d.date.startswith(prefix)),
+            key=lambda d: d.date,
+        )
+        return {
+            "month": prefix[:-1],
+            "days": days_json(days),
+            "total_calls": sum(d.calls for d in days),
+            "avg_score": mean_of_day_means(days),
+            "baseline_calls": baseline_calls_of(elder_id),
+        }
+
+    def baseline_calls_of(elder_id: int) -> int | None:
+        """평소 기준에 쓸 수 있는 최근 통화 수. 안내 한 줄용 덤이라 못 읽어도 통계는 막지 않는다(앱은 null이면 안내를 숨긴다)."""
+        try:
+            return data.reports.baseline_calls(elder_id)
+        except Exception:
+            logger.exception("평소 기준 통화 수 조회에 실패했다 elder_id=%s", elder_id)
+            return None
 
     @app.get("/v1/guardian/alerts")
     @guarded

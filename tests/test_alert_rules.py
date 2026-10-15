@@ -30,6 +30,14 @@ def test_a_watch_judgement_raises_a_warning():
     assert alert.call_id == 7 and alert.elder_id == 12
 
 
+def test_risk_messages_do_not_name_a_cause():
+    """점수는 신호가 평소와 다르다는 것만 안다. 말수·대답 같은 원인을 단정하지 않는다(이미 저장된 알림은 그대로 둔다)."""
+    assert RISK_MESSAGES["watch"] == "최근 통화에서 평소와 다른 신호가 있었어요. 한 번 안부를 확인해 보세요."
+    assert RISK_MESSAGES["alert"] == "최근 통화에서 평소와 많이 달랐어요. 한 번 안부를 확인해 보세요."
+    for message in RISK_MESSAGES.values():
+        assert "말수" not in message and "대답" not in message and "느려" not in message
+
+
 def test_an_alert_judgement_raises_a_critical():
     rules, alerts = make()
 

@@ -6,6 +6,7 @@ from datetime import date, datetime
 
 import pytest
 
+from app.analysis.baseline import BASELINE_WINDOW
 from app.api.alerts import InMemoryAlertStore
 from app.api.elder_directory import ElderAccess, InMemoryElderDirectory
 from app.api.reports import InMemoryReports, kst_week_start, sunday_on_or_before
@@ -61,11 +62,14 @@ def _postgres():
     seed_world(pool)
     alerts = PostgresAlertStore(pool=pool, clock=lambda: kst(2026, 10, 7, 12))
 
-    def add_call(*, call_id, elder_id, status, created_at, trigger_type="scheduled", score=None, duration_ms=None):
+    def add_call(
+        *, call_id, elder_id, status, created_at, trigger_type="scheduled", score=None, duration_ms=None,
+        degraded=False,
+    ):
         insert_call(
             pool, call_id=call_id, elder_id=elder_id, status=status, created_at=created_at,
             trigger_type=trigger_type, score=score,
-            level=None if score is None else "normal", duration_ms=duration_ms,
+            level=None if score is None else "normal", duration_ms=duration_ms, degraded=degraded,
         )
 
     def add_alert(elder_id, guardian_id):
@@ -149,6 +153,50 @@ def test_weekly_ignores_other_elders(world):
     world.add_call(call_id=1, elder_id=13, status="completed", created_at=kst(2026, 10, 5, 9), score=50)
 
     assert all(d.calls == 0 for d in world.reports.weekly(12, SUNDAY))
+
+
+# ------------------------------------------------ 평소 기준에 쓸 수 있는 통화 수
+
+
+def test_baseline_calls_is_zero_without_calls(world):
+    assert world.reports.baseline_calls(12) == 0
+
+
+def test_baseline_calls_counts_completed_calls_with_usable_metrics(world):
+    world.add_call(call_id=1, elder_id=12, status="completed", created_at=kst(2026, 10, 1, 9), score=10)
+    world.add_call(call_id=2, elder_id=12, status="completed", created_at=kst(2026, 10, 2, 9), degraded=True)
+    world.add_call(call_id=3, elder_id=12, status="completed", created_at=kst(2026, 10, 3, 9))  # 지표 없음
+    world.add_call(call_id=4, elder_id=12, status="no_answer", created_at=kst(2026, 10, 4, 9))
+    world.add_call(call_id=5, elder_id=13, status="completed", created_at=kst(2026, 10, 5, 9), score=10)
+    world.add_call(call_id=6, elder_id=12, status="completed", created_at=kst(2026, 10, 6, 9), score=20)
+
+    assert world.reports.baseline_calls(12) == 2  # 1번과 6번만. degraded·지표 없음·안 받음·남의 통화는 빠진다
+
+
+def test_baseline_calls_looks_at_most_at_the_latest_window(world):
+    for n in range(1, BASELINE_WINDOW + 6):
+        world.add_call(call_id=n, elder_id=12, status="completed", created_at=kst(2026, 9, n, 9), score=10)
+
+    assert world.reports.baseline_calls(12) == BASELINE_WINDOW == 14
+
+
+def test_baseline_calls_cuts_the_window_before_dropping_degraded(world):
+    """기준선과 같은 순서다: 창을 먼저 자르고 degraded를 뺀다. 거꾸로 하면 오래전 통화가 '평소'가 된다."""
+    for n in range(1, 6):
+        world.add_call(call_id=n, elder_id=12, status="completed", created_at=kst(2026, 9, n, 9), score=10)
+    for n in range(6, 6 + BASELINE_WINDOW):
+        world.add_call(call_id=n, elder_id=12, status="completed", created_at=kst(2026, 9, n, 9), degraded=True)
+
+    assert world.reports.baseline_calls(12) == 0
+
+
+def test_unanswered_calls_do_not_take_a_window_slot(world):
+    for n in range(1, BASELINE_WINDOW + 1):
+        world.add_call(call_id=n, elder_id=12, status="completed", created_at=kst(2026, 9, n, 9), score=10)
+    for n in range(20, 25):
+        world.add_call(call_id=n, elder_id=12, status="no_answer", created_at=kst(2026, 9, n, 9))
+
+    assert world.reports.baseline_calls(12) == BASELINE_WINDOW
 
 
 # ------------------------------------------------ 어르신 요약

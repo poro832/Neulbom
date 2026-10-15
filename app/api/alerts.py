@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 RISK_MESSAGES = {
-    "watch": "최근 통화에서 평소보다 말수가 줄고 대답이 느려졌어요.",
+    # 원인(말수·대답)을 단정하지 않는다. 이미 저장된 알림 문구는 그대로 둔다.
+    "watch": "최근 통화에서 평소와 다른 신호가 있었어요. 한 번 안부를 확인해 보세요.",
     "alert": "최근 통화에서 평소와 많이 달랐어요. 한 번 안부를 확인해 보세요.",
 }
 NO_ANSWER_MESSAGE = "오늘 안부 전화를 받지 못하셨어요."
