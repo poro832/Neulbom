@@ -10,7 +10,17 @@ class AuthService {
   static const String _isLoggedInKey = 'is_logged_in';
   static const String _tokenKey = 'auth_token';
 
-  // 어르신 회원가입
+  /// 어르신 열쇠를 받은 뒤 이 폰을 어르신 폰으로 기억한다 — 앱을 다시 열면 어르신 문(ElderlyGate)으로 간다.
+  static Future<void> rememberElder({required String name, required String phone}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_userTypeKey, 'elderly');
+    await prefs.setString(_phoneKey, phone);
+    await prefs.setString(_nameKey, name);
+    await prefs.setBool(_isLoggedInKey, true);
+  }
+
+  // 어르신 회원가입 — 구 흐름(보호자 개인 코드로 가입). 가입 화면은 이제 보호자 코드 없이
+  // NulbomApi.elderSignup으로 먼저 가입한다. 서버가 아직 이 주소를 받아 함수는 남겨 둔다.
   static Future<Map<String, dynamic>> elderlySignup({
     required String name,
     required String phone,
@@ -29,13 +39,7 @@ class AuthService {
         phone: phone.trim(),
         agreed: agreed,
       );
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_userTypeKey, 'elderly');
-      await prefs.setString(_phoneKey, phone);
-      await prefs.setString(_nameKey, name);
-      await prefs.setBool(_isLoggedInKey, true);
-      await prefs.setString(_tokenKey, 'mock_token_$phone');
+      await rememberElder(name: name, phone: phone);
 
       return {
         'success': true,
@@ -61,7 +65,7 @@ class AuthService {
       if (await NulbomApi.elderKey() == null) {
         return {
           'success': false,
-          'message': '이 폰은 아직 연결되지 않았어요. 처음이시면 회원가입에서 보호자 연결 코드를 입력해 주세요.',
+          'message': '이 폰은 아직 가입하지 않았어요. 처음이시면 회원가입을 해 주세요.',
         };
       }
 
@@ -69,7 +73,6 @@ class AuthService {
       await prefs.setString(_userTypeKey, 'elderly');
       await prefs.setString(_phoneKey, phone);
       await prefs.setBool(_isLoggedInKey, true);
-      await prefs.setString(_tokenKey, 'mock_token_$phone');
 
       return {
         'success': true,
@@ -107,7 +110,11 @@ class AuthService {
       return {
         'success': true,
         'message': '회원가입 성공',
-        'data': {'name': profile.name, 'email': profile.email},
+        'data': {
+          'name': profile.name,
+          'email': profile.email,
+          'activated': profile.activated,
+        },
       };
     } on ApiException catch (e) {
       return {'success': false, 'message': e.message};

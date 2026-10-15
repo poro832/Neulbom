@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
-import 'connection_code_section.dart';
 import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
@@ -26,7 +25,6 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   bool _notificationsEnabled = true;
   bool _emailNotificationsEnabled = true;
   bool _smsNotificationsEnabled = false;
-  bool _showConnectionCode = false;
 
   @override
   void initState() {
@@ -307,35 +305,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  TextButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _showConnectionCode =
-                                            !_showConnectionCode;
-                                      });
-                                    },
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: Text(
-                                      _showConnectionCode
-                                          ? '연결코드 숨기기'
-                                          : '연결코드 확인하기',
-                                      style: GoogleFonts.notoSansKr(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: eAccent,
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               ),
-                              if (_showConnectionCode)
-                                const ConnectionCodeSection(),
                             ],
                           ),
                         ),

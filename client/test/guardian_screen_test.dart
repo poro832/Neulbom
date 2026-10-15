@@ -101,14 +101,15 @@ void main() {
     expect(find.text('다시 불러오기'), findsOneWidget);
   });
 
-  testWidgets('어르신이 없어도 보호자 코드를 만들고 로그아웃할 수 있다', (tester) async {
+  testWidgets('어르신이 없으면 연결 코드 입력을 안내하고(구 보호자 코드 발급은 없다) 로그아웃할 수 있다', (tester) async {
     tester.view.physicalSize = const Size(1200, 4000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
+    final paths = <String>[];
     NulbomApi.client = MockClient((request) async {
+      paths.add(request.url.path);
       if (request.url.path == '/v1/guardian/elders') return json({'elders': []});
       if (request.url.path == '/v1/guardian/alerts') return json({'alerts': []});
-      if (request.url.path == '/v1/guardian/invite') return json({'code': '04829316'});
       if (request.url.path == '/v1/guardian/logout') return http.Response('', 204);
       return json({'detail': 'x'}, 404);
     });
@@ -117,12 +118,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('관리 중인 어르신이 아직 없어요.'), findsOneWidget);
-    expect(find.text('내 보호자 코드'), findsOneWidget);
+    expect(find.text('어르신이 앱에서 가입하고 받은 연결 코드를 입력하세요.'), findsOneWidget);
+    expect(find.text('연결하기'), findsOneWidget);
+    expect(find.text('내 보호자 코드'), findsNothing);
+    expect(find.text('코드 발급'), findsNothing);
+    expect(paths, isNot(contains('/v1/guardian/invite')));
     expect(find.byKey(const Key('logout-button')), findsOneWidget);
-
-    await tester.tap(find.text('코드 발급'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('04829316'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('logout-button')));
     await tester.pumpAndSettle();
@@ -151,6 +152,52 @@ void main() {
         'total_calls': 0,
         'avg_score': null,
       };
+
+  testWidgets('어르신이 없는 홈에서 연결 코드로 연결하면 홈을 다시 읽어 그 어르신을 보여 준다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    var linked = false;
+    final posts = <String>[];
+    NulbomApi.client = MockClient((request) async {
+      final path = request.url.path;
+      if (request.method == 'POST') posts.add(path);
+      if (path == '/v1/guardian/link/preview') {
+        return json({'name': '홍길동', 'phone_masked': '010-****-1111'});
+      }
+      if (path == '/v1/guardian/link') {
+        linked = true;
+        return json({'elder_id': 31, 'name': '홍길동', 'status': 'active'});
+      }
+      if (path == '/v1/guardian/elders') {
+        return json({
+          'week_start': '2026-10-04',
+          'elders': [if (linked) elderJson(31, '홍길동')],
+        });
+      }
+      if (path.endsWith('/weekly')) return json(weeklyJson());
+      if (path == '/v1/guardian/alerts') return json({'alerts': []});
+      return json({'detail': 'x'}, 404);
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: GuardianScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('연결하기'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('link-code-field')), '04829316');
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('홍길동 어르신(010-****-1111)이 맞나요?'), findsOneWidget);
+    expect(posts, ['/v1/guardian/link/preview']);
+
+    await tester.tap(find.byKey(const Key('link-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(posts, ['/v1/guardian/link/preview', '/v1/guardian/link']);
+    expect(find.text('관리 중인 어르신이 아직 없어요.'), findsNothing);
+    expect(find.text('홍길동'), findsWidgets);
+  });
 
   testWidgets('승인 대기 어르신이 카드로 뜨고 승인하면 목록을 다시 읽는다', (tester) async {
     tester.view.physicalSize = const Size(1200, 4000);

@@ -3,40 +3,22 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../main.dart' show eAccent, eInk, eInkSoft;
 import '../models/nulbom_models.dart';
-import '../services/nulbom_api.dart';
+import 'link_elder_dialog.dart' show showLinkElderDialog;
 
-/// 보호자 개인 코드를 발급해 보여 준다. 어르신이 가입 화면에 이 코드를 입력하면 보호자 홈에
-/// "승인 대기"로 나타나고, 보호자가 승인해야 안부 전화가 시작된다. 새로 발급하면 이전 코드는
-/// 쓸 수 없다. 코드는 여러 어르신이 쓸 수 있다.
-class ConnectionCodeSection extends StatefulWidget {
-  const ConnectionCodeSection({super.key});
+/// 어르신이 없는 보호자 홈의 연결 영역. 어르신이 앱에서 먼저 가입하고 받은 8자리 연결 코드를
+/// 보호자가 입력해 연결한다(코드 입력 → 이름·가려진 번호 확인 → 연결). 연결하면 [onLinked]를 부른다.
+///
+/// 예전에는 여기서 보호자 개인 코드(`NulbomApi.issueInvite`)를 발급해 어르신이 가입 화면에
+/// 입력했다. 어르신 가입 화면이 더는 보호자 코드를 받지 않아 화면에서만 내렸다 — 서버 주소와
+/// `NulbomApi.issueInvite`는 그대로 있다.
+class ConnectionCodeSection extends StatelessWidget {
+  const ConnectionCodeSection({super.key, this.onLinked});
 
-  @override
-  State<ConnectionCodeSection> createState() => _ConnectionCodeSectionState();
-}
+  final ValueChanged<LinkResult>? onLinked;
 
-class _ConnectionCodeSectionState extends State<ConnectionCodeSection> {
-  InviteCode? _code;
-  String? _error;
-  bool _busy = false;
-
-  Future<void> _issue() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final code = await NulbomApi.issueInvite();
-      if (!mounted) return;
-      setState(() => _code = code);
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = error is ApiException ? error.message : '코드를 만들지 못했어요. 잠시 뒤에 다시 해 주세요.';
-      });
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  Future<void> _link(BuildContext context) async {
+    final linked = await showLinkElderDialog(context);
+    if (linked != null) onLinked?.call(linked);
   }
 
   @override
@@ -44,62 +26,51 @@ class _ConnectionCodeSectionState extends State<ConnectionCodeSection> {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: eAccent.withOpacity(0.08),
+        color: eAccent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: eAccent.withOpacity(0.25)),
+        border: Border.all(color: eAccent.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '내 보호자 코드',
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: eInk,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: _busy ? null : _issue,
-                child: Text(
-                  _code == null ? '코드 발급' : '새 코드 발급',
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: eAccent,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_code != null) ...[
-            const SizedBox(height: 6),
-            SelectableText(
-              _code!.code,
-              style: GoogleFonts.notoSansKr(
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 4,
-                color: eAccent,
-              ),
+          Text(
+            '어르신 연결',
+            style: GoogleFonts.notoSansKr(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: eInk,
             ),
-          ],
+          ),
           const SizedBox(height: 4),
           Text(
-            '어르신이 가입 화면에 이 코드를 입력하면 보호자 홈에 승인 대기로 나타나요. '
-            '새로 발급하면 이전 코드는 쓸 수 없어요.',
-            style: GoogleFonts.notoSansKr(fontSize: 11, color: eInkSoft),
+            '어르신이 앱에서 가입하고 받은 연결 코드를 입력하세요.',
+            style: GoogleFonts.notoSansKr(fontSize: 13, color: eInkSoft),
           ),
-          if (_error != null) ...[
-            const SizedBox(height: 6),
-            Text(_error!, style: const TextStyle(fontSize: 12, color: Color(0xFFD92D20))),
-          ],
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              key: const Key('link-elder-button'),
+              onPressed: () => _link(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: eAccent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                '연결하기',
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
