@@ -427,7 +427,6 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
             if (changeAlerts.isNotEmpty) ...[
               _buildAlertSection(
                 title: '평소와 다름',
-                icon: Icons.trending_up_rounded,
                 color: const Color(0xFFF44336),
                 alerts: changeAlerts,
               ),
@@ -436,7 +435,6 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
             if (noResponseAlerts.isNotEmpty)
               _buildAlertSection(
                 title: '미응답',
-                icon: Icons.phone_missed_rounded,
                 color: const Color(0xFFFFA726),
                 alerts: noResponseAlerts,
               ),
@@ -448,7 +446,6 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
 
   Widget _buildAlertSection({
     required String title,
-    required IconData icon,
     required Color color,
     required List<HealthAlert> alerts,
   }) {
@@ -457,8 +454,6 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
       children: [
         Row(
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(width: 12),
             Text(
               title,
               style: GoogleFonts.notoSansKr(

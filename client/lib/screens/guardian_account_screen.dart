@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
-import 'connection_code_section.dart';
 import 'role_selection_screen.dart';
 import 'elderly_management_screen.dart';
 
@@ -26,7 +25,6 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   bool _notificationsEnabled = true;
   bool _emailNotificationsEnabled = true;
   bool _smsNotificationsEnabled = false;
-  bool _showConnectionCode = false;
 
   @override
   void initState() {
@@ -307,35 +305,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  TextButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _showConnectionCode =
-                                            !_showConnectionCode;
-                                      });
-                                    },
-                                    style: TextButton.styleFrom(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: Size.zero,
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: Text(
-                                      _showConnectionCode
-                                          ? '연결코드 숨기기'
-                                          : '연결코드 확인하기',
-                                      style: GoogleFonts.notoSansKr(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: eAccent,
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               ),
-                              if (_showConnectionCode)
-                                const ConnectionCodeSection(),
                             ],
                           ),
                         ),
@@ -484,9 +455,9 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildElderlyItem('김할머니', '78세', '정상'),
+                    _buildElderlyItem('김할머니', '78세'),
                     const Divider(color: eLine, height: 20),
-                    _buildElderlyItem('이할아버지', '82세', '주의'),
+                    _buildElderlyItem('이할아버지', '82세'),
                   ],
                 ),
               ),
@@ -664,13 +635,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     );
   }
 
-  Widget _buildElderlyItem(String name, String age, String status) {
-    final statusColor = status == '정상'
-        ? const Color(0xFF4CAF50)
-        : const Color(0xFFFFA726);
-
+  Widget _buildElderlyItem(String name, String age) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -686,21 +652,6 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             const SizedBox(height: 2),
             Text(age, style: const TextStyle(fontSize: 12, color: eInkSoft)),
           ],
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(
-            status,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: statusColor,
-            ),
-          ),
         ),
       ],
     );

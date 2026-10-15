@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/nulbom_models.dart' show ElderSummary;
 import '../services/nulbom_api.dart';
 import 'elderly_detail_screen.dart' show ElderlyDetailScreen;
+import 'link_elder_dialog.dart' show showLinkElderDialog;
 
 const Color eBg = Color(0xFFEFF6FF);
 const Color eCard = Color(0xFFFFFFFF);
@@ -50,22 +51,32 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
     }
   }
 
-  /// 서버에 아직 없는 기능(어르신 추가·삭제)은 가짜로 동작하지 않는다.
+  /// 서버에 아직 없는 기능(어르신 삭제)은 가짜로 동작하지 않는다.
   void _notYet(String what) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$what 기능은 추후 제공됩니다.'), backgroundColor: eAccent),
     );
   }
 
-  /// 낮을수록 평소와 같다: 30점부터 주의, 60점부터 경보.
-  static String _statusText(ElderSummary elder) {
+  /// 어르신이 앱에서 받은 연결 코드로 연결한다. 이름은 서버가 알고 있어 따로 받지 않는다.
+  Future<void> _addElderly() async {
+    final linked = await showLinkElderDialog(context);
+    if (linked == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('어르신이 추가되었습니다.'),
+        backgroundColor: eAccent,
+        duration: Duration(seconds: 2),
+      ),
+    );
+    await _load();
+  }
+
+  /// 연결 상태만 적는다. 정상·주의 같은 건강 상태 표시는 팀원 화면(649a086)이 목록에서 내렸다.
+  static String? _linkText(ElderSummary elder) {
     if (elder.status == 'pending') return '승인 대기';
     if (elder.status != 'active') return '동의 전';
-    final score = elder.weekAvgScore;
-    if (score == null) return '기록 없음';
-    if (score >= 60) return '경보';
-    if (score >= 30) return '주의';
-    return '정상';
+    return null;
   }
 
   @override
@@ -178,11 +189,13 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                                           color: eInk,
                                         ),
                                       ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _statusText(elder),
-                                        style: const TextStyle(fontSize: 14, color: eInkSoft),
-                                      ),
+                                      if (_linkText(elder) case final link?) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          link,
+                                          style: const TextStyle(fontSize: 14, color: eInkSoft),
+                                        ),
+                                      ],
                                       const SizedBox(height: 6),
                                       Text(
                                         '이번 주 통화 ${elder.weekCalls}회',
@@ -233,7 +246,7 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: () => _notYet('어르신 추가'),
+                    onPressed: _addElderly,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: eAccent,
                       shape: RoundedRectangleBorder(

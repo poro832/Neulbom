@@ -61,8 +61,9 @@ void main() {
     expect(find.text('김영희'), findsOneWidget);
     expect(find.text('대기중'), findsOneWidget);
     expect(find.textContaining('이번 주 통화 3회'), findsOneWidget);
-    expect(find.textContaining('정상'), findsWidgets);
-    expect(find.textContaining('주의'), findsWidgets);
+    // 건강 상태(정상·주의) 표시는 팀원 화면이 목록에서 내렸다. 연결 상태만 남는다.
+    expect(find.textContaining('정상'), findsNothing);
+    expect(find.textContaining('주의'), findsNothing);
     expect(find.textContaining('승인 대기'), findsWidgets);
     expect(find.text('김할머니'), findsNothing); // 옛 예시 자료가 아니다
     expect(find.text('이할아버지'), findsNothing);
@@ -77,7 +78,80 @@ void main() {
     expect(find.text('관리 중인 어르신이 없습니다.'), findsOneWidget);
   });
 
-  testWidgets('삭제와 추가는 서버에 없는 기능이라 가짜로 지우지 않는다', (tester) async {
+  testWidgets('어르신 추가: 연결 코드만 받고, 확인하고 연결하면 서버 목록을 다시 읽는다', (tester) async {
+    var linked = false;
+    final calls = <String>[];
+    NulbomApi.client = MockClient((request) async {
+      final path = request.url.path;
+      calls.add('${request.method} $path');
+      if (path == '/v1/guardian/link/preview') {
+        return json({'name': '박순자', 'phone_masked': '010-****-3333'});
+      }
+      if (path == '/v1/guardian/link') {
+        linked = true;
+        return json({'elder_id': 33, 'name': '박순자', 'status': 'active'});
+      }
+      return json({
+        'elders': [
+          elder(20, '홍길동', calls: 1),
+          if (linked) elder(33, '박순자'),
+        ],
+      });
+    });
+
+    await open(tester);
+    expect(find.textContaining('(1명)'), findsOneWidget);
+
+    await tester.tap(find.text('어르신 추가'));
+    await tester.pumpAndSettle();
+    // 이름은 서버가 알고 나이는 서버에 없다 — 연결 코드 칸 하나만 받는다.
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('8자리 숫자를 입력해주세요'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('link-code-field')), '55512345');
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+    expect(find.text('박순자 어르신(010-****-3333)이 맞나요?'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('link-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(calls, [
+      'GET /v1/guardian/elders',
+      'POST /v1/guardian/link/preview',
+      'POST /v1/guardian/link',
+      'GET /v1/guardian/elders',
+    ]);
+    expect(find.text('박순자'), findsOneWidget);
+    expect(find.textContaining('(2명)'), findsOneWidget);
+    expect(find.text('어르신이 추가되었습니다.'), findsOneWidget);
+  });
+
+  testWidgets('어르신 추가: 한도에 걸리면(409) 서버 문장을 보여 주고 목록은 그대로다', (tester) async {
+    NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/link/preview') {
+        return json({'name': '박순자', 'phone_masked': '010-****-3333'});
+      }
+      if (request.url.path == '/v1/guardian/link') {
+        return json({'detail': '더 이상 어르신을 연결할 수 없어요'}, 409);
+      }
+      return json({'elders': [elder(20, '홍길동')]});
+    });
+
+    await open(tester);
+    await tester.tap(find.text('어르신 추가'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('link-code-field')), '55512345');
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('link-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('더 이상 어르신을 연결할 수 없어요'), findsOneWidget);
+    expect(find.textContaining('(1명)'), findsOneWidget);
+  });
+
+  testWidgets('삭제는 서버에 없는 기능이라 가짜로 지우지 않는다', (tester) async {
     NulbomApi.client = MockClient(
         (request) async => json({'elders': [elder(20, '홍길동', calls: 1, score: 10.0)]}));
 
