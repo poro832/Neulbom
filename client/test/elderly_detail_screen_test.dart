@@ -174,13 +174,7 @@ void main() {
   });
 
   testWidgets('어르신이 동의하기 전에는 최근 통화 요약 자리에 안내만 보인다', (tester) async {
-    // 이 테스트는 통화 요약 카드만 본다. 언급 구역도 동의 전이면 같은 안내가 한 번 더 나오므로,
-    // 언급 구역은 "동의했지만 이번 주 말씀 없음"으로 둔다(언급 구역의 동의 전 안내는
-    // elder_mentions_section_test.dart가 따로 확인한다).
-    NulbomApi.client = serverWithOneCallPerDay(
-      calls: {'share_agreed': false, 'calls': []},
-      mentions: {'share_agreed': true, 'week_start': '2026-10-04', 'categories': []},
-    );
+    NulbomApi.client = serverWithOneCallPerDay(calls: {'share_agreed': false, 'calls': []});
 
     await open(tester);
 
@@ -198,7 +192,7 @@ void main() {
     expect(find.text('홍길동님 통화'), findsOneWidget);
   });
 
-  testWidgets('최근 통화 요약 아래에 이번 주 어르신이 말씀하신 것 구역이 있다', (tester) async {
+  testWidgets('최근 통화 요약 아래에 어르신이 말씀하신 것 구역이 있다', (tester) async {
     final paths = <String>[];
     NulbomApi.client = serverWithOneCallPerDay(
       paths: paths,
@@ -222,8 +216,9 @@ void main() {
     await open(tester);
 
     expect(paths, contains('/v1/elders/20/mentions'));
-    final title = find.text('이번 주 어르신이 말씀하신 것');
+    final title = find.text('어르신이 말씀하신 것');
     expect(title, findsOneWidget);
+    expect(find.text('이번 주'), findsOneWidget);
     expect(find.text('몸이 아프거나 불편함'), findsOneWidget);
     expect(find.textContaining('진단이 아니에요'), findsOneWidget);
     final y = tester.getTopLeft(title).dy;
