@@ -37,7 +37,7 @@ def check_mentions(mentions: Sequence[Mention]) -> None:
         if m.said not in MENTION_SAID:
             raise ValueError(f"알 수 없는 언급 느낌: {m.said!r}")
         if not m.quote.strip() or len(m.quote) > MAX_MENTION_QUOTE:
-            raise ValueError("언급 인용은 1~40자여야 한다")
+            raise ValueError("언급 인용은 1~80자여야 한다")
 
 
 @dataclass(frozen=True)
