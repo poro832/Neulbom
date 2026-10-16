@@ -27,6 +27,10 @@ const Map<String, dynamic> mentionsBeforeConsent = {
   'categories': [],
 };
 
+/// 안부 전화 시간 카드(일간 화면)가 읽는 주소와 그 기본 응답.
+const String callTimePath = '/v1/elders/20/call-time';
+http.Response callTimeReply() => json({'call_time': '18:30'});
+
 /// 그 달(YYYY-MM)의 모든 날짜 키.
 List<String> monthKeys(String month) {
   final year = int.parse(month.substring(0, 4));
@@ -49,6 +53,7 @@ http.Client serverWithOneCallPerDay({
 }) =>
     MockClient((request) async {
       paths?.add(request.url.path);
+      if (request.url.path == callTimePath) return callTimeReply();
       if (request.url.path == '/v1/elders/20/calls') {
         return json(calls ?? {'share_agreed': true, 'calls': []});
       }
@@ -95,6 +100,7 @@ http.Client serverWithScores(
 }) =>
     MockClient((request) async {
       requests?.add(requestLine(request));
+      if (request.url.path == callTimePath) return callTimeReply();
       if (request.url.path == '/v1/elders/20/calls') {
         return json({'share_agreed': true, 'calls': []});
       }
@@ -348,6 +354,7 @@ void main() {
   testWidgets('통화가 없는 기간은 기록 없음으로 보여 준다', (tester) async {
     NulbomApi.client = MockClient((request) async {
       if (request.url.path == '/v1/elders/20/mentions') return json(mentionsBeforeConsent);
+      if (request.url.path == callTimePath) return callTimeReply();
       final asked = DateTime.parse(request.url.queryParameters['week_start']!);
       final sunday = DateTime(asked.year, asked.month, asked.day)
           .subtract(Duration(days: asked.weekday % 7));
@@ -644,6 +651,7 @@ void main() {
           requests?.add('${request.method} ${request.url.path}');
           final path = request.url.path;
           if (path == '/v1/elders/20/pairing-code') return pairing(request);
+          if (path == callTimePath) return callTimeReply();
           if (path == '/v1/elders/20/calls') return json({'share_agreed': true, 'calls': []});
           if (path == '/v1/elders/20/mentions') return json(mentionsBeforeConsent);
           return json({'week_start': '2026-10-04', 'days': [], 'total_calls': 0, 'avg_score': null});
@@ -654,6 +662,27 @@ void main() {
       await tester.tap(find.text('연결 코드 만들기'));
       await tester.pumpAndSettle();
     }
+
+    testWidgets('일간 화면의 어르신 폰 연결 카드 바로 위에 안부 전화 시간 카드가 있다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = serverWithPairing((_) async => json({}), requests: requests);
+
+      await open(tester, now: fixedNow);
+
+      expect(requests, contains('GET /v1/elders/20/call-time'));
+      expect(find.text('안부 전화 시간'), findsOneWidget);
+      expect(find.text('오후 6:30'), findsOneWidget);
+      final callTimeY = tester.getTopLeft(find.text('안부 전화 시간')).dy;
+      expect(callTimeY, greaterThan(tester.getTopLeft(find.text('상태 분석')).dy));
+      expect(callTimeY, lessThan(tester.getTopLeft(find.text('어르신 폰 연결')).dy));
+
+      // 주간·월간 화면에는 없다(어르신 폰 연결 카드와 같은 규칙)
+      for (final period in ['주간', '월간']) {
+        await tester.tap(find.text(period));
+        await tester.pumpAndSettle();
+        expect(find.text('안부 전화 시간'), findsNothing);
+      }
+    });
 
     testWidgets('상세 화면에 어르신 폰 연결 카드가 있고, 열 때는 코드를 만들지 않는다', (tester) async {
       final requests = <String>[];
