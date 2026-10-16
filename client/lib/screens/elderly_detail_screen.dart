@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/nulbom_api.dart';
 import '../models/nulbom_models.dart' show DayStat, ElderCalls;
 import '../utils/kst.dart';
+import 'elder_call_time_card.dart';
 import 'elder_calls_screen.dart';
 import 'elder_mentions_section.dart';
 
@@ -1266,6 +1267,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               ),
               const SizedBox(height: 12),
               _buildStatusAnalysis(),
+              const SizedBox(height: 24),
+
+              // 하루 한 번 AI가 전화하는 시간(07:00~21:00, 30분 단위). 스케줄러가 매분 새로 읽는다.
+              ElderCallTimeCard(elderId: widget.elderlyId),
               const SizedBox(height: 24),
 
               // 어르신 폰을 바꿨거나 미리 등록된 어르신이 처음 앱에 들어올 때 쓰는 6자리 코드

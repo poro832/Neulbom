@@ -162,6 +162,10 @@ class NulbomApi {
         response = await client
             .post(uri, headers: headers, body: body == null ? null : jsonEncode(body))
             .timeout(_timeout);
+      case 'PUT':
+        response = await client
+            .put(uri, headers: headers, body: body == null ? null : jsonEncode(body))
+            .timeout(_timeout);
       case 'DELETE':
         response = await client.delete(uri, headers: headers).timeout(_timeout);
       default:
@@ -294,6 +298,20 @@ class NulbomApi {
     final json = await _send('GET', '/v1/elders/$elderId/monthly$query',
         key: _guardianKeyOrThrow(key));
     return MonthlyStats.fromJson(json);
+  }
+
+  /// 보호자: 하루 한 번 AI가 어르신께 전화하는 시각(한국 시간, `HH:MM`).
+  static Future<String> callTime(int elderId, {String? key}) async {
+    final json = await _send('GET', '/v1/elders/$elderId/call-time', key: _guardianKeyOrThrow(key));
+    return json['call_time'] as String;
+  }
+
+  /// 보호자: 안부 전화 시각을 바꾼다(`HH:MM`, 07:00~21:00 30분 단위). 서버가 저장한 값을 돌려준다.
+  /// 방금 지난 시간(409)·범위 밖(422)·인증 전(403)은 서버 문장이 [ApiException.message]에 그대로 온다.
+  static Future<String> setCallTime(int elderId, String hhmm, {String? key}) async {
+    final json = await _send('PUT', '/v1/elders/$elderId/call-time',
+        key: _guardianKeyOrThrow(key), body: {'call_time': hhmm});
+    return json['call_time'] as String;
   }
 
   static Future<List<AlertItem>> guardianAlerts({String? key, int limit = 20}) async {

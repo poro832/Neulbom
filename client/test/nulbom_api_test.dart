@@ -403,4 +403,67 @@ void main() {
     expect(m.categories.single.total, 3);
     expect(m.categories.single.items.single.quote, '허리가 아파요');
   });
+
+  group('안부 전화 시간', () {
+    test('읽기: 보호자 열쇠로 GET하고 HH:MM 문자열을 받는다', () async {
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return json({'call_time': '09:00'});
+      });
+
+      final value = await NulbomApi.callTime(12, key: 'nlb_test');
+
+      expect(seen.method, 'GET');
+      expect(seen.url.path, '/v1/elders/12/call-time');
+      expect(seen.headers['Authorization'], 'Bearer nlb_test');
+      expect(value, '09:00');
+    });
+
+    test('바꾸기: PUT 본문이 {"call_time": "09:30"}이고 서버가 돌려준 값을 준다', () async {
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return json({'call_time': '09:30'});
+      });
+
+      final value = await NulbomApi.setCallTime(12, '09:30', key: 'nlb_test');
+
+      expect(seen.method, 'PUT');
+      expect(seen.url.path, '/v1/elders/12/call-time');
+      expect(seen.headers['Authorization'], 'Bearer nlb_test');
+      expect(seen.headers['Content-Type'], startsWith('application/json'));
+      expect(jsonDecode(seen.body), {'call_time': '09:30'});
+      expect(value, '09:30');
+    });
+
+    for (final (status, detail) in [
+      (409, '방금 지난 시간이라 곧바로 전화가 걸릴 수 있어요. 지금보다 나중 시간이나 더 일찍 지난 시간(내일부터 걸려요)을 골라 주세요'),
+      (422, '안부 전화 시간은 오전 7시부터 오후 9시까지 30분 단위로 고를 수 있어요'),
+      (403, '운영자 확인 후 사용할 수 있어요'),
+    ]) {
+      test('바꾸기 $status: 서버 문장을 그대로 ApiException.message로 준다', () async {
+        NulbomApi.client = MockClient((request) async => json({'detail': detail}, status));
+
+        await expectLater(
+          NulbomApi.setCallTime(12, '09:00', key: 'nlb_test'),
+          throwsA(isA<ApiException>()
+              .having((e) => e.statusCode, 'status', status)
+              .having((e) => e.message, 'message', detail)),
+        );
+      });
+    }
+
+    test('열쇠가 없으면 서버를 부르지 않는다', () async {
+      var called = false;
+      NulbomApi.client = MockClient((request) async {
+        called = true;
+        return json({'call_time': '09:00'});
+      });
+
+      await expectLater(NulbomApi.callTime(12), throwsA(isA<ApiException>()));
+      await expectLater(NulbomApi.setCallTime(12, '09:30'), throwsA(isA<ApiException>()));
+      expect(called, isFalse);
+    });
+  });
 }
