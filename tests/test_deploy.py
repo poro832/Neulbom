@@ -158,6 +158,7 @@ APP_PATHS = {
     "/v1/guardian/email/verify",
     "/v1/elders/*/mentions",
     "/v1/elders/*/monthly",
+    "/v1/elders/*/call-time",
 }
 
 
@@ -172,8 +173,10 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
 
     client = TestClient(main.app)
     for path in ("/v1/guardian/elders", "/v1/guardian/alerts", "/v1/elders/1/weekly",
-                 "/v1/elders/1/monthly", "/v1/me/calls", "/v1/me/contacts"):
+                 "/v1/elders/1/monthly", "/v1/elders/1/call-time", "/v1/me/calls", "/v1/me/contacts"):
         assert client.get(path).status_code == 401, path
+    # 안부 전화 시간은 같은 주소로 바꾸기도 한다 — 열쇠 없이는 바꿀 수 없다
+    assert client.put("/v1/elders/1/call-time", json={"call_time": "10:00"}).status_code == 401
     assert client.post("/v1/elders/1/pairing-code").status_code == 401
     assert client.post("/v1/me/contacts", json={"name": "가", "phone": "111-1111"}).status_code == 401
     assert client.delete("/v1/me/contacts/1").status_code == 401
