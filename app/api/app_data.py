@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from datetime import time as time_of_day
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, Field, field_validator
@@ -54,7 +55,7 @@ from app.api.reports import (
     week_bounds,
 )
 from app.firebase_verify import EmailVerifier
-from app.scheduler import KST
+from app.scheduler import DEFAULT_GRACE_SECONDS, KST
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,15 @@ ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
 TOO_MANY_ELDERS = "더 이상 어르신을 연결할 수 없어요"
 PHONE_USED = "이미 등록된 번호예요"
 BAD_MONTH = "달을 확인해 주세요"
+CALL_TIME_RANGE = "안부 전화 시간은 오전 7시부터 오후 9시까지 30분 단위로 고를 수 있어요"
+CALL_TIME_JUST_PASSED = (
+    "방금 지난 시간이라 곧바로 전화가 걸릴 수 있어요. "
+    "지금보다 나중 시간이나 더 일찍 지난 시간(내일부터 걸려요)을 골라 주세요"
+)
+
+# 보호자가 고를 수 있는 안부 전화 시간: 07:00 ~ 21:00(둘 다 포함), 30분 단위(형식은 CallTimeRequest가 본다).
+EARLIEST_CALL_TIME = time_of_day(7, 0)
+LATEST_CALL_TIME = time_of_day(21, 0)
 
 # 한 보호자가 연결할 수 있는 어르신 수. 코드를 가진 사람이 한 보호자에게 어르신을 무한히 붙이지 못하게 한다.
 MAX_ELDERS_PER_GUARDIAN = 10
@@ -135,6 +145,22 @@ def iso_kst(epoch: float) -> str:
 
 def days_json(days: list[DayStat]) -> list[dict]:
     return [{"date": d.date, "calls": d.calls, "avg_score": d.avg_score} for d in days]
+
+
+def hhmm(value: time_of_day) -> str:
+    return f"{value.hour:02d}:{value.minute:02d}"
+
+
+def just_passed(now_kst: datetime, value: time_of_day) -> bool:
+    """오늘의 value가 지금(한국 시간)부터 유예 안쪽으로 막 지났는가 — 지금 그 분도 포함한다.
+
+    그렇다면 스케줄러(app/scheduler.py)가 다음 확인(1분 안)에서 곧바로 건다. 분 단위로 세서 초는 버린다:
+    9:30:59에 09:00은 30분 차이로 거절한다(스케줄러는 이미 유예를 넘었다고 볼 때라 조금 더 조심하는 쪽이다).
+    더 일찍 지난 시간은 오늘은 건너뛰고 내일부터 걸린다.
+    """
+    now_m = now_kst.hour * 60 + now_kst.minute
+    new_m = value.hour * 60 + value.minute
+    return 0 <= now_m - new_m <= DEFAULT_GRACE_SECONDS // 60
 
 
 def mean_of_day_means(days: list[DayStat]) -> float | None:
@@ -205,6 +231,11 @@ class ContactRequest(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     relation: str = Field(default="", max_length=20)
     phone: str = Field(pattern=r"^[0-9+\- ]{5,20}$")
+
+
+class CallTimeRequest(BaseModel):
+    # HH:MM, 정각이나 30분. 숫자는 [0-9]만 받는다(\d는 전각·다른 문자의 숫자도 맞는다).
+    call_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):(00|30)$")
 
 
 def add_app_routes(app: FastAPI, data: AppData) -> None:
@@ -389,6 +420,45 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         except Exception:
             logger.exception("평소 기준 통화 수 조회에 실패했다 elder_id=%s", elder_id)
             return None
+
+    # ------------------------------------------------ 안부 전화 시간
+
+    @app.get("/v1/elders/{elder_id}/call-time")
+    @guarded
+    def elder_call_time(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        value = data.elders.call_time_of(elder_id)
+        if value is None:
+            raise HTTPException(status_code=404, detail=NO_ELDER)
+        return {"call_time": hhmm(value)}
+
+    @app.put("/v1/elders/{elder_id}/call-time")
+    @guarded
+    def change_elder_call_time(
+        body: CallTimeRequest,
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        # 형식(HH:MM, 30분 단위)은 본문 모델이 먼저 422로 거른다. 그다음 열쇠·소유, 범위, 방금 지난 시간 순서다.
+        guardian_id = active_guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        value = time_of_day(int(body.call_time[:2]), int(body.call_time[3:]))
+        if not EARLIEST_CALL_TIME <= value <= LATEST_CALL_TIME:
+            raise HTTPException(status_code=422, detail=CALL_TIME_RANGE)
+        # 스케줄러는 이 칸을 매분 새로 읽고 유예 안이면 곧바로 건다. 방금 지난 시간으로 바꾸면 예고 없이 전화가 간다.
+        if just_passed(datetime.fromtimestamp(data.wall_clock(), KST), value):
+            raise HTTPException(status_code=409, detail=CALL_TIME_JUST_PASSED)
+        if not data.elders.set_call_time(elder_id, guardian_id, value):
+            raise HTTPException(status_code=404, detail=NO_ELDER)
+        # 번호·이름은 남기지 않는다.
+        logger.info(
+            "안부 전화 시간을 바꿨다 elder_id=%s guardian_id=%s 시각=%s", elder_id, guardian_id, hhmm(value)
+        )
+        return {"call_time": hhmm(value)}
 
     @app.get("/v1/guardian/alerts")
     @guarded

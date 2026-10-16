@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import time
 
 import pytest
 
@@ -284,3 +285,61 @@ def test_discarding_refuses_a_linked_elder_and_an_unknown_id(directory):
     assert directory.get(elder_id) is not None
     assert directory.discard_unlinked(4242) is False
     assert directory.discard_unlinked(1) is False  # 시드 어르신은 보호자가 있다
+
+
+# ------------------------------------------------ 안부 전화 시간
+
+
+def test_the_call_time_defaults_to_nine(directory):
+    assert directory.call_time_of(12) == time(9, 0)
+    assert directory.call_time_of(13) == time(9, 0)
+
+
+def test_a_changed_call_time_is_read_back_and_touches_only_that_elder(directory):
+    assert directory.set_call_time(13, 1, time(7, 30)) is True
+
+    assert directory.call_time_of(13) == time(7, 30)
+    assert directory.call_time_of(12) == time(9, 0)
+    assert directory.set_call_time(13, 1, time(21, 0)) is True
+    assert directory.call_time_of(13) == time(21, 0)
+
+
+def test_another_guardian_cannot_change_the_call_time(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert directory.set_call_time(13, other, time(10, 0)) is False
+
+    assert directory.call_time_of(13) == time(9, 0)
+
+
+def test_an_unknown_elder_has_no_call_time_and_cannot_get_one(directory):
+    assert directory.call_time_of(4242) is None
+    assert directory.set_call_time(4242, 1, time(10, 0)) is False
+    assert directory.call_time_of(4242) is None
+
+
+def test_an_unlinked_elder_has_no_guardian_to_change_the_call_time(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert directory.call_time_of(elder_id) == time(9, 0)
+    assert directory.set_call_time(elder_id, 1, time(10, 0)) is False
+    assert directory.call_time_of(elder_id) == time(9, 0)
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_the_new_call_time_lands_in_the_column_the_scheduler_reads():
+    """스케줄러의 명부(PostgresRoster)는 elders.call_time을 매분 읽는다. 바꾼 값이 그 칸에 실제로 들어가야 바로 적용된다."""
+    from app.api.postgres_store import PostgresRoster
+
+    directory = _postgres()
+
+    assert directory.set_call_time(13, 1, time(18, 30)) is True
+
+    with directory._pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT elder_id, call_time FROM elders WHERE elder_id IN (12, 13) ORDER BY elder_id"
+        ).fetchall()
+    assert rows == [(12, time(9, 0)), (13, time(18, 30))]
+    # 동의한 어르신(13)만 명부에 나오고, 새 시간으로 나온다
+    entries = PostgresRoster(pool=directory._pool).entries()
+    assert [(e.elder_id, e.call_time) for e in entries] == [(13, time(18, 30))]

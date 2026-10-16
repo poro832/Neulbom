@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import time
 
 from psycopg.errors import UniqueViolation
 
@@ -210,3 +211,19 @@ class PostgresElderDirectory:
                 (elder_id, guardian_id),
             ).rowcount
         return deleted == 1
+
+    def call_time_of(self, elder_id: int) -> time | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT call_time FROM elders WHERE elder_id = %s", (elder_id,)
+            ).fetchone()
+        return None if row is None else row[0]
+
+    def set_call_time(self, elder_id: int, guardian_id: int, value: time) -> bool:
+        # 스케줄러의 명부가 이 칸을 매분 새로 읽는다 — 저장하면 다음 확인부터 적용된다.
+        with self._pool.connection() as conn:
+            updated = conn.execute(
+                "UPDATE elders SET call_time = %s WHERE elder_id = %s AND guardian_id = %s",
+                (value, elder_id, guardian_id),
+            ).rowcount
+        return updated == 1

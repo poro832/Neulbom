@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, replace
+from datetime import time
 from typing import Protocol
 
 STATUS_ACTIVE = "active"
@@ -61,6 +62,10 @@ class ElderRef:
 class GuardianProfile:
     name: str
     phone: str
+
+
+# db/schema.sql의 elders.call_time 기본값과 같다.
+DEFAULT_CALL_TIME = time(9, 0)
 
 
 def digits_of(phone: str) -> str:
@@ -127,6 +132,14 @@ class ElderDirectory(Protocol):
         """그 보호자의 승인 대기 어르신일 때만 행을 지우고 True."""
         ...
 
+    def call_time_of(self, elder_id: int) -> time | None:
+        """하루 한 번 안부 전화를 거는 시각(한국 시간). 없는 어르신이면 None."""
+        ...
+
+    def set_call_time(self, elder_id: int, guardian_id: int, value: time) -> bool:
+        """그 보호자의 어르신일 때만 안부 전화 시각을 바꾸고 True. 스케줄러는 이 값을 매분 새로 읽는다."""
+        ...
+
 
 class DirectoryAdmin(Protocol):
     """운영 도구(`python -m app.admin`)가 쓴다. 동의는 여기서 바꾸지 않는다."""
@@ -148,6 +161,8 @@ class InMemoryElderDirectory:
         self._phone_text = dict(phones or {})
         self._phones = {elder_id: digits_of(phone) for elder_id, phone in self._phone_text.items()}
         self._profiles = dict(guardians or {})
+        # 바꾼 안부 전화 시각만 둔다. 없으면 DEFAULT_CALL_TIME이다(DB의 기본값과 같게).
+        self._call_times: dict[int, time] = {}
         self._guardians = {
             access.guardian_id for access in self._entries.values() if access.guardian_id is not None
         } | set(self._profiles)
@@ -230,6 +245,7 @@ class InMemoryElderDirectory:
             del self._entries[elder_id]
             self._phone_text.pop(elder_id, None)
             self._phones.pop(elder_id, None)
+            self._call_times.pop(elder_id, None)
             return True
 
     def link(self, elder_id: int, guardian_id: int) -> bool:
@@ -256,6 +272,20 @@ class InMemoryElderDirectory:
             del self._entries[elder_id]
             self._phone_text.pop(elder_id, None)
             self._phones.pop(elder_id, None)
+            self._call_times.pop(elder_id, None)
+            return True
+
+    def call_time_of(self, elder_id: int) -> time | None:
+        if elder_id not in self._entries:
+            return None
+        return self._call_times.get(elder_id, DEFAULT_CALL_TIME)
+
+    def set_call_time(self, elder_id: int, guardian_id: int, value: time) -> bool:
+        with self._lock:
+            access = self._entries.get(elder_id)
+            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+                return False
+            self._call_times[elder_id] = value
             return True
 
     def add_guardian(self, name: str, phone: str) -> int:
