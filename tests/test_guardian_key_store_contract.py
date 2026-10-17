@@ -184,6 +184,42 @@ def test_revoke_others_with_nothing_else_is_zero(store):
     assert store.revoke_others(1, keep.key_hash) == 0
 
 
+def test_revoke_all_revokes_every_key_of_that_guardian_only(store):
+    """비밀번호 재설정: 열쇠 없이 바꾸므로 남길 열쇠가 없다 — 그 보호자의 폰을 모두 내보낸다."""
+    mine = [add(store, guardian_id=1, label=f"폰{i}")[1] for i in range(3)]
+    _, stranger = add(store, guardian_id=2, label="남의 폰")
+
+    assert store.revoke_all(1) == 3
+
+    assert all(store.find_guardian(k.key_hash) is None for k in mine)
+    assert all(store.is_active(k.key_hash) is False for k in mine)
+    assert store.find_guardian(stranger.key_hash) == 2  # 다른 보호자의 열쇠는 건드리지 않는다
+
+
+def test_revoke_all_does_not_count_keys_that_were_already_revoked(store):
+    _, gone = add(store, guardian_id=1)
+    _, live = add(store, guardian_id=1)
+    store.revoke_hash(gone.key_hash)
+
+    assert store.revoke_all(1) == 1
+    assert store.revoke_all(1) == 0  # 두 번째는 폐기할 것이 없다
+    assert store.revoke_all(3) == 0  # 열쇠가 없는 보호자
+    assert store.find_guardian(live.key_hash) is None
+
+
+def test_revoke_all_keeps_the_revoke_time_of_keys_already_revoked(make_store):
+    clock = Clock()
+    store = make_store(clock)
+    _, gone = add(store, guardian_id=1)
+    store.revoke_hash(gone.key_hash)
+    first = next(i.revoked_at for i in store.list_keys() if i.key_prefix == gone.key_prefix)
+
+    clock.now += 60
+    store.revoke_all(1)
+
+    assert next(i.revoked_at for i in store.list_keys() if i.key_prefix == gone.key_prefix) == pytest.approx(first)
+
+
 def test_is_active_is_true_until_the_key_is_revoked(store):
     _, new = add(store)
     assert store.is_active(new.key_hash) is True

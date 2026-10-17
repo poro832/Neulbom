@@ -159,6 +159,7 @@ APP_PATHS = {
     "/v1/elders/*/mentions",
     "/v1/elders/*/monthly",
     "/v1/elders/*/call-time",
+    "/v1/guardian/password/reset",
 }
 
 
@@ -190,6 +191,10 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     assert client.post("/v1/guardian/logout").status_code == 401
     assert client.get("/v1/guardian/me").status_code == 401
     assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
+    # 비밀번호 재설정은 열쇠 대신 방금 받은 Firebase 증명서가 맞아야 한다. 확인기(FIREBASE_PROJECT_ID)가 없는
+    # 서버에서는 본문이 맞아도 닫혀 있다(503) — 확인기가 있으면 이 가짜 증명서는 401이다.
+    reset = client.post("/v1/guardian/password/reset", json={"id_token": "x" * 30, "new_password": "longenough1"})
+    assert reset.status_code == (503 if main._app_data.email_verifier is None else 401)
     assert client.post("/v1/guardian/devices", json={"token": "token-aaaaaaaaaaaaaaaaaaaa"}).status_code == 401
     assert client.post("/v1/guardian/devices/unregister", json={"token": "token-aaaaaaaaaaaaaaaaaaaa"}).status_code == 401
     # 가입·로그인은 열쇠 대신 이메일과 비밀번호가 맞아야 한다 — 없는 계정은 401
