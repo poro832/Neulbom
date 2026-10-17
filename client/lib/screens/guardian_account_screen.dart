@@ -35,6 +35,27 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
   /// 서버가 인증 전이라고 했을 때만 true — 서버에 닿지 못했거나 옛 응답이면 표시하지 않는다.
   bool get _emailPending => _guardianInfo['emailVerified'] == false;
 
+  EmailProof get _proof => widget.emailProof ?? AuthService.emailProof;
+
+  /// 앱 안에서 비밀번호를 바꾼 뒤 Firebase 비밀번호도 아무도 모르는 값으로 바꾼다(할 수 있는 만큼, 5초까지).
+  ///
+  /// Firebase에 옛 비밀번호가 남으면 그것을 아는 사람이 메일 없이 비밀번호 재설정 증명서를 얻는다. 지금(옛)
+  /// 비밀번호로 먼저 다시 로그인하므로 Firebase 비밀번호가 아직 옛 것일 때만 확실히 된다. 이메일 인증 전 계정은
+  /// 하지 않는다 — 인증 메일을 다시 보낼 때 Firebase 로그인이 막히고, 그런 계정은 어차피 재설정할 수 없다.
+  /// 이 폰의 Firebase 세션이 다른 보호자 것이어도 하지 않는다.
+  Future<void> _rotateFirebasePasswordAfterChange(String current) async {
+    if (_guardianInfo['emailVerified'] != true) return;
+    final email = _guardianInfo['email'];
+    final String? owner;
+    try {
+      owner = _proof.sessionEmail;
+    } catch (_) {
+      return;
+    }
+    if (email is! String || owner == null || owner.trim().toLowerCase() != email.trim().toLowerCase()) return;
+    await rotatePasswordQuietly(_proof, knownPassword: current);
+  }
+
   /// 서버의 실제 "관리 중인 어르신" 목록. null이면 아직 불러오는 중.
   List<ElderSummary>? _elders;
   bool _eldersFailed = false;
@@ -157,6 +178,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                       try {
                         final others = await NulbomApi.changeGuardianPassword(
                             current: current.text, next: next.text);
+                        await _rotateFirebasePasswordAfterChange(current.text);
                         if (dialogContext.mounted) Navigator.pop(dialogContext, others);
                       } on ApiException catch (e) {
                         setLocal(() {

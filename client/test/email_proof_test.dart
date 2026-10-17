@@ -11,10 +11,12 @@ class RotatingProof implements EmailProof {
   RotatingProof(this.rotate);
   final Future<void> Function() rotate;
   int calls = 0;
+  final knownPasswords = <String?>[];
 
   @override
-  Future<void> rotatePassword() {
+  Future<void> rotatePassword({String? knownPassword}) {
     calls++;
+    knownPasswords.add(knownPassword);
     return rotate();
   }
 
@@ -22,7 +24,111 @@ class RotatingProof implements EmailProof {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
+/// Firebase 사용자 가짜 — 다시 로그인·비밀번호 바꾸기 요청만 적어 둔다.
+class FakeUser implements User {
+  FakeUser({this.email = 'kim@example.com'});
+
+  @override
+  final String? email;
+  final calls = <String>[];
+  EmailAuthCredential? reauthWith;
+  String? newPassword;
+  Object? reauthError;
+  Object? updateError;
+
+  @override
+  Future<UserCredential> reauthenticateWithCredential(AuthCredential credential) async {
+    calls.add('reauth');
+    reauthWith = credential as EmailAuthCredential;
+    if (reauthError != null) throw reauthError!;
+    return FakeUserCredential();
+  }
+
+  @override
+  Future<void> updatePassword(String newPassword) async {
+    calls.add('update');
+    this.newPassword = newPassword;
+    if (updateError != null) throw updateError!;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakeUserCredential implements UserCredential {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakeAuth implements FirebaseAuth {
+  FakeAuth(this.user, {this.brokenApp = false});
+  final User? user;
+  final bool brokenApp;
+
+  @override
+  User? get currentUser {
+    if (brokenApp) throw StateError('Firebase가 초기화되지 않았다');
+    return user;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
+  group('FirebaseEmailProof.rotatePassword', () {
+    test('아는 비밀번호가 있으면 그 비밀번호로 다시 로그인한 뒤 무작위 40자로 바꾼다', () async {
+      final user = FakeUser();
+
+      await FirebaseEmailProof(auth: FakeAuth(user)).rotatePassword(knownPassword: 'correct-horse-1');
+
+      expect(user.calls, ['reauth', 'update']);
+      expect(user.reauthWith!.email, 'kim@example.com');
+      expect(user.reauthWith!.password, 'correct-horse-1');
+      expect(user.newPassword, hasLength(FirebaseEmailProof.rotatedPasswordLength));
+      expect(user.newPassword, isNot('correct-horse-1'));
+    });
+
+    test('다시 로그인이 실패해도(이미 다른 비밀번호) 바꾸기는 해 보고, 던지지 않는다', () async {
+      final user = FakeUser()..reauthError = FirebaseAuthException(code: 'wrong-password');
+
+      await FirebaseEmailProof(auth: FakeAuth(user)).rotatePassword(knownPassword: 'old-password-1');
+
+      expect(user.calls, ['reauth', 'update']);
+    });
+
+    test('아는 비밀번호가 없으면(또는 빈 값) 다시 로그인 없이 바꾸기만 해 본다', () async {
+      for (final known in [null, '']) {
+        final user = FakeUser();
+
+        await FirebaseEmailProof(auth: FakeAuth(user)).rotatePassword(knownPassword: known);
+
+        expect(user.calls, ['update'], reason: '$known');
+      }
+    });
+
+    test('세션 이메일을 모르면 다시 로그인하지 않는다', () async {
+      final user = FakeUser(email: null);
+
+      await FirebaseEmailProof(auth: FakeAuth(user)).rotatePassword(knownPassword: 'correct-horse-1');
+
+      expect(user.calls, ['update']);
+    });
+
+    test('바꾸기가 거절돼도(최근 로그인 아님 등) 던지지 않는다', () async {
+      final user = FakeUser()..updateError = FirebaseAuthException(code: 'requires-recent-login');
+
+      await FirebaseEmailProof(auth: FakeAuth(user)).rotatePassword(knownPassword: 'correct-horse-1');
+
+      expect(user.calls, ['reauth', 'update']);
+    });
+
+    test('세션이 없거나 Firebase가 없으면 아무것도 하지 않고 던지지 않는다', () async {
+      await FirebaseEmailProof(auth: FakeAuth(null)).rotatePassword(knownPassword: 'correct-horse-1');
+      await FirebaseEmailProof(auth: FakeAuth(null, brokenApp: true)).rotatePassword(knownPassword: 'x' * 8);
+    });
+  });
+
   group('Firebase 비밀번호 바꾸기(아무도 모르는 값)', () {
     test('무작위 값은 32자 이상의 영문·숫자이고 매번 다르다', () {
       final values = List.generate(20, (_) => FirebaseEmailProof.newRandomPassword());
@@ -34,12 +140,14 @@ void main() {
       expect(values.toSet(), hasLength(values.length));
     });
 
-    test('조용히 바꾸기: 성공하면 한 번 부르고 끝난다', () async {
+    test('조용히 바꾸기: 성공하면 한 번 부르고 끝난다, 아는 비밀번호를 그대로 넘긴다', () async {
       final proof = RotatingProof(() async {});
 
       await rotatePasswordQuietly(proof);
+      await rotatePasswordQuietly(proof, knownPassword: 'correct-horse-1');
 
-      expect(proof.calls, 1);
+      expect(proof.calls, 2);
+      expect(proof.knownPasswords, [null, 'correct-horse-1']);
     });
 
     test('조용히 바꾸기: 실패해도(바로 던지든 나중에 던지든) 밖으로 내지 않는다', () async {

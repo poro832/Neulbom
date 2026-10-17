@@ -8,10 +8,10 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 const Duration rotatePasswordWait = Duration(seconds: 5);
 
 /// [EmailProof.rotatePassword]를 [rotatePasswordWait]까지만 기다린다. 실패·멈춤 무엇도 밖으로 내지 않는다 —
-/// 인증·재설정은 이미 서버에 기록됐고, 이 일은 할 수 있는 만큼만 한다.
-Future<void> rotatePasswordQuietly(EmailProof proof) async {
+/// 인증·재설정·변경은 이미 서버에 기록됐고, 이 일은 할 수 있는 만큼만 한다. [knownPassword]는 그대로 넘긴다.
+Future<void> rotatePasswordQuietly(EmailProof proof, {String? knownPassword}) async {
   try {
-    await proof.rotatePassword().timeout(rotatePasswordWait);
+    await proof.rotatePassword(knownPassword: knownPassword).timeout(rotatePasswordWait);
   } catch (_) {}
 }
 
@@ -63,8 +63,11 @@ abstract class EmailProof {
   /// 이 폰에 Firebase 로그인 세션이 있으면 Firebase 비밀번호를 아무도 모르는 무작위 값으로 바꾼다(앱도 기억하지 않는다).
   /// 서버가 이메일 인증·비밀번호 재설정을 받아들인 뒤 부른다. 그 뒤 재설정에 쓸 증명서는 재설정 메일의 링크에서
   /// 새 비밀번호를 정한 사람(메일함 주인)만 얻는다 — 가입·옛 비밀번호를 아는 것만으로는 얻지 못한다.
+  /// [knownPassword]는 부르는 화면이 아는 지금의 Firebase 비밀번호(가입·입력한 비밀번호, 재설정에서 방금 정한 것,
+  /// 앱 안 변경의 옛 비밀번호)다. 주면 먼저 그것으로 다시 로그인해 "최근 로그인"을 채운다 — 오래된 세션이면 Firebase가
+  /// 바꾸기를 거절하기 때문이다. 다시 로그인이 실패해도 바꾸기는 해 본다.
   /// 할 수 있는 만큼만 한다: 세션이 없거나 실패해도 던지지 않는다. 부르는 쪽은 [rotatePasswordQuietly]를 쓴다.
-  Future<void> rotatePassword();
+  Future<void> rotatePassword({String? knownPassword});
 }
 
 class FirebaseEmailProof implements EmailProof {
@@ -75,7 +78,12 @@ class FirebaseEmailProof implements EmailProof {
   static const int rotatedPasswordLength = 40;
   static const String _rotatedPasswordChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
-  FirebaseAuth get _auth => FirebaseAuth.instance;
+  /// [auth]는 시험용이다. 없으면 앱의 [FirebaseAuth.instance]를 쓴다(쓸 때 처음 찾는다 — 만들 때는 Firebase가 없어도 된다).
+  FirebaseEmailProof({FirebaseAuth? auth}) : _injectedAuth = auth;
+
+  final FirebaseAuth? _injectedAuth;
+
+  FirebaseAuth get _auth => _injectedAuth ?? FirebaseAuth.instance;
 
   @override
   bool get hasSession => _auth.currentUser != null;
@@ -227,14 +235,24 @@ class FirebaseEmailProof implements EmailProof {
   }
 
   @override
-  Future<void> rotatePassword() async {
+  Future<void> rotatePassword({String? knownPassword}) async {
     try {
       final user = _auth.currentUser;
       if (user == null) return;
-      // 값은 이 호출 안에만 있다 — 저장·기록하지 않고, 오류 문장에도 싣지 않는다.
+      final email = user.email;
+      if (knownPassword != null && knownPassword.isNotEmpty && email != null && email.isNotEmpty) {
+        try {
+          await user.reauthenticateWithCredential(
+            EmailAuthProvider.credential(email: email, password: knownPassword),
+          );
+        } catch (_) {
+          // Firebase 비밀번호가 이미 다른 값이면 여기서 실패한다. 세션이 최근이면 바꾸기는 그래도 된다.
+        }
+      }
+      // 새 값은 이 호출 안에만 있다 — 저장·기록하지 않고, 오류 문장에도 싣지 않는다.
       await user.updatePassword(newRandomPassword());
     } catch (_) {
-      // 할 수 있는 만큼만 한다(로그인이 오래돼 거절, Firebase 미초기화, 인터넷 끊김 등). 인증은 이미 끝났다.
+      // 할 수 있는 만큼만 한다(로그인이 오래돼 거절, Firebase 미초기화, 인터넷 끊김 등). 서버 쪽 일은 이미 끝났다.
     }
   }
 }

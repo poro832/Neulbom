@@ -63,9 +63,13 @@ class FakeProof implements EmailProof {
   @override
   Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
 
+  /// rotatePassword가 받은 "아는 비밀번호"(없으면 null).
+  final knownPasswords = <String?>[];
+
   @override
-  Future<void> rotatePassword() {
+  Future<void> rotatePassword({String? knownPassword}) {
     rotated++;
+    knownPasswords.add(knownPassword);
     events.add('rotate');
     if (rotateThrowsAtOnce) throw rotateError!; // 기다리기 전에 바로 터지는 경우
     if (rotateHangs) return Completer<void>().future; // 끝나지 않는 경우
@@ -216,6 +220,54 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(proof.rotated, 0);
+    });
+
+    testWidgets('가입 직후: 가입 비밀번호로 다시 로그인해 바꾸도록 그 비밀번호를 넘긴다', (tester) async {
+      final proof = FakeProof(token: 'tok-' * 10);
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', password: 'secret-pass-1', proof: proof, verify: (_) async => true));
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, ['secret-pass-1']);
+    });
+
+    testWidgets('세션이 없어 비밀번호를 입력받았으면 그 비밀번호를 넘긴다(칸은 비워도)', (tester) async {
+      final proof = FakeProof(session: false, token: 'tok-' * 10);
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: (_) async => true));
+      await tester.enterText(find.byType(TextField), 'typed-pass-2');
+      await tester.tap(find.text('인증 메일 보내기'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, ['typed-pass-2']);
+    });
+
+    testWidgets('가입 비밀번호 보내기가 실패하고 다시 입력한 비밀번호로 보냈으면 나중 것을 넘긴다', (tester) async {
+      final proof = FakeProof(token: 'tok-' * 10)..sendError = const EmailProofException('비밀번호를 확인해 주세요.');
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', password: 'secret-pass-1', proof: proof, verify: (_) async => true));
+      proof.sendError = null;
+      await tester.enterText(find.byType(TextField), 'typed-pass-2');
+      await tester.tap(find.text('인증 메일 보내기'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, ['typed-pass-2']);
+    });
+
+    testWidgets('비밀번호 없이 이미 세션이 있는 채로 열었으면(나중에 인증) 아는 비밀번호 없이 바꿔 본다', (tester) async {
+      final proof = FakeProof(session: true, token: 'tok-' * 10);
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: (_) async => true));
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, [null]);
     });
 
     testWidgets('메일 보내기·다시 보내기에서는 바꾸지 않는다', (tester) async {

@@ -217,6 +217,7 @@ void main() {
   rejectedKeyTests();
   pendingTests();
   emailPendingTests();
+  passwordChangeRotationTests();
 
   group('화면', () {
     Future<void> pump(WidgetTester tester, Widget home) async {
@@ -405,17 +406,30 @@ void pendingTests() {
 
 /// Firebase 대신 쓰는 가짜 — 이 폰에 kim@example.com의 세션이 있고, 링크를 눌렀으면 [token]을 준다.
 class FakeProof implements EmailProof {
-  FakeProof({this.token, this.signOutError, this.signOutHangs = false});
+  FakeProof({
+    this.token,
+    this.signOutError,
+    this.signOutHangs = false,
+    this.sessionOwner = 'kim@example.com',
+    this.rotateHangs = false,
+    this.rotateError,
+  });
   final String? token;
   final Object? signOutError;
   final bool signOutHangs;
+  final String? sessionOwner;
+  final bool rotateHangs;
+  final Object? rotateError;
   int signedOut = 0;
+
+  /// rotatePassword가 받은 "아는 비밀번호"(없으면 null). 불린 횟수만큼 쌓인다.
+  final knownPasswords = <String?>[];
 
   @override
   bool get hasSession => true;
 
   @override
-  String? get sessionEmail => 'kim@example.com';
+  String? get sessionEmail => sessionOwner;
 
   @override
   Future<void> signOut() {
@@ -441,7 +455,106 @@ class FakeProof implements EmailProof {
   Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
 
   @override
-  Future<void> rotatePassword() async {}
+  Future<void> rotatePassword({String? knownPassword}) {
+    knownPasswords.add(knownPassword);
+    if (rotateHangs) return Completer<void>().future;
+    if (rotateError != null) return Future.error(rotateError!);
+    return Future.value();
+  }
+}
+
+void passwordChangeRotationTests() {
+  group('앱 안 비밀번호 변경 뒤 Firebase 비밀번호 바꾸기', () {
+    Future<void> openChange(WidgetTester tester, FakeProof proof,
+        {bool emailVerified = true, int status = 200}) async {
+      GoogleFonts.config.allowRuntimeFetching = false;
+      NulbomApi.guardianKey = 'nlb_test';
+      addTearDown(() => NulbomApi.guardianKey = '');
+      NulbomApi.client = MockClient((request) async {
+        if (request.url.path == '/v1/guardian/password') {
+          return status == 200
+              ? json({'revoked_others': 0})
+              : json({'detail': '현재 비밀번호를 확인해 주세요'}, status);
+        }
+        return json({
+          'name': '김보호',
+          'email': 'kim@example.com',
+          'phone': '010-1111-2222',
+          'activated': true,
+          'email_verified': emailVerified,
+        });
+      });
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      await tester.pumpWidget(MaterialApp(home: GuardianAccountScreen(emailProof: proof)));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('비밀번호 변경'));
+      await tester.tap(find.text('비밀번호 변경'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('current-password')), 'correct-horse-1');
+      await tester.enterText(find.byKey(const Key('new-password')), 'brand-new-pass-2');
+      await tester.tap(find.text('변경'));
+    }
+
+    testWidgets('서버가 바꾸면 지금(옛) 비밀번호로 다시 로그인해 Firebase 비밀번호를 바꾸도록 넘긴다', (tester) async {
+      final proof = FakeProof();
+      await openChange(tester, proof);
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, ['correct-horse-1']);
+      expect(find.text('비밀번호를 바꿨어요.'), findsOneWidget);
+    });
+
+    testWidgets('서버가 거절하면 바꾸지 않는다', (tester) async {
+      final proof = FakeProof();
+      await openChange(tester, proof, status: 403);
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, isEmpty);
+      expect(find.text('현재 비밀번호를 확인해 주세요'), findsOneWidget);
+    });
+
+    testWidgets('바꾸기가 실패해도 변경은 끝나 알림이 뜬다', (tester) async {
+      final proof = FakeProof(rotateError: StateError('requires-recent-login'));
+      await openChange(tester, proof);
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, ['correct-horse-1']);
+      expect(find.text('비밀번호를 바꿨어요.'), findsOneWidget);
+      expect(find.byKey(const Key('new-password')), findsNothing); // 대화상자는 닫혔다
+    });
+
+    testWidgets('바꾸기가 끝나지 않아도 5초 뒤에는 대화상자가 닫히고 알림이 뜬다', (tester) async {
+      final proof = FakeProof(rotateHangs: true);
+      await openChange(tester, proof);
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byKey(const Key('new-password')), findsOneWidget); // 아직 기다린다
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('new-password')), findsNothing);
+      expect(find.text('비밀번호를 바꿨어요.'), findsOneWidget);
+    });
+
+    testWidgets('이메일 인증 전 계정이면 바꾸지 않는다(인증 메일을 다시 보낼 때 Firebase 로그인이 막히지 않게)', (tester) async {
+      final proof = FakeProof();
+      await openChange(tester, proof, emailVerified: false);
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, isEmpty);
+      expect(find.text('비밀번호를 바꿨어요.'), findsOneWidget);
+    });
+
+    testWidgets('이 폰의 Firebase 세션이 다른 보호자 것이면 바꾸지 않는다', (tester) async {
+      final proof = FakeProof(sessionOwner: 'other@example.com');
+      await openChange(tester, proof);
+      await tester.pumpAndSettle();
+
+      expect(proof.knownPasswords, isEmpty);
+    });
+  });
 }
 
 void emailPendingTests() {

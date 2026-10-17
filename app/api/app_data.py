@@ -748,9 +748,21 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             record_bad_password(account.email, known=True)
             raise HTTPException(status_code=403, detail=BAD_CURRENT)
         new_hash = hash_password(body.new)
+        key_hash = hash_key(parse_bearer(authorization))
         with credential_lock:
+            # 검사한 뒤 쓰기 전에 비밀번호가 바뀌었거나(재설정·다른 폰의 변경·운영 도구) 이 열쇠가 폐기됐으면, 이 변경은
+            # 옛 비밀번호·옛 열쇠로 한 것이다 — 아무것도 쓰지 않는다. 그러지 않으면 새어 나간 비밀번호와 열쇠를 쥔 사람이
+            # 메일함 주인의 재설정을 덮어쓴다. 이유는 알리지 않고 열쇠가 틀렸을 때와 같은 401이다(로그인의 다시 보기와 같다).
+            current = data.accounts.profile(guardian_id)
+            if (
+                current is None
+                or current.password_hash != account.password_hash
+                or not key_store().is_active(key_hash)
+            ):
+                logger.warning("비밀번호 변경 중 비밀번호나 열쇠가 바뀌어 거절했다 guardian_id=%s", guardian_id)
+                raise HTTPException(status_code=401, detail=NEED_KEY)
             data.accounts.set_password(guardian_id, new_hash)
-            revoked = key_store().revoke_others(guardian_id, hash_key(parse_bearer(authorization)))
+            revoked = key_store().revoke_others(guardian_id, key_hash)
         data.login_limiter.clear(account.email)
         logger.info("보호자가 비밀번호를 바꿨다 guardian_id=%s revoked_others=%s", guardian_id, revoked)
         return {"revoked_others": revoked}
@@ -788,8 +800,9 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             new_hash = hash_password(body.new_password)  # 느린 해시는 잠금 밖에서 — 다른 로그인을 세우지 않게
             with credential_lock:
                 # 로그인의 "열쇠 발급"과 한 줄로 선다: 옛 비밀번호로 시작한 로그인은 이 뒤에 열쇠를 받지 못한다.
-                data.accounts.set_password(account.guardian_id, new_hash)
+                # 열쇠를 먼저 폐기한다 — 비밀번호를 쓰다 실패해도 닫힌 쪽(모든 폰 로그아웃, 비밀번호는 옛 그대로)에 남는다.
                 revoked = key_store().revoke_all(account.guardian_id)
+                data.accounts.set_password(account.guardian_id, new_hash)
                 data.login_limiter.clear(account.email)
         finally:
             data.password_reset_slots.release(slot)
