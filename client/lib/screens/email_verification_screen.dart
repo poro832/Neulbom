@@ -15,7 +15,8 @@ const String _sendFailed = '인증 메일을 보내지 못했어요. 잠시 뒤�
 /// 비밀번호를 받으면(가입 직후) 바로 인증 메일을 보낸다. 비밀번호가 없고 이 폰에 이 이메일의
 /// Firebase 세션도 없으면(계정 화면에서 열었을 때, 같은 폰의 앞 보호자 세션만 남았을 때 등)
 /// 비밀번호를 다시 입력받아 보낸다. "인증했어요"를
-/// 누르면 Firebase가 준 증명서(ID 토큰)를 서버에 보내고, 서버가 기록하면 true로 닫힌다.
+/// 누르면 Firebase가 준 증명서(ID 토큰)를 서버에 보내고, 서버가 기록하면 Firebase 비밀번호를 아무도 모르는 값으로
+/// 바꾼 뒤(할 수 있는 만큼, 5초까지) true로 닫힌다.
 /// "나중에 하기"·뒤로 가기는 false(또는 null)다. 비밀번호는 저장하거나 기록하지 않는다.
 /// 오류는 SnackBar가 아니라 화면 안 문장으로 보여 준다.
 class EmailVerificationScreen extends StatefulWidget {
@@ -157,6 +158,10 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       final recorded = await _verify(token);
       if (!mounted) return;
       if (recorded) {
+        // 서버가 기록했다. 이제 Firebase 비밀번호를 아무도 모르는 값으로 바꾼다 — 가입 비밀번호를 아는 것만으로는
+        // 비밀번호 재설정 증명서를 얻지 못하게(재설정 메일의 링크로만). 5초까지만 기다리고, 실패해도 인증은 끝난다.
+        await rotatePasswordQuietly(_proof);
+        if (!mounted) return;
         Navigator.pop(context, true);
         return;
       }

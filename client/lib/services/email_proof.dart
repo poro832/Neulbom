@@ -1,5 +1,19 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
+
+/// Firebase 비밀번호 바꾸기를 기다리는 최대 시간. 넘으면 기다리지 않고 화면을 닫는다.
+const Duration rotatePasswordWait = Duration(seconds: 5);
+
+/// [EmailProof.rotatePassword]를 [rotatePasswordWait]까지만 기다린다. 실패·멈춤 무엇도 밖으로 내지 않는다 —
+/// 인증·재설정은 이미 서버에 기록됐고, 이 일은 할 수 있는 만큼만 한다.
+Future<void> rotatePasswordQuietly(EmailProof proof) async {
+  try {
+    await proof.rotatePassword().timeout(rotatePasswordWait);
+  } catch (_) {}
+}
 
 /// 이 이메일의 Firebase 계정이 없을 때(운영 도구로 만든 보호자 등). 운영자가 `guardian set-login`으로 바꿔 준다.
 const String noResetAccountMessage = '이 이메일로는 비밀번호 재설정 메일을 보낼 수 없어요. 운영자에게 문의해 주세요.';
@@ -45,11 +59,21 @@ abstract class EmailProof {
   /// 메일의 링크에서 정한 새 비밀번호로 Firebase에 로그인해, 서버에 보낼 **방금 받은** ID 토큰을 준다.
   /// 비밀번호가 다르면 [resetPasswordMismatchMessage]의 [EmailProofException]. 비밀번호는 저장하지 않는다.
   Future<String> idTokenForReset({required String email, required String password});
+
+  /// 이 폰에 Firebase 로그인 세션이 있으면 Firebase 비밀번호를 아무도 모르는 무작위 값으로 바꾼다(앱도 기억하지 않는다).
+  /// 서버가 이메일 인증·비밀번호 재설정을 받아들인 뒤 부른다. 그 뒤 재설정에 쓸 증명서는 재설정 메일의 링크에서
+  /// 새 비밀번호를 정한 사람(메일함 주인)만 얻는다 — 가입·옛 비밀번호를 아는 것만으로는 얻지 못한다.
+  /// 할 수 있는 만큼만 한다: 세션이 없거나 실패해도 던지지 않는다. 부르는 쪽은 [rotatePasswordQuietly]를 쓴다.
+  Future<void> rotatePassword();
 }
 
 class FirebaseEmailProof implements EmailProof {
   /// Firebase가 보내는 인증 메일과 링크 안내 페이지의 언어. 우리 앱은 한국어만 쓴다.
   static const String mailLanguageCode = 'ko';
+
+  /// 바꾼 Firebase 비밀번호의 길이와 글자(영문 대소문자·숫자 62가지, 40자 ≈ 238비트).
+  static const int rotatedPasswordLength = 40;
+  static const String _rotatedPasswordChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
   FirebaseAuth get _auth => FirebaseAuth.instance;
 
@@ -189,6 +213,28 @@ class FirebaseEmailProof implements EmailProof {
       return token;
     } on FirebaseAuthException catch (e) {
       throw EmailProofException(resetSignInMessage(e));
+    }
+  }
+
+  /// 아무도 모르는 Firebase 비밀번호. 암호학적 난수([Random.secure])로 고른다.
+  @visibleForTesting
+  static String newRandomPassword() {
+    final random = Random.secure();
+    return String.fromCharCodes(List.generate(
+      rotatedPasswordLength,
+      (_) => _rotatedPasswordChars.codeUnitAt(random.nextInt(_rotatedPasswordChars.length)),
+    ));
+  }
+
+  @override
+  Future<void> rotatePassword() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+      // 값은 이 호출 안에만 있다 — 저장·기록하지 않고, 오류 문장에도 싣지 않는다.
+      await user.updatePassword(newRandomPassword());
+    } catch (_) {
+      // 할 수 있는 만큼만 한다(로그인이 오래돼 거절, Firebase 미초기화, 인터넷 끊김 등). 인증은 이미 끝났다.
     }
   }
 }

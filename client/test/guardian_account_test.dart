@@ -439,6 +439,9 @@ class FakeProof implements EmailProof {
 
   @override
   Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
+
+  @override
+  Future<void> rotatePassword() async {}
 }
 
 void emailPendingTests() {

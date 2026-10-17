@@ -30,6 +30,9 @@ class FakeResetProof implements EmailProof {
   Object? sendError;
   Object? signInError;
   Completer<String>? pendingToken;
+  int rotated = 0;
+  bool rotateHangs = false;
+  Object? rotateError;
 
   @override
   bool get hasSession => false;
@@ -61,6 +64,14 @@ class FakeResetProof implements EmailProof {
     if (signInError != null) throw signInError!;
     if (pendingToken != null) return pendingToken!.future;
     return resetToken;
+  }
+
+  @override
+  Future<void> rotatePassword() {
+    rotated++;
+    if (rotateHangs) return Completer<void>().future;
+    if (rotateError != null) return Future.error(rotateError!);
+    return Future.value();
   }
 }
 
@@ -315,6 +326,57 @@ void main() {
 
       expect(reset.calls, ['$resetToken|$newPassword']);
       expect(result, [true]);
+    });
+
+    testWidgets('서버가 바꾸면 Firebase 비밀번호도 아무도 모르는 값으로 한 번 바꾼 뒤 닫힌다', (tester) async {
+      final proof = FakeResetProof();
+      final reset = FakeReset();
+      final result = <bool>[];
+      await open(tester, PasswordResetScreen(email: 'kim@example.com', proof: proof, reset: reset.call), result: result);
+      await sendMail(tester);
+
+      await typePasswords(tester, newPassword, newPassword);
+      await tester.tap(find.text('비밀번호 바꾸기'));
+      await tester.pumpAndSettle();
+
+      expect(reset.calls, hasLength(1));
+      expect(proof.rotated, 1);
+      expect(result, [true]);
+    });
+
+    testWidgets('Firebase 비밀번호 바꾸기가 실패하거나 끝나지 않아도 5초 안에 true로 닫힌다', (tester) async {
+      final proof = FakeResetProof()..rotateHangs = true;
+      final result = <bool>[];
+      await open(tester, PasswordResetScreen(email: 'kim@example.com', proof: proof, reset: FakeReset().call),
+          result: result);
+      await sendMail(tester);
+
+      await typePasswords(tester, newPassword, newPassword);
+      await tester.tap(find.text('비밀번호 바꾸기'));
+      await tester.pump(const Duration(seconds: 4));
+      expect(result, isEmpty);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(proof.rotated, 1);
+      expect(result, [true]);
+    });
+
+    testWidgets('서버가 거절하거나 Firebase 로그인이 틀리면 Firebase 비밀번호를 바꾸지 않는다', (tester) async {
+      final proof = FakeResetProof();
+      final reset = FakeReset()..error = const ApiException(401, '비밀번호 재설정을 확인하지 못했어요');
+      await open(tester, PasswordResetScreen(email: 'kim@example.com', proof: proof, reset: reset.call));
+      await sendMail(tester);
+      await typePasswords(tester, newPassword, newPassword);
+
+      await tester.tap(find.text('비밀번호 바꾸기'));
+      await tester.pumpAndSettle();
+      expect(proof.rotated, 0); // 다시 시도할 때 같은 비밀번호로 Firebase에 들어갈 수 있어야 한다
+
+      proof.signInError = const EmailProofException(resetPasswordMismatchMessage);
+      await tester.tap(find.text('비밀번호 바꾸기'));
+      await tester.pumpAndSettle();
+      expect(proof.rotated, 0);
     });
 
     testWidgets('메일 다시 보내기는 같은 이메일로 다시 보내고 알린다', (tester) async {

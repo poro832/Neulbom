@@ -3,6 +3,9 @@
 흐름: 앱이 Firebase 재설정 메일을 보내고, 보호자가 메일의 링크에서 새 비밀번호를 정한 뒤, 앱이 같은 새 비밀번호로
 Firebase에 로그인해 받은 증명서와 새 비밀번호를 이 주소로 보낸다. 서버는 그 증명서의 이메일 계정 비밀번호를 바꾸고
 그 보호자의 열쇠를 모두 폐기한다(모든 폰에서 로그아웃).
+
+재설정은 이미 이메일 인증을 마친 계정만 된다. 앱은 이메일 인증이 끝나면 Firebase 비밀번호를 아무도 모르는 값으로
+바꾸므로, 재설정에 쓸 증명서는 메일의 링크(메일함 주인)로만 다시 얻을 수 있다.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import replace
 
 import pytest
 
@@ -56,18 +60,56 @@ def now(kit) -> int:
     return int(kit.clock.now)
 
 
-def signed_up_kit():
-    """앱에서 가입한 보호자(이메일 인증 전)의 kit과 가입 때 받은 열쇠 머리글. 확인기는 비어 있다."""
+def signed_up_kit(*, verified=True):
+    """앱에서 가입한 보호자의 kit과 가입 때 받은 열쇠 머리글. 확인기는 비어 있다.
+
+    재설정은 이메일 인증을 마친 계정만 되므로 기본은 인증을 마친 보호자다(verified=False면 인증 전 그대로).
+    """
     kit = make_app_kit()
     for n in (1, 2):  # kit의 열쇠가 보호자 1·2를 쓰므로 번호를 비켜 간다
         kit.data.accounts.create("자리", f"placeholder{n}@no-login.invalid", "010-0", NO_LOGIN)
     kit.data.email_verifier = FakeVerifier()
     body = kit.client.post(SIGNUP, json=GOOD).json()
+    if verified:
+        kit.data.accounts.mark_email_verified(guardian_id_of(kit))
     return kit, bearer(body["key"])
 
 
 def guardian_id_of(kit, email=GOOD["email"]):
     return kit.data.accounts.find_by_email(email).guardian_id
+
+
+def verified_flag(kit, email=GOOD["email"]):
+    return kit.data.accounts.profile(guardian_id_of(kit, email)).email_verified
+
+
+class RecordingAccounts:
+    """계정 저장소를 감싸 이메일 인증 기록 호출을 적어 둔다. 나머지는 그대로 넘긴다."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.marked = []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def mark_email_verified(self, guardian_id):
+        self.marked.append(guardian_id)
+        return self._inner.mark_email_verified(guardian_id)
+
+
+class FlaglessAccounts:
+    """이메일로 찾은 계정의 인증 칸이 True가 아닌(None) 저장소 — 인증된 것으로 치지 않아야 한다."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def find_by_email(self, email):
+        account = self._inner.find_by_email(email)
+        return None if account is None else replace(account, email_verified=None)
 
 
 def login(kit, password, email=GOOD["email"]):
@@ -102,10 +144,21 @@ def test_a_fresh_proof_resets_the_password_and_logs_every_phone_out():
     assert login(kit, GOOD["password"]).status_code == 401
     fresh = login(kit, NEW_PASSWORD)
     assert fresh.status_code == 200
-    # Firebase가 이메일 인증까지 확인해 준 증명서다 — 이메일도 인증된 것으로 기록한다
-    assert fresh.json()["email_verified"] is True
-    assert kit.data.accounts.profile(guardian_id_of(kit)).email_verified is True
     assert kit.client.get(ME, headers=bearer(fresh.json()["key"])).status_code == 200
+
+
+def test_a_reset_does_not_touch_the_verified_flag():
+    """재설정은 이미 인증된 계정만 받으므로 인증 기록을 따로 하지 않는다 — 칸은 그대로 True다."""
+    kit, _ = signed_up_kit()
+    accounts = RecordingAccounts(kit.data.accounts)
+    kit.data.accounts = accounts
+    fresh_proof(kit)
+
+    assert reset(kit).status_code == 200
+
+    assert accounts.marked == []
+    assert verified_flag(kit) is True
+    assert login(kit, NEW_PASSWORD).json()["email_verified"] is True
 
 
 def test_the_email_in_the_proof_is_matched_without_case_or_spaces():
@@ -141,7 +194,6 @@ def test_phones_registered_for_push_stop_getting_alerts_after_a_reset():
     """폰 등록은 열쇠에 묶여 있고 읽을 때 폐기된 열쇠의 폰을 거른다 — 재설정은 따로 지우지 않아도 된다."""
     kit, phone = signed_up_kit()
     gid = guardian_id_of(kit)
-    kit.data.accounts.mark_email_verified(gid)
     kit.data.accounts.activate(gid)
     kit.data.devices = InMemoryDeviceStore(is_key_active=kit.data.guardian_auth.store.is_active)
     assert kit.client.post("/v1/guardian/devices", json={"token": "t" * 30}, headers=phone).status_code == 204
@@ -157,6 +209,7 @@ def test_only_the_guardian_named_in_the_proof_is_changed_whatever_key_is_sent():
     """열쇠 없이 부르는 주소다 — 머리글에 다른 보호자의 열쇠가 실려 와도 무시하고 증명서의 이메일만 본다."""
     kit, kim_phone = signed_up_kit()
     lee_phone = bearer(kit.client.post(SIGNUP, json=OTHER).json()["key"])
+    kit.data.accounts.mark_email_verified(guardian_id_of(kit, OTHER["email"]))
     fresh_proof(kit, email=OTHER["email"])
 
     response = reset(kit, headers=kim_phone)
@@ -167,7 +220,7 @@ def test_only_the_guardian_named_in_the_proof_is_changed_whatever_key_is_sent():
     # 김보호는 그대로다
     assert kit.client.get(ME, headers=kim_phone).status_code == 200
     assert login(kit, GOOD["password"]).status_code == 200
-    assert kit.data.accounts.profile(guardian_id_of(kit)).email_verified is False
+    assert login(kit, NEW_PASSWORD).status_code == 401
 
 
 def test_the_legacy_key_only_guardian_is_untouched():
@@ -204,12 +257,19 @@ def _bad_proof(kit):
 
 
 @pytest.mark.parametrize(
-    "make_token",
-    [_stale, _future, _no_auth_time, _unknown_email, _bad_proof],
-    ids=["301초 전 로그인", "61초 뒤 로그인", "auth_time 없음", "없는 이메일", "확인 실패"],
+    ("verified", "make_token"),
+    [
+        (True, _stale),
+        (True, _future),
+        (True, _no_auth_time),
+        (True, _unknown_email),
+        (True, _bad_proof),
+        (False, fresh_proof),  # 증명서는 맞지만 이 서버에서 이메일 인증을 마치지 않은 계정
+    ],
+    ids=["301초 전 로그인", "61초 뒤 로그인", "auth_time 없음", "없는 이메일", "확인 실패", "인증 전 계정"],
 )
-def test_every_kind_of_failure_gets_the_same_401_and_counts_toward_the_limit(make_token):
-    kit, phone = signed_up_kit()
+def test_every_kind_of_failure_gets_the_same_401_and_counts_toward_the_limit(verified, make_token):
+    kit, phone = signed_up_kit(verified=verified)
     kit.data.password_reset_failures = FailureLimiter(limit=1)
     token = make_token(kit)
     assert kit.data.password_reset_failures.blocked() is False
@@ -221,7 +281,36 @@ def test_every_kind_of_failure_gets_the_same_401_and_counts_toward_the_limit(mak
     # 아무것도 바뀌지 않았다
     assert kit.client.get(ME, headers=phone).status_code == 200
     assert login(kit, GOOD["password"]).status_code == 200
-    assert kit.data.accounts.profile(guardian_id_of(kit)).email_verified is False
+    assert verified_flag(kit) is verified
+
+
+def test_an_unverified_account_stays_unverified_and_keeps_its_password():
+    """인증 전 계정은 운영 도구로 되찾는다(재설정으로 인증까지 끝내게 두지 않는다)."""
+    kit, _ = signed_up_kit(verified=False)
+    accounts = RecordingAccounts(kit.data.accounts)
+    kit.data.accounts = accounts
+    fresh_proof(kit)
+
+    response = reset(kit)
+
+    assert (response.status_code, response.json()) == (401, NOT_CONFIRMED)
+    assert accounts.marked == []
+    assert verified_flag(kit) is False
+    assert login(kit, NEW_PASSWORD).status_code == 401
+
+
+def test_an_account_whose_verified_flag_is_not_true_is_refused_the_same_way():
+    kit, phone = signed_up_kit()
+    kit.data.accounts = FlaglessAccounts(kit.data.accounts)
+    kit.data.password_reset_failures = FailureLimiter(limit=1)
+    fresh_proof(kit)
+
+    response = reset(kit)
+
+    assert (response.status_code, response.json()) == (401, NOT_CONFIRMED)
+    assert kit.data.password_reset_failures.blocked() is True
+    assert kit.client.get(ME, headers=phone).status_code == 200
+    assert login(kit, NEW_PASSWORD).status_code == 401
 
 
 def test_failures_are_limited_server_wide_and_a_blocked_request_is_not_checked():
