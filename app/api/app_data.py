@@ -761,8 +761,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         """비밀번호를 잊은 보호자 — 열쇠 없이 부른다. 신원은 Firebase 증명서 하나로만 본다.
 
         우리 프로젝트가 서명했고 이메일이 인증됐고(EmailVerifier), **방금(5분 안) 이메일·비밀번호로 로그인한**
-        증명서여야 한다. 앱은 보호자가 재설정 메일의 링크에서 정한 새 비밀번호로 Firebase에 로그인해 이 증명서를
-        받는다. 틀린 증명서, 오래되거나 미래의 로그인, 없는 계정을 구분해 알려 주지 않는다(같은 401, 같은 실패 계수).
+        증명서여야 하고, 그 계정은 **이 서버에서 이미 이메일 인증을 마친** 것이어야 한다. 앱은 이메일 인증이 끝나면
+        Firebase 비밀번호를 아무도 모르는 값으로 바꾸므로(EmailProof.rotatePassword), 그 뒤 이 증명서는 재설정 메일의
+        링크에서 새 비밀번호를 정한 사람(메일함 주인)만 얻는다. 인증 전 계정은 Firebase 비밀번호가 가입 비밀번호
+        그대로라 메일 없이도 증명서를 얻을 수 있다 — 받지 않는다(운영 도구로 되찾는다).
+        틀린 증명서, 오래되거나 미래의 로그인, 없는 계정, 인증 전 계정을 구분해 알려 주지 않는다(같은 401, 같은 실패 계수).
         성공하면 그 보호자의 열쇠를 모두 폐기한다 — 남길 "이 폰"의 열쇠가 없다. 이메일·증명서·비밀번호는 기록하지 않는다.
         """
         if data.password_reset_failures.blocked():
@@ -778,7 +781,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             account = None
             if proof is not None and signed_in_just_now(proof.auth_time, data.wall_clock()):
                 account = data.accounts.find_by_email(normalize_email(proof.email))
-            if account is None:
+            if account is None or account.email_verified is not True:
                 data.password_reset_failures.record_failure()
                 logger.warning("비밀번호 재설정 확인 실패")
                 raise HTTPException(status_code=401, detail=BAD_RESET)
@@ -787,7 +790,6 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 # 로그인의 "열쇠 발급"과 한 줄로 선다: 옛 비밀번호로 시작한 로그인은 이 뒤에 열쇠를 받지 못한다.
                 data.accounts.set_password(account.guardian_id, new_hash)
                 revoked = key_store().revoke_all(account.guardian_id)
-                data.accounts.mark_email_verified(account.guardian_id)
                 data.login_limiter.clear(account.email)
         finally:
             data.password_reset_slots.release(slot)

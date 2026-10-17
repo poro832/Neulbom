@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:eldercare/screens/email_verification_screen.dart';
 import 'package:eldercare/services/email_proof.dart';
+import 'package:eldercare/services/nulbom_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,8 +15,15 @@ class FakeProof implements EmailProof {
   final sent = <String>[];
   int resent = 0;
   int signedOut = 0;
+  int rotated = 0;
   Object? sendError;
   Object? resendError;
+  Object? rotateError;
+  bool rotateThrowsAtOnce = false;
+  bool rotateHangs = false;
+
+  /// 부른 순서를 남긴다(서버 기록 → Firebase 비밀번호 바꾸기).
+  final events = <String>[];
 
   @override
   bool get hasSession => session;
@@ -52,6 +62,16 @@ class FakeProof implements EmailProof {
 
   @override
   Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
+
+  @override
+  Future<void> rotatePassword() {
+    rotated++;
+    events.add('rotate');
+    if (rotateThrowsAtOnce) throw rotateError!; // 기다리기 전에 바로 터지는 경우
+    if (rotateHangs) return Completer<void>().future; // 끝나지 않는 경우
+    if (rotateError != null) return Future.error(rotateError!);
+    return Future.value();
+  }
 }
 
 Future<void> pump(WidgetTester tester, EmailVerificationScreen screen, {List<bool>? result}) async {
@@ -105,6 +125,109 @@ void main() {
 
     expect(sent, 'tok-' * 10);
     expect(result, [true]);
+  });
+
+  group('서버가 인증을 기록하면 Firebase 비밀번호를 아무도 모르는 값으로 바꾼다', () {
+    testWidgets('서버 기록 뒤 한 번만 바꾸고 true로 닫힌다', (tester) async {
+      final proof = FakeProof(session: true, token: 'tok-' * 10);
+      final result = <bool>[];
+      await pump(
+          tester,
+          EmailVerificationScreen(
+              email: 'a@b.co',
+              proof: proof,
+              verify: (_) async {
+                proof.events.add('verify');
+                return true;
+              }),
+          result: result);
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.rotated, 1);
+      expect(proof.events, ['verify', 'rotate']);
+      expect(result, [true]);
+    });
+
+    for (final (name, arrange) in [
+      ('나중에 실패', (FakeProof p) => p.rotateError = StateError('requires-recent-login')),
+      ('바로 실패', (FakeProof p) {
+        p.rotateError = StateError('no-app');
+        p.rotateThrowsAtOnce = true;
+      }),
+    ]) {
+      testWidgets('바꾸기가 $name해도 인증은 그대로 끝나 true로 닫힌다', (tester) async {
+        final proof = FakeProof(session: true, token: 'tok-' * 10);
+        arrange(proof);
+        final result = <bool>[];
+        await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: (_) async => true),
+            result: result);
+
+        await tester.tap(find.text('인증했어요'));
+        await tester.pumpAndSettle();
+
+        expect(proof.rotated, 1);
+        expect(result, [true]);
+        expect(find.textContaining('인증을 확인하지 못했어요'), findsNothing);
+      });
+    }
+
+    testWidgets('바꾸기가 끝나지 않아도 5초 뒤에는 true로 닫힌다', (tester) async {
+      final proof = FakeProof(session: true, token: 'tok-' * 10)..rotateHangs = true;
+      final result = <bool>[];
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: (_) async => true),
+          result: result);
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pump(const Duration(seconds: 4));
+      expect(result, isEmpty); // 아직 기다린다(닫기 전에 바꾼다)
+      expect(find.byType(EmailVerificationScreen), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+
+      expect(proof.rotated, 1);
+      expect(result, [true]);
+    });
+
+    for (final (name, verify) in <(String, Future<bool> Function(String))>[
+      ('서버 문장으로 거절', (_) async => throw const ApiException(401, '이메일 인증을 확인하지 못했어요')),
+      ('false', (_) async => false),
+    ]) {
+      testWidgets('서버가 거절하면($name) 바꾸지 않는다', (tester) async {
+        final proof = FakeProof(session: true, token: 'tok-' * 10);
+        final result = <bool>[];
+        await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: verify), result: result);
+
+        await tester.tap(find.text('인증했어요'));
+        await tester.pumpAndSettle();
+
+        expect(proof.rotated, 0);
+        expect(result, isEmpty);
+      });
+    }
+
+    testWidgets('아직 링크를 안 눌러 증명서가 없으면 바꾸지 않는다', (tester) async {
+      final proof = FakeProof(session: true, token: null);
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', proof: proof, verify: (_) async => true));
+
+      await tester.tap(find.text('인증했어요'));
+      await tester.pumpAndSettle();
+
+      expect(proof.rotated, 0);
+    });
+
+    testWidgets('메일 보내기·다시 보내기에서는 바꾸지 않는다', (tester) async {
+      final proof = FakeProof();
+      await pump(tester, EmailVerificationScreen(email: 'a@b.co', password: 'secret-pass-1', proof: proof, verify: (_) async => true));
+      await tester.tap(find.text('다시 보내기'));
+      await tester.pumpAndSettle();
+
+      expect(proof.sent, hasLength(1));
+      expect(proof.resent, 1);
+      expect(proof.rotated, 0);
+    });
   });
 
   testWidgets('세션이 없고 비밀번호도 없으면 비밀번호를 입력받아 메일을 보낸다', (tester) async {

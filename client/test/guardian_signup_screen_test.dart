@@ -53,6 +53,11 @@ class FakeProof implements EmailProof {
 
   @override
   Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
+
+  int rotated = 0;
+
+  @override
+  Future<void> rotatePassword() async => rotated++;
 }
 
 Future<void> fillAndSubmit(WidgetTester tester) async {
@@ -168,6 +173,7 @@ void main() {
 
     expect(jsonDecode(verified.body), {'id_token': 'firebase-id-token'});
     expect(verified.headers['Authorization'], 'Bearer nlb_new'); // 가입으로 받은 열쇠
+    expect(proof.rotated, 1); // 인증이 기록되면 Firebase 비밀번호는 아무도 모르는 값이 된다
     expect(find.byType(EmailVerificationScreen), findsNothing);
     expect(find.text('회원가입이 완료되었습니다'), findsOneWidget);
   });

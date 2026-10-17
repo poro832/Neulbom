@@ -22,7 +22,8 @@ const int _minPassword = 8;
 ///
 /// 1단계: 이메일로 Firebase 재설정 메일을 보낸다. 2단계: 보호자가 메일의 링크에서 새 비밀번호를 정한 뒤 같은
 /// 비밀번호를 여기에 입력하면, 그 비밀번호로 Firebase에 로그인해 받은 증명서와 새 비밀번호를 서버에 보낸다.
-/// 서버가 바꾸면 true로 닫힌다(그 보호자의 모든 폰은 로그아웃된다). 뒤로 가기는 false다.
+/// 서버가 바꾸면 Firebase 비밀번호를 아무도 모르는 값으로 바꾼 뒤(할 수 있는 만큼, 5초까지) true로 닫힌다
+/// (그 보호자의 모든 폰은 로그아웃된다). 뒤로 가기는 false다. 서버는 이메일 인증을 마친 계정만 재설정한다.
 /// 비밀번호는 저장하거나 기록하지 않는다. 오류는 SnackBar가 아니라 화면 안 문장으로 보여 준다.
 class PasswordResetScreen extends StatefulWidget {
   const PasswordResetScreen({
@@ -159,6 +160,11 @@ class _PasswordResetScreenState extends State<PasswordResetScreen> {
       final idToken = await _proof.idTokenForReset(email: email, password: password);
       if (!mounted) return;
       await _reset(idToken, password);
+      if (!mounted) return;
+      // 서버가 바꿨다. Firebase 비밀번호는 방금 정한 새 비밀번호라, 나중에 앱에서 비밀번호를 바꾸면 이 값이 뒤에 남는다 —
+      // 아무도 모르는 값으로 바꿔 다음 재설정도 메일의 링크로만 하게 한다. 5초까지만 기다리고, 실패해도 재설정은 끝났다.
+      // 서버가 거절했을 때는 바꾸지 않는다(같은 비밀번호로 다시 시도할 수 있어야 한다).
+      await rotatePasswordQuietly(_proof);
       if (!mounted) return;
       setState(() {
         _busy = false;
