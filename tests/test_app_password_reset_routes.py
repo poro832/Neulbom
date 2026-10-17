@@ -18,13 +18,16 @@ from dataclasses import replace
 
 import pytest
 
+from app.api import app_data
 from app.api.devices import InMemoryDeviceStore
-from app.api.passwords import NO_LOGIN
+from app.api.guardian_auth import KeyAuth, hash_key, parse_bearer
+from app.api.passwords import NO_LOGIN, hash_password
 from app.api.rate_limit import FailureLimiter
 from app.firebase_verify import VerifiedEmail
 from tests.app_data_helpers import make_app_kit
 
 RESET = "/v1/guardian/password/reset"
+CHANGE = "/v1/guardian/password"
 SIGNUP = "/v1/guardian/signup"
 LOGIN = "/v1/guardian/login"
 ME = "/v1/guardian/me"
@@ -32,7 +35,8 @@ NOT_CONFIRMED = {"detail": "비밀번호 재설정을 확인하지 못했어요"
 TRY_LATER = {"detail": "잠시 뒤에 다시 해 주세요"}
 OFF = {"detail": "이메일 인증을 아직 쓸 수 없어요"}
 UNAVAILABLE = {"detail": "인증을 확인할 수 없습니다"}
-GOOD = {"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "password": "correct-horse-1"}
+NEED_KEY = {"detail": "열쇠가 필요합니다"}
+GOOD ={"name": "김보호", "email": "kim@example.com", "phone": "010-1111-2222", "password": "correct-horse-1"}
 OTHER = {**GOOD, "name": "이보호", "email": "lee@example.com", "password": "other-horse-2"}
 NEW_PASSWORD = "brand-new-pass-3"
 PROOF = "p" * 40
@@ -84,11 +88,13 @@ def verified_flag(kit, email=GOOD["email"]):
 
 
 class RecordingAccounts:
-    """계정 저장소를 감싸 이메일 인증 기록 호출을 적어 둔다. 나머지는 그대로 넘긴다."""
+    """계정 저장소를 감싸 이메일 인증 기록·비밀번호 쓰기를 적어 둔다. 나머지는 그대로 넘긴다."""
 
-    def __init__(self, inner):
+    def __init__(self, inner, events=None, fail_set_password=False):
         self._inner = inner
         self.marked = []
+        self.events = events if events is not None else []
+        self.fail_set_password = fail_set_password
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
@@ -96,6 +102,27 @@ class RecordingAccounts:
     def mark_email_verified(self, guardian_id):
         self.marked.append(guardian_id)
         return self._inner.mark_email_verified(guardian_id)
+
+    def set_password(self, guardian_id, password_hash):
+        self.events.append("set_password")
+        if self.fail_set_password:
+            raise RuntimeError("DB가 끊겼다")
+        return self._inner.set_password(guardian_id, password_hash)
+
+
+class RecordingKeyStore:
+    """열쇠 저장소를 감싸 전부 폐기 호출을 적어 둔다."""
+
+    def __init__(self, inner, events):
+        self._inner = inner
+        self.events = events
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def revoke_all(self, guardian_id):
+        self.events.append("revoke_all")
+        return self._inner.revoke_all(guardian_id)
 
 
 class FlaglessAccounts:
@@ -159,6 +186,33 @@ def test_a_reset_does_not_touch_the_verified_flag():
     assert accounts.marked == []
     assert verified_flag(kit) is True
     assert login(kit, NEW_PASSWORD).json()["email_verified"] is True
+
+
+def test_a_reset_revokes_the_keys_before_it_writes_the_password():
+    events = []
+    kit, _ = signed_up_kit()
+    kit.data.accounts = RecordingAccounts(kit.data.accounts, events)
+    kit.data.guardian_auth = KeyAuth(RecordingKeyStore(kit.data.guardian_auth.store, events))
+    fresh_proof(kit)
+
+    assert reset(kit).status_code == 200
+
+    assert events == ["revoke_all", "set_password"]
+
+
+def test_a_reset_that_fails_while_writing_fails_closed():
+    """비밀번호를 쓰다 저장소가 실패하면 503이다. 열쇠는 이미 모두 폐기됐고(남이 쥔 열쇠도 끊긴다) 비밀번호는 옛 그대로다."""
+    kit, phone = signed_up_kit()
+    kit.data.accounts = RecordingAccounts(kit.data.accounts, fail_set_password=True)
+    fresh_proof(kit)
+
+    response = reset(kit)
+
+    assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+    assert kit.client.get(ME, headers=phone).status_code == 401
+    kit.data.accounts.fail_set_password = False
+    assert login(kit, NEW_PASSWORD).status_code == 401
+    assert login(kit, GOOD["password"]).status_code == 200
 
 
 def test_the_email_in_the_proof_is_matched_without_case_or_spaces():
@@ -497,3 +551,85 @@ def test_email_verification_slots_are_not_shared_with_resets():
     kit, _ = signed_up_kit()
 
     assert kit.data.password_reset_slots is not kit.data.email_verify_slots
+
+
+# ------------------------------------------------ 앱 안 비밀번호 변경이 재설정과 겹칠 때
+#
+# 변경은 "현재 비밀번호 검사 → (느린 해시) → 잠금 안에서 쓰기"다. 검사가 끝난 뒤 쓰기 전에 메일함 주인의 재설정이
+# 끝나면, 옛 비밀번호와 열쇠를 쥔 사람(비밀번호가 새어 나간 경우)의 변경이 재설정을 덮어쓰면 안 된다.
+
+
+def change_password(kit, headers, new="attacker-pass-9", current=GOOD["password"]):
+    return kit.client.post(CHANGE, json={"current": current, "new": new}, headers=headers)
+
+
+def between_check_and_write(monkeypatch, action):
+    """변경의 현재 비밀번호 검사 바로 뒤(쓰기 전)에 action을 한 번 실행한다. 결과는 돌려준 목록에 담긴다."""
+    real = app_data.verify_password
+    done = []
+
+    def check_then_act(password, stored):
+        ok = real(password, stored)
+        if not done:
+            done.append(action())
+        return ok
+
+    monkeypatch.setattr(app_data, "verify_password", check_then_act)
+    return done
+
+
+def test_a_password_change_that_raced_a_reset_does_not_overwrite_it(monkeypatch):
+    kit, phone = signed_up_kit()
+    fresh_proof(kit)
+    done = between_check_and_write(monkeypatch, lambda: reset(kit))
+
+    changed = change_password(kit, phone)
+
+    assert done[0].status_code == 200  # 재설정은 끝났다(이 폰의 열쇠도 폐기됐다)
+    assert (changed.status_code, changed.json()) == (401, NEED_KEY)  # 이유는 말하지 않는다
+    assert login(kit, NEW_PASSWORD).status_code == 200  # 재설정의 새 비밀번호가 그대로다
+    assert login(kit, "attacker-pass-9").status_code == 401
+    assert login(kit, GOOD["password"]).status_code == 401
+
+
+def test_a_password_change_whose_key_was_revoked_meanwhile_writes_nothing(monkeypatch):
+    kit, phone = signed_up_kit()
+    other_phone = bearer(login(kit, GOOD["password"]).json()["key"])
+    key_hash = hash_key(parse_bearer(phone["Authorization"]))
+    between_check_and_write(monkeypatch, lambda: kit.data.guardian_auth.store.revoke_hash(key_hash))
+
+    changed = change_password(kit, phone)
+
+    assert (changed.status_code, changed.json()) == (401, NEED_KEY)
+    assert login(kit, GOOD["password"]).status_code == 200  # 비밀번호는 그대로
+    assert login(kit, "attacker-pass-9").status_code == 401
+    assert kit.client.get(ME, headers=other_phone).status_code == 200  # 다른 폰도 내보내지 않았다
+
+
+def test_a_password_change_whose_password_changed_meanwhile_writes_nothing(monkeypatch):
+    """운영 도구(set-login) 등으로 검사 뒤에 비밀번호가 바뀌었으면, 열쇠가 살아 있어도 옛 검사로 쓰지 않는다."""
+    kit, phone = signed_up_kit()
+    other_phone = bearer(login(kit, GOOD["password"]).json()["key"])
+    gid = guardian_id_of(kit)
+    between_check_and_write(
+        monkeypatch, lambda: kit.data.accounts.set_password(gid, hash_password("operator-set-1"))
+    )
+
+    changed = change_password(kit, phone)
+
+    assert (changed.status_code, changed.json()) == (401, NEED_KEY)
+    assert login(kit, "operator-set-1").status_code == 200
+    assert login(kit, "attacker-pass-9").status_code == 401
+    assert kit.client.get(ME, headers=other_phone).status_code == 200
+
+
+def test_a_password_change_without_a_race_still_works():
+    kit, phone = signed_up_kit()
+    other_phone = bearer(login(kit, GOOD["password"]).json()["key"])
+
+    changed = change_password(kit, phone, new="brand-new-pass-4")
+
+    assert (changed.status_code, changed.json()) == (200, {"revoked_others": 1})
+    assert kit.client.get(ME, headers=phone).status_code == 200
+    assert kit.client.get(ME, headers=other_phone).status_code == 401
+    assert login(kit, "brand-new-pass-4").status_code == 200

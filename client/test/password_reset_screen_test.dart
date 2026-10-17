@@ -66,9 +66,12 @@ class FakeResetProof implements EmailProof {
     return resetToken;
   }
 
+  final knownPasswords = <String?>[];
+
   @override
-  Future<void> rotatePassword() {
+  Future<void> rotatePassword({String? knownPassword}) {
     rotated++;
+    knownPasswords.add(knownPassword);
     if (rotateHangs) return Completer<void>().future;
     if (rotateError != null) return Future.error(rotateError!);
     return Future.value();
@@ -341,6 +344,7 @@ void main() {
 
       expect(reset.calls, hasLength(1));
       expect(proof.rotated, 1);
+      expect(proof.knownPasswords, [newPassword]); // 방금 쓴 새 비밀번호로 다시 로그인해 바꾼다
       expect(result, [true]);
     });
 

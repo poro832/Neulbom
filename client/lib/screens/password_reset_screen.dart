@@ -163,8 +163,9 @@ class _PasswordResetScreenState extends State<PasswordResetScreen> {
       if (!mounted) return;
       // 서버가 바꿨다. Firebase 비밀번호는 방금 정한 새 비밀번호라, 나중에 앱에서 비밀번호를 바꾸면 이 값이 뒤에 남는다 —
       // 아무도 모르는 값으로 바꿔 다음 재설정도 메일의 링크로만 하게 한다. 5초까지만 기다리고, 실패해도 재설정은 끝났다.
-      // 서버가 거절했을 때는 바꾸지 않는다(같은 비밀번호로 다시 시도할 수 있어야 한다).
-      await rotatePasswordQuietly(_proof);
+      // 서버가 거절했을 때는 바꾸지 않는다(같은 비밀번호로 다시 시도할 수 있어야 한다). 방금 쓴 새 비밀번호로 먼저
+      // 다시 로그인한다.
+      await rotatePasswordQuietly(_proof, knownPassword: password);
       if (!mounted) return;
       setState(() {
         _busy = false;

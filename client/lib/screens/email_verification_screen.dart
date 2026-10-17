@@ -52,6 +52,10 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   String? _message;
   bool _messageIsError = false;
 
+  /// Firebase가 받아 준(메일 보내기에 성공한) 비밀번호. 인증이 기록된 뒤 Firebase 비밀번호를 바꿀 때 먼저 이것으로
+  /// 다시 로그인한다. 이 화면의 메모리에만 있고 저장·기록하지 않는다. 비밀번호 없이 세션만으로 열었으면 null이다.
+  String? _knownPassword;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +70,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   @override
   void dispose() {
+    _knownPassword = null;
     _passwordController.dispose();
     super.dispose();
   }
@@ -96,6 +101,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   Future<void> _send(String password) async {
     try {
       await _proof.sendVerification(email: widget.email, password: password);
+      _knownPassword = password;
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -159,8 +165,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       if (!mounted) return;
       if (recorded) {
         // 서버가 기록했다. 이제 Firebase 비밀번호를 아무도 모르는 값으로 바꾼다 — 가입 비밀번호를 아는 것만으로는
-        // 비밀번호 재설정 증명서를 얻지 못하게(재설정 메일의 링크로만). 5초까지만 기다리고, 실패해도 인증은 끝난다.
-        await rotatePasswordQuietly(_proof);
+        // 비밀번호 재설정 증명서를 얻지 못하게(재설정 메일의 링크로만). 아는 비밀번호가 있으면 먼저 그것으로 다시
+        // 로그인한다(오래된 세션이면 바꾸기가 거절된다). 5초까지만 기다리고, 실패해도 인증은 끝난다.
+        await rotatePasswordQuietly(_proof, knownPassword: _knownPassword);
         if (!mounted) return;
         Navigator.pop(context, true);
         return;

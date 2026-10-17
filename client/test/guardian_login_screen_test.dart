@@ -41,7 +41,7 @@ class FakeResetProof implements EmailProof {
   Future<String> idTokenForReset({required String email, required String password}) async => resetToken;
 
   @override
-  Future<void> rotatePassword() async {}
+  Future<void> rotatePassword({String? knownPassword}) async {}
 }
 
 Future<void> open(WidgetTester tester, {EmailProof? proof, Future<void> Function(String, String)? reset}) async {
