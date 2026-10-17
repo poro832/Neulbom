@@ -321,6 +321,51 @@ void main() {
     expect(rejected, 0);
   });
 
+  group('비밀번호 재설정', () {
+    test('열쇠 없이 증명서와 새 비밀번호를 보낸다 — 이 폰에 열쇠가 있어도 싣지 않는다', () async {
+      await NulbomApi.saveGuardianKey('nlb_saved');
+      addTearDown(() => NulbomApi.guardianKey = '');
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return json({'reset': true});
+      });
+
+      await NulbomApi.resetPassword('t' * 40, 'brand-new-pass-3');
+
+      expect(seen.method, 'POST');
+      expect(seen.url.path, '/v1/guardian/password/reset');
+      expect(seen.headers.containsKey('Authorization'), isFalse);
+      expect(seen.headers['Content-Type'], startsWith('application/json'));
+      expect(jsonDecode(seen.body), {'id_token': 't' * 40, 'new_password': 'brand-new-pass-3'});
+    });
+
+    for (final (status, detail) in [
+      (401, '비밀번호 재설정을 확인하지 못했어요'),
+      (429, '잠시 뒤에 다시 해 주세요'),
+      (503, '이메일 인증을 아직 쓸 수 없어요'),
+    ]) {
+      test('$status: 서버 문장을 그대로 ApiException.message로 주고 저장된 열쇠는 건드리지 않는다', () async {
+        var rejected = 0;
+        NulbomApi.onGuardianKeyRejected = () => rejected++;
+        addTearDown(() => NulbomApi.onGuardianKeyRejected = null);
+        await NulbomApi.saveGuardianKey('nlb_saved');
+        addTearDown(() => NulbomApi.guardianKey = '');
+        NulbomApi.client = MockClient((request) async => json({'detail': detail}, status));
+
+        await expectLater(
+          NulbomApi.resetPassword('t' * 40, 'brand-new-pass-3'),
+          throwsA(isA<ApiException>()
+              .having((e) => e.statusCode, 'status', status)
+              .having((e) => e.message, 'message', detail)),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(await NulbomApi.loadGuardianKey(), 'nlb_saved');
+        expect(rejected, 0);
+      });
+    }
+  });
+
   test('보호자 정보: email_verified가 없으면 인증된 것으로 읽는다', () {
     final old = GuardianProfile.fromJson(
         {'name': '가', 'email': 'a@b.co', 'phone': '010', 'activated': true});

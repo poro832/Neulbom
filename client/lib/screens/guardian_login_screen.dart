@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../services/email_proof.dart';
 import 'guardian_signup_screen.dart';
 import 'guardian_home_page.dart';
+import 'password_reset_screen.dart';
 import 'role_selection_screen.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
@@ -14,7 +16,13 @@ const Color eAccent = Color(0xFF1A6BFF);
 const Color eBrass = Color(0xFFFFC21A);
 
 class GuardianLoginScreen extends StatefulWidget {
-  const GuardianLoginScreen({super.key});
+  const GuardianLoginScreen({super.key, this.emailProof, this.resetPassword});
+
+  /// 비밀번호 찾기 화면에 넘긴다. 없으면 Firebase. 테스트에서 가짜로 바꾼다.
+  final EmailProof? emailProof;
+
+  /// 비밀번호 찾기 화면에 넘긴다. 없으면 서버(NulbomApi.resetPassword). 테스트에서 가짜로 바꾼다.
+  final Future<void> Function(String idToken, String newPassword)? resetPassword;
 
   @override
   State<GuardianLoginScreen> createState() => _GuardianLoginScreenState();
@@ -25,6 +33,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  String? _notice;
   bool _obscurePassword = true;
 
   @override
@@ -52,6 +61,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _notice = null;
     });
 
     final result = await AuthService.guardianLogin(
@@ -74,6 +84,26 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
         _errorMessage = result['message'];
       });
     }
+  }
+
+  /// 비밀번호 찾기 화면을 연다. 바꾸고 돌아오면(true) 안내를 보이고 옛 비밀번호가 남은 칸을 비운다.
+  Future<void> _openPasswordReset() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PasswordResetScreen(
+          email: _emailController.text.trim(),
+          proof: widget.emailProof,
+          reset: widget.resetPassword,
+        ),
+      ),
+    );
+    if (!mounted || changed != true) return;
+    setState(() {
+      _passwordController.clear();
+      _errorMessage = null;
+      _notice = passwordResetDoneMessage;
+    });
   }
 
   @override
@@ -251,6 +281,43 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
                     ),
                   ),
                 ),
+
+                // 비밀번호 찾기
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _isLoading ? null : _openPasswordReset,
+                    child: Text(
+                      '비밀번호를 잊으셨나요?',
+                      style: GoogleFonts.notoSansKr(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: eAccent,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 비밀번호를 바꾸고 돌아온 안내
+                if (_notice != null)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: eAccent.withValues(alpha: 0.08),
+                      border: Border.all(color: eAccent.withValues(alpha: 0.5)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _notice!,
+                      style: GoogleFonts.notoSansKr(
+                        fontSize: 14,
+                        height: 1.5,
+                        color: eInk,
+                      ),
+                    ),
+                  ),
 
                 // 에러 메시지
                 if (_errorMessage != null)
