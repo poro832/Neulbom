@@ -37,7 +37,7 @@ void main() async {
     );
 
     // FCM 초기화
-    await FcmService.init();
+    await FcmService.init(navigatorKey: navigatorKey);
     FcmService.listenToTokenRefresh();
   } catch (error) {
     debugPrint('Firebase 초기화를 건너뜁니다: $error');
