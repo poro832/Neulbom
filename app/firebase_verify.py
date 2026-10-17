@@ -42,6 +42,9 @@ def _short_timeout_request_class():
 @dataclass(frozen=True)
 class VerifiedEmail:
     email: str  # 토큰에 적힌 그대로. 비교는 부르는 쪽이 정규화해서 한다.
+    # Firebase에 마지막으로 로그인한 시각(정수 초). 토큰을 새로 받아도 바뀌지 않는다 — 비밀번호 재설정이
+    # "방금 새 비밀번호로 로그인했는가"를 보는 데 쓴다. 없거나 정수가 아니면 None(이메일 인증은 쓰지 않는다).
+    auth_time: int | None = None
 
 
 class EmailVerifier(Protocol):
@@ -84,7 +87,10 @@ class FirebaseEmailVerifier:
         email = claims.get("email")
         if not isinstance(email, str) or not email.strip():
             return None
-        return VerifiedEmail(email=email)
+        auth_time = claims.get("auth_time")
+        if not isinstance(auth_time, int) or isinstance(auth_time, bool):  # bool은 int의 한 종류다
+            auth_time = None
+        return VerifiedEmail(email=email, auth_time=auth_time)
 
 
 def verifier_from_env(env: Mapping[str, str]) -> EmailVerifier | None:

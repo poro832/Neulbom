@@ -76,6 +76,19 @@ def test_the_subject_must_be_a_non_empty_string():
         assert verifier_returning(claims(sub=sub)).verify("tok") is None, sub
 
 
+def test_an_integer_auth_time_is_passed_on():
+    """비밀번호 재설정은 방금 로그인했는지(auth_time)를 본다. 이메일 인증은 이 값을 쓰지 않는다."""
+    assert verifier_returning(claims(auth_time=1_800_000_000)).verify("tok") == VerifiedEmail(
+        email="Kim@Example.com", auth_time=1_800_000_000
+    )
+
+
+def test_a_missing_or_non_integer_auth_time_is_none_and_the_email_still_verifies():
+    for over in ({}, {"auth_time": "1800000000"}, {"auth_time": True}, {"auth_time": False},
+                 {"auth_time": 1_800_000_000.5}, {"auth_time": None}, {"auth_time": [1]}):
+        assert verifier_returning(claims(**over)).verify("tok") == VerifiedEmail(email="Kim@Example.com"), over
+
+
 def test_a_decode_failure_is_none_and_the_token_is_never_logged(caplog):
     def boom(token):
         raise ValueError("Token expired: " + token)

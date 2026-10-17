@@ -80,6 +80,7 @@ NOT_ACTIVATED = "운영자 확인 후 사용할 수 있어요"
 EMAIL_NOT_VERIFIED = "이메일 인증 후 사용할 수 있어요"
 BAD_EMAIL_PROOF = "이메일 인증을 확인하지 못했어요"
 EMAIL_VERIFY_OFF = "이메일 인증을 아직 쓸 수 없어요"
+BAD_RESET = "비밀번호 재설정을 확인하지 못했어요"
 BAD_LINK = "연결 코드를 확인해 주세요"
 LINK_WAITING = "보호자 연결을 기다리고 있어요"
 ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
@@ -106,6 +107,15 @@ MAX_PENDING_PER_GUARDIAN = 5
 
 # 한 보호자의 사용 중 앱 열쇠 상한. 로그인을 거듭해도 열쇠가 무한히 쌓이지 않게, 넘으면 가장 오래된 것부터 폐기한다.
 MAX_ACTIVE_KEYS_PER_GUARDIAN = 10
+
+# 비밀번호 재설정 증명서는 "방금" 이메일·비밀번호로 Firebase에 로그인해 받은 것이어야 한다(토큰의 auth_time).
+# 토큰을 새로 받아도 auth_time은 처음 로그인한 때 그대로라, 오래 열어 둔 Firebase 세션의 증명서는 여기서 걸린다.
+# 앞쪽은 구글 시계가 우리 서버보다 조금 빠를 때를 위한 여유다.
+RESET_SIGN_IN_MAX_AGE_SECONDS = 300
+RESET_SIGN_IN_MAX_AHEAD_SECONDS = 60
+# 재설정 동시 확인 자리의 이름. 열쇠가 없어 보호자 번호로 나눌 수 없다 — 요청마다 이 이름에 고유한 표를 붙여
+# 자리를 얻으므로 보호자별 하나 제한 없이 서버 전체 수(InFlightLimiter의 limit)만 걸린다.
+PASSWORD_RESET_SLOT = "password-reset"
 
 
 @dataclass
@@ -137,6 +147,11 @@ class AppData:
     email_verifier: EmailVerifier | None = None
     email_verify_failures: FailureLimiter = field(default_factory=FailureLimiter)
     email_verify_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
+    # 비밀번호 재설정(열쇠 없이 부른다, 확인기는 위의 것을 같이 쓴다): 서버 전체 분당 20회 실패 한도 /
+    # 동시에 확인하는 수(서버 전체 4개 — 넘으면 기다리지 않고 429). 이메일 인증 자리와는 따로 센다 —
+    # 열쇠 없는 요청이 몰려도 로그인한 보호자의 이메일 인증 자리를 빼앗지 못하게.
+    password_reset_failures: FailureLimiter = field(default_factory=FailureLimiter)
+    password_reset_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
 
 
 def iso_kst(epoch: float) -> str:
@@ -161,6 +176,13 @@ def just_passed(now_kst: datetime, value: time_of_day) -> bool:
     now_m = now_kst.hour * 60 + now_kst.minute
     new_m = value.hour * 60 + value.minute
     return 0 <= now_m - new_m <= DEFAULT_GRACE_SECONDS // 60
+
+
+def signed_in_just_now(auth_time: int | None, now: float) -> bool:
+    """Firebase 로그인 시각이 지금부터 300초 안쪽(앞으로 60초까지)인가. 없거나 정수가 아니면 False."""
+    if not isinstance(auth_time, int) or isinstance(auth_time, bool):
+        return False
+    return now - RESET_SIGN_IN_MAX_AGE_SECONDS <= auth_time <= now + RESET_SIGN_IN_MAX_AHEAD_SECONDS
 
 
 def mean_of_day_means(days: list[DayStat]) -> float | None:
@@ -225,6 +247,11 @@ class LinkRequest(BaseModel):
 
 class EmailProofRequest(BaseModel):
     id_token: str = Field(min_length=20, max_length=4096)
+
+
+class PasswordResetRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=4096)
+    new_password: str = Field(min_length=MIN_PASSWORD, max_length=128)
 
 
 class ContactRequest(BaseModel):
@@ -727,6 +754,45 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         data.login_limiter.clear(account.email)
         logger.info("보호자가 비밀번호를 바꿨다 guardian_id=%s revoked_others=%s", guardian_id, revoked)
         return {"revoked_others": revoked}
+
+    @app.post("/v1/guardian/password/reset")
+    @guarded
+    def guardian_password_reset(body: PasswordResetRequest) -> dict:
+        """비밀번호를 잊은 보호자 — 열쇠 없이 부른다. 신원은 Firebase 증명서 하나로만 본다.
+
+        우리 프로젝트가 서명했고 이메일이 인증됐고(EmailVerifier), **방금(5분 안) 이메일·비밀번호로 로그인한**
+        증명서여야 한다. 앱은 보호자가 재설정 메일의 링크에서 정한 새 비밀번호로 Firebase에 로그인해 이 증명서를
+        받는다. 틀린 증명서, 오래되거나 미래의 로그인, 없는 계정을 구분해 알려 주지 않는다(같은 401, 같은 실패 계수).
+        성공하면 그 보호자의 열쇠를 모두 폐기한다 — 남길 "이 폰"의 열쇠가 없다. 이메일·증명서·비밀번호는 기록하지 않는다.
+        """
+        if data.password_reset_failures.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        if data.email_verifier is None:
+            raise HTTPException(status_code=503, detail=EMAIL_VERIFY_OFF)
+        # 확인은 작업 스레드 안에서 구글에 닿는 느린 일이다(이메일 인증과 같은 이유). 자리를 못 얻으면 기다리지 않고 429.
+        slot = (PASSWORD_RESET_SLOT, object())
+        if not data.password_reset_slots.try_acquire(slot):
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        try:
+            proof = data.email_verifier.verify(body.id_token)
+            account = None
+            if proof is not None and signed_in_just_now(proof.auth_time, data.wall_clock()):
+                account = data.accounts.find_by_email(normalize_email(proof.email))
+            if account is None:
+                data.password_reset_failures.record_failure()
+                logger.warning("비밀번호 재설정 확인 실패")
+                raise HTTPException(status_code=401, detail=BAD_RESET)
+            new_hash = hash_password(body.new_password)  # 느린 해시는 잠금 밖에서 — 다른 로그인을 세우지 않게
+            with credential_lock:
+                # 로그인의 "열쇠 발급"과 한 줄로 선다: 옛 비밀번호로 시작한 로그인은 이 뒤에 열쇠를 받지 못한다.
+                data.accounts.set_password(account.guardian_id, new_hash)
+                revoked = key_store().revoke_all(account.guardian_id)
+                data.accounts.mark_email_verified(account.guardian_id)
+                data.login_limiter.clear(account.email)
+        finally:
+            data.password_reset_slots.release(slot)
+        logger.info("비밀번호를 재설정했다 guardian_id=%s 폐기=%s", account.guardian_id, revoked)
+        return {"reset": True}
 
     # ------------------------------------------------ 보호자 코드로 어르신 가입
 

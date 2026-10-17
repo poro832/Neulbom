@@ -89,6 +89,15 @@ class PostgresGuardianKeyStore:
             )
             return cur.rowcount
 
+    def revoke_all(self, guardian_id: int) -> int:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE guardian_keys SET revoked_at = to_timestamp(%s) "
+                "WHERE guardian_id = %s AND revoked_at IS NULL",
+                (self._clock(), guardian_id),
+            )
+            return cur.rowcount
+
     def revoke_oldest_beyond(self, guardian_id: int, keep: int) -> int:
         with self._pool.connection() as conn:
             cur = conn.execute(
