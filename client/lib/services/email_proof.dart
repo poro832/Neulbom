@@ -1,4 +1,15 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
+/// 이 이메일의 Firebase 계정이 없을 때(운영 도구로 만든 보호자 등). 운영자가 `guardian set-login`으로 바꿔 준다.
+const String noResetAccountMessage = '이 이메일로는 비밀번호 재설정 메일을 보낼 수 없어요. 운영자에게 문의해 주세요.';
+
+/// 앱에 입력한 새 비밀번호가 재설정 메일의 링크에서 정한 것과 다를 때.
+const String resetPasswordMismatchMessage = '메일의 링크에서 정한 새 비밀번호와 같게 입력해 주세요.';
+
+const String _resetMailFailed = '비밀번호 재설정 메일을 보내지 못했어요. 운영자에게 문의해 주세요.';
+const String _resetCheckFailed = '비밀번호 재설정을 확인하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+const String _badEmail = '이메일을 확인해 주세요.';
 
 /// 화면이 Firebase를 직접 부르지 않도록 감싼다 — 화면 테스트는 가짜로 바꾼다.
 class EmailProofException implements Exception {
@@ -26,6 +37,14 @@ abstract class EmailProof {
 
   /// 메일 링크를 눌러 인증됐으면 서버에 보낼 ID 토큰, 아직이면 null.
   Future<String?> verifiedIdToken();
+
+  /// [email]로 Firebase 비밀번호 재설정 메일(한국어)을 보낸다. 보호자는 메일의 링크에서 새 비밀번호를 정한다.
+  /// 이 이메일의 Firebase 계정이 없으면 [noResetAccountMessage]의 [EmailProofException].
+  Future<void> sendPasswordReset({required String email});
+
+  /// 메일의 링크에서 정한 새 비밀번호로 Firebase에 로그인해, 서버에 보낼 **방금 받은** ID 토큰을 준다.
+  /// 비밀번호가 다르면 [resetPasswordMismatchMessage]의 [EmailProofException]. 비밀번호는 저장하지 않는다.
+  Future<String> idTokenForReset({required String email, required String password});
 }
 
 class FirebaseEmailProof implements EmailProof {
@@ -55,7 +74,7 @@ class FirebaseEmailProof implements EmailProof {
     }
   }
 
-  String _message(FirebaseAuthException e) {
+  static String _message(FirebaseAuthException e) {
     switch (e.code) {
       case 'too-many-requests':
         return '요청이 많아요. 잠시 뒤에 다시 해 주세요.';
@@ -111,6 +130,65 @@ class FirebaseEmailProof implements EmailProof {
       return await fresh.getIdToken(true);
     } on FirebaseAuthException catch (e) {
       throw EmailProofException(_message(e));
+    }
+  }
+
+  /// 재설정 메일 보내기의 오류 문장.
+  @visibleForTesting
+  static String resetMailMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'user-not-found':
+        return noResetAccountMessage;
+      case 'invalid-email':
+        return _badEmail;
+      case 'too-many-requests':
+      case 'network-request-failed':
+      case 'operation-not-allowed':
+        return _message(e);
+      default:
+        return _resetMailFailed;
+    }
+  }
+
+  /// 새 비밀번호로 Firebase에 로그인할 때의 오류 문장.
+  @visibleForTesting
+  static String resetSignInMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+        return resetPasswordMismatchMessage;
+      case 'user-not-found':
+        return noResetAccountMessage;
+      case 'invalid-email':
+        return _badEmail;
+      case 'too-many-requests':
+      case 'network-request-failed':
+        return _message(e);
+      default:
+        return _resetCheckFailed;
+    }
+  }
+
+  @override
+  Future<void> sendPasswordReset({required String email}) async {
+    try {
+      await _auth.setLanguageCode(mailLanguageCode);
+      await _auth.sendPasswordResetEmail(email: email);
+    } on FirebaseAuthException catch (e) {
+      throw EmailProofException(resetMailMessage(e));
+    }
+  }
+
+  @override
+  Future<String> idTokenForReset({required String email, required String password}) async {
+    try {
+      // 새로 로그인해야 토큰의 로그인 시각(auth_time)이 지금이 된다 — 서버는 5분이 지난 로그인을 받지 않는다.
+      final credential = await _auth.signInWithEmailAndPassword(email: email, password: password);
+      final token = await credential.user?.getIdToken(true);
+      if (token == null || token.isEmpty) throw const EmailProofException(_resetCheckFailed);
+      return token;
+    } on FirebaseAuthException catch (e) {
+      throw EmailProofException(resetSignInMessage(e));
     }
   }
 }

@@ -46,6 +46,12 @@ class FakeProof implements EmailProof {
     signedOut++;
     session = false;
   }
+
+  @override
+  Future<void> sendPasswordReset({required String email}) async {}
+
+  @override
+  Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
 }
 
 Future<void> pump(WidgetTester tester, EmailVerificationScreen screen, {List<bool>? result}) async {

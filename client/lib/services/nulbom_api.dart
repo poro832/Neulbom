@@ -259,6 +259,14 @@ class NulbomApi {
     return (json['revoked_others'] as int?) ?? 0;
   }
 
+  /// 비밀번호를 잊은 보호자: 재설정 메일의 링크에서 정한 새 비밀번호로 Firebase에 로그인해 받은 ID 토큰과
+  /// 같은 새 비밀번호를 서버에 보낸다. **열쇠 없이** 부른다(이 폰에 열쇠가 있어도 싣지 않는다). 서버는 그 보호자의
+  /// 열쇠를 모두 폐기한다 — 모든 폰에서 새 비밀번호로 다시 로그인한다. 거절은 서버 문장 그대로의 [ApiException].
+  static Future<void> resetPassword(String idToken, String newPassword) async {
+    await _send('POST', '/v1/guardian/password/reset',
+        body: {'id_token': idToken, 'new_password': newPassword});
+  }
+
   /// 이 폰의 푸시 토큰을 서버에 등록한다. 로그인한 열쇠에 묶여, 로그아웃하면 서버가 지운다.
   static Future<void> registerDevice(String token, {String? key}) async {
     await _send('POST', '/v1/guardian/devices',

@@ -433,6 +433,12 @@ class FakeProof implements EmailProof {
 
   @override
   Future<String?> verifiedIdToken() async => token;
+
+  @override
+  Future<void> sendPasswordReset({required String email}) async {}
+
+  @override
+  Future<String> idTokenForReset({required String email, required String password}) async => 'reset-token';
 }
 
 void emailPendingTests() {
