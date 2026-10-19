@@ -133,3 +133,31 @@ def test_a_code_only_works_for_its_own_elder(make_store):
 
 def test_an_elder_without_a_code_cannot_redeem(make_store):
     assert make_store(Clock()).redeem(12, hash_code("111111")) is False
+
+
+def test_removing_unused_codes_voids_them_for_those_elders_only(make_store):
+    """보호자 탈퇴: 그 보호자가 내준, 아직 안 쓴 연결 코드로는 더 이상 어르신 폰을 잇지 못한다."""
+    store = make_store(Clock())
+    store.issue(12, hash_code("111111"))
+    store.issue(13, hash_code("222222"))
+    assert store.redeem(13, hash_code("222222")) is True  # 이미 쓴 코드는 기록으로 남는다
+    store.issue(13, hash_code("333333"))
+    store.issue(14, hash_code("444444"))
+
+    assert store.remove_unused_for([12, 13]) == 2
+
+    assert store.redeem(12, hash_code("111111")) is False
+    assert store.redeem(13, hash_code("333333")) is False
+    assert store.redeem(14, hash_code("444444")) is True
+    assert store.remove_unused_for([12, 13]) == 0
+    assert store.remove_unused_for([]) == 0
+
+
+def test_a_new_code_works_again_after_the_unused_ones_were_removed(make_store):
+    store = make_store(Clock())
+    store.issue(12, hash_code("111111"))
+    store.remove_unused_for([12])
+
+    store.issue(12, hash_code("555555"))
+
+    assert store.redeem(12, hash_code("555555")) is True

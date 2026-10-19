@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from app.admin import run
@@ -259,16 +261,21 @@ def _deletion_world():
     )
     directory.add_audio_key(12, "12-a.wav")
     directory.add_audio_key(12, "12-b.wav")
+    from app.api.pairing import InMemoryPairingStore, hash_code
+
     accounts = InMemoryGuardianAccounts()
-    accounts.create("가", "a@example.com", "010-1", "H", activated=True)
-    accounts.create("나", "b@example.com", "010-2", "H2", activated=True)
+    accounts.create("김보호", "a@example.com", "010-1", "H", activated=True)
+    accounts.create("이보호", "b@example.com", "010-2", "H2", activated=True)
     devices = InMemoryDeviceStore()
     devices.register(1, "1" * 64, "token-aaaaaaaaaaaaaaaaaaaa")
     invites = InMemoryInviteStore()
     invites.issue(1, hash_invite_code("11111111"))
+    pairings = InMemoryPairingStore()
+    pairings.issue(12, hash_code("121212"))
+    pairings.issue(14, hash_code("141414"))
     return {
         "keys": keys, "directory": directory, "accounts": accounts, "devices": devices, "invites": invites,
-        "deleter": FakeDeleter(), "code": hash_invite_code("11111111"),
+        "pairings": pairings, "deleter": FakeDeleter(), "code": hash_invite_code("11111111"), "recordings_dir": None,
     }
 
 
@@ -276,7 +283,8 @@ def _delete(world, argv):
     out, err = Output(), Output()
     code = run(
         argv, keys=world["keys"], directory=world["directory"], out=out, err=err, accounts=world["accounts"],
-        devices=world["devices"], invites=world["invites"], recording_deleter=world["deleter"],
+        devices=world["devices"], invites=world["invites"], pairings=world["pairings"],
+        recording_deleter=world["deleter"], recordings_dir=world["recordings_dir"],
     )
     return code, out, err
 
@@ -289,6 +297,34 @@ def test_elder_delete_without_yes_deletes_nothing_and_explains():
     assert code == 1
     assert "--yes" in (out.text + err.text)
     assert world["directory"].get(12) is not None and world["deleter"].calls == []
+
+
+def test_the_delete_previews_name_who_would_be_deleted_on_stderr_only(caplog):
+    """운영자가 번호를 잘못 쳤는지 이름으로 확인한다. 이름은 화면(stderr)에만 — 출력·로그에는 남기지 않는다."""
+    world = _deletion_world()
+
+    with caplog.at_level(logging.DEBUG):
+        _, elder_out, elder_err = _delete(world, ["elder", "delete", "12"])
+        _, guardian_out, guardian_err = _delete(world, ["guardian", "delete", "1"])
+
+    assert "김순자" in elder_err.text and "김순자" not in elder_out.text
+    assert "김보호" in guardian_err.text and "김보호" not in guardian_out.text
+    assert "김순자" not in caplog.text and "김보호" not in caplog.text
+
+
+def test_elder_delete_also_removes_the_recordings_left_on_the_server_disk(tmp_path):
+    from app.archiver import MARKER_SUFFIX
+
+    world = _deletion_world()
+    world["recordings_dir"] = tmp_path
+    for name in ("12-a.wav", "12-a.wav" + MARKER_SUFFIX, "12-b.wav", "13-a.wav"):
+        (tmp_path / name).write_bytes(b"RIFF")
+
+    code, out, _ = _delete(world, ["elder", "delete", "12", "--yes"])
+
+    assert code == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["13-a.wav"]
+    assert "서버 파일 2개" in out.text
 
 
 def test_elder_delete_with_yes_removes_the_elder_and_its_recordings():
@@ -348,6 +384,10 @@ def test_guardian_delete_with_yes_unlinks_the_elders_and_removes_the_account():
     assert world["keys"].find_guardian("1" * 64) is None
     assert world["devices"].tokens_for(1) == []
     assert world["invites"].find_guardian(world["code"]) is None
+    from app.api.pairing import hash_code
+
+    assert world["pairings"].redeem(12, hash_code("121212")) is False  # 탈퇴 전에 내준 연결 코드는 지워졌다
+    assert world["pairings"].redeem(14, hash_code("141414")) is True  # 다른 보호자의 어르신 것은 그대로다
     assert world["deleter"].calls == []  # 녹음은 어르신 것이라 그대로다
     # 다른 보호자는 그대로다
     assert world["accounts"].profile(2) is not None and world["keys"].find_guardian("2" * 64) == 2

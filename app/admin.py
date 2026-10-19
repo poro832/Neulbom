@@ -28,6 +28,7 @@ import logging
 import sys
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from app.api.account_deletion import withdraw_elder, withdraw_guardian
 from app.api.db import connect, database_url
@@ -36,6 +37,7 @@ from app.api.elder_directory import DirectoryAdmin
 from app.api.guardian_accounts import EmailTaken, GuardianAccounts
 from app.api.guardian_auth import AmbiguousPrefix, GuardianKeyStore, generate_key
 from app.api.invites import InviteStore
+from app.api.pairing import PairingStore
 from app.api.passwords import hash_password
 from app.recordings import RecordingDeleter, recording_deleter_from_env
 from app.scheduler import KST
@@ -107,6 +109,8 @@ def run(
     devices: DeviceStore | None = None,
     invites: InviteStore | None = None,
     recording_deleter: RecordingDeleter | None = None,
+    pairings: PairingStore | None = None,
+    recordings_dir: Path | None = None,
 ) -> int:
     err = err or (lambda text="": print(text, file=sys.stderr))
     args = build_parser().parse_args(argv)
@@ -236,19 +240,28 @@ def run(
         if accounts is None:
             err("계정 저장소가 없다.")
             return 1
-        if accounts.profile(args.guardian_id) is None:
+        account = accounts.profile(args.guardian_id)
+        if account is None:
             err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
             return 1
         linked = len(directory.elders_of(args.guardian_id))
         if not args.yes:
+            # 번호를 잘못 쳤는지 이름으로 확인하게 한다. 이름은 이 화면(stderr)에만 — 로그에는 남기지 않는다.
             err(
-                f"보호자 {args.guardian_id}번을 지우면 계정·열쇠·폰 등록·개인 코드·알림이 지워지고 되돌릴 수 없다. "
-                f"연결된 어르신 {linked}명은 지우지 않고 연결 전으로 돌린다(안부 전화가 멈춘다)."
+                f"보호자 {args.guardian_id}번({account.name})을 지우면 계정·열쇠·폰 등록·개인 코드·알림이 지워지고 "
+                f"되돌릴 수 없다. 연결된 어르신 {linked}명은 지우지 않고 연결 전으로 돌린다(안부 전화가 멈추고, "
+                "아직 안 쓴 연결 코드는 지워진다)."
             )
             err(f"정말 지우려면 `guardian delete {args.guardian_id} --yes`로 다시 실행한다.")
             return 1
         detached = withdraw_guardian(
-            args.guardian_id, elders=directory, accounts=accounts, keys=keys, devices=devices, invites=invites
+            args.guardian_id,
+            elders=directory,
+            accounts=accounts,
+            keys=keys,
+            pairings=pairings,
+            devices=devices,
+            invites=invites,
         )
         out(f"보호자 {args.guardian_id}번을 지웠다 — 어르신 {detached}명은 지우지 않고 연결 전으로 돌렸다.")
         return 0
@@ -262,21 +275,26 @@ def run(
         return 0
 
     if (args.group, args.action) == ("elder", "delete"):
-        if directory.get(args.elder_id) is None:
+        access = directory.get(args.elder_id)
+        if access is None:
             err(f"그런 어르신이 없다 — 어르신 번호 {args.elder_id}.")
             return 1
         recordings = len(directory.audio_keys_of(args.elder_id))
         if not args.yes:
+            # 번호를 잘못 쳤는지 이름으로 확인하게 한다. 이름은 이 화면(stderr)에만 — 로그에는 남기지 않는다.
             err(
-                f"어르신 {args.elder_id}번을 지우면 통화·점수·요약·언급·연락처·열쇠·코드가 지워지고 되돌릴 수 없다. "
-                f"녹음 {recordings}개는 S3에서 지운다(실패하면 버킷의 30일 규칙이 지운다)."
+                f"어르신 {args.elder_id}번({access.name})을 지우면 통화·점수·요약·언급·연락처·열쇠·코드가 지워지고 "
+                f"되돌릴 수 없다. 녹음 {recordings}개는 서버 디스크와 S3에서 지운다(S3에서 실패하면 버킷의 30일 규칙이 지운다)."
             )
             err(f"정말 지우려면 `elder delete {args.elder_id} --yes`로 다시 실행한다.")
             return 1
-        result = withdraw_elder(args.elder_id, elders=directory, recording_deleter=recording_deleter)
+        result = withdraw_elder(
+            args.elder_id, elders=directory, recording_deleter=recording_deleter, recordings_dir=recordings_dir
+        )
         out(
             f"어르신 {args.elder_id}번을 지웠다 — 녹음 {result.recordings}개 삭제 시도, 실패 {result.failed}개"
-            + ("(버킷의 30일 규칙이 지운다)." if result.failed else ".")
+            + ("(버킷의 30일 규칙이 지운다)" if result.failed else "")
+            + f", 서버 파일 {result.local_removed}개 삭제."
         )
         return 0
 
@@ -302,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
     from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
     from app.api.postgres_invites import PostgresInviteStore
+    from app.api.postgres_pairing import PostgresPairingStore
+    from app.media.stream_server import RECORDINGS_DIR
 
     pool = connect(url)
     try:
@@ -313,8 +333,11 @@ def main(argv: list[str] | None = None) -> int:
             pool=pool,
             devices=PostgresDeviceStore(pool=pool),
             invites=PostgresInviteStore(pool=pool),
+            pairings=PostgresPairingStore(pool=pool),
             # 서버와 같은 버킷 설정(.env의 RECORDINGS_BUCKET). 여기서는 S3에 닿지 않고 `elder delete --yes`에서만 닿는다.
             recording_deleter=recording_deleter_from_env(),
+            # 서버(app.serve)와 같은 상대 경로다 — 프로젝트 폴더에서 실행한다(.env를 읽는 것과 같은 전제).
+            recordings_dir=RECORDINGS_DIR,
         )
     finally:
         pool.close()

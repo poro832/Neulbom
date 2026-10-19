@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import sys
 import types
+from pathlib import Path
 
 from app.recordings import MAX_KEYS_PER_REQUEST, S3RecordingDeleter, recording_deleter_from_env
 
@@ -167,15 +168,21 @@ def test_app_data_carries_the_deleter_it_was_given():
     deleter = S3RecordingDeleter("b", client=FakeS3())
     auth = KeyAuth(InMemoryGuardianKeyStore())
 
-    data, _ = app_data_for(None, guardian_auth=auth, elders=InMemoryElderDirectory(), recording_deleter=deleter)
+    data, _ = app_data_for(
+        None, guardian_auth=auth, elders=InMemoryElderDirectory(), recording_deleter=deleter,
+        recordings_dir=Path("somewhere"),
+    )
     plain, _ = app_data_for(None, guardian_auth=auth, elders=InMemoryElderDirectory())
 
-    assert data.recording_deleter is deleter
-    assert plain.recording_deleter is None
+    assert data.recording_deleter is deleter and data.recordings_dir == Path("somewhere")
+    assert plain.recording_deleter is None and plain.recordings_dir is None
 
 
-def test_the_server_builds_no_deleter_without_a_bucket():
-    """시험 환경에는 버킷이 없다(conftest가 지운다) — 서버 조립이 진짜 S3 삭제기를 만들지 않는다."""
+def test_the_server_builds_no_deleter_without_a_bucket_and_cleans_the_folder_the_archiver_uses():
+    """시험 환경에는 버킷이 없다(conftest가 지운다) — 서버 조립이 진짜 S3 삭제기를 만들지 않는다.
+    서버 디스크 정리는 통화 녹음과 보관기가 쓰는 바로 그 폴더를 본다."""
     import app.main as main
+    from app.media.stream_server import RECORDINGS_DIR
 
     assert main._app_data.recording_deleter is None
+    assert main._app_data.recordings_dir == RECORDINGS_DIR
