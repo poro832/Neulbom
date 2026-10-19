@@ -253,7 +253,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     return Scaffold(
       backgroundColor: eBg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFFD92D20),
+        backgroundColor: eBg,
         elevation: 0,
         automaticallyImplyLeading: false,
         title: Text(
@@ -261,7 +261,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
           style: GoogleFonts.notoSansKr(
             fontSize: 28,
             fontWeight: FontWeight.w700,
-            color: Colors.white,
+            color: eInk,
           ),
         ),
         centerTitle: true,
