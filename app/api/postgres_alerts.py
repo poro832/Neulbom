@@ -52,3 +52,11 @@ class PostgresAlertStore:
                 (elder_id, since),
             ).fetchone()
         return row[0]
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM alerts WHERE elder_id = %s", (elder_id,)).rowcount
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM alerts WHERE guardian_id = %s", (guardian_id,)).rowcount

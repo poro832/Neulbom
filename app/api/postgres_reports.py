@@ -99,3 +99,7 @@ class PostgresReports:
                 (elder_id, BASELINE_WINDOW),
             ).fetchone()
         return count
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM calls WHERE elder_id = %s", (elder_id,)).rowcount

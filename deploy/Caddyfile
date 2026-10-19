@@ -11,7 +11,8 @@ nuelbom.duckdns.org {
 	# 전화가 나가지 않는다(동의 칸은 승인에서만 채워진다).
 	# 어르신 가입(/v1/elders/signup)은 열쇠 없이 열리지만 가입만으로는 전화가 나가지 않는다 — 보호자가 연결 코드를 확인하면 동의가 기록된다.
 	# 비밀번호 재설정(/v1/guardian/password/reset)도 열쇠 없이 열리지만, 방금(5분 안) 새 비밀번호로 Firebase에 로그인한 증명서가 맞아야 바뀐다(아니면 401, 확인기가 없으면 503).
-	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status /v1/calls/request /v1/pair /v1/elders/*/pairing-code /v1/elders/*/weekly /v1/guardian/elders /v1/guardian/alerts /v1/me/calls /v1/me/contacts /v1/me/contacts/* /v1/signup /v1/guardian/invite /v1/guardian/signup /v1/guardian/login /v1/guardian/logout /v1/guardian/devices /v1/guardian/devices/unregister /v1/guardian/me /v1/guardian/password /v1/elders/*/approve /v1/elders/*/reject /v1/me/status /v1/elders/*/calls /v1/calls/*/turns /v1/me/share-consent /v1/elders/signup /v1/me/link-code /v1/guardian/link/preview /v1/guardian/link /v1/guardian/email/verify /v1/elders/*/mentions /v1/elders/*/monthly /v1/elders/*/call-time /v1/guardian/password/reset
+	# 탈퇴(DELETE /v1/me, DELETE /v1/guardian/me)는 열쇠가 있어야 하고(없으면 401), 보호자는 현재 비밀번호도 맞아야 한다. 경로로만 허용하므로 DELETE도 같이 열린다.
+	@clawops path /v1/voiceml /v1/stream /v1/stream-ended /v1/call-status /v1/calls/request /v1/pair /v1/elders/*/pairing-code /v1/elders/*/weekly /v1/guardian/elders /v1/guardian/alerts /v1/me/calls /v1/me/contacts /v1/me/contacts/* /v1/signup /v1/guardian/invite /v1/guardian/signup /v1/guardian/login /v1/guardian/logout /v1/guardian/devices /v1/guardian/devices/unregister /v1/guardian/me /v1/guardian/password /v1/elders/*/approve /v1/elders/*/reject /v1/me/status /v1/elders/*/calls /v1/calls/*/turns /v1/me/share-consent /v1/elders/signup /v1/me/link-code /v1/guardian/link/preview /v1/guardian/link /v1/guardian/email/verify /v1/elders/*/mentions /v1/elders/*/monthly /v1/elders/*/call-time /v1/guardian/password/reset /v1/me
 	handle @clawops {
 		# 통화 웹훅과 앱 요청은 모두 작은 폼/JSON이다. 큰 본문은 앱에 닿기 전에 끊는다.
 		request_body {

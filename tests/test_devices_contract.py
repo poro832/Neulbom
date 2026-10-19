@@ -105,6 +105,24 @@ def test_remove_for_key_removes_that_keys_tokens_only(world):
     assert devices.tokens_for(1) == [T2]
 
 
+def test_remove_for_guardian_removes_every_phone_of_that_guardian_only(world):
+    devices, add_key, revoke_key = world
+    add_key(K1)
+    add_key(K2)
+    add_key(K3)
+    devices.register(1, K1, T1)
+    devices.register(1, K2, T2)
+    revoke_key(K2)  # 폐기된 열쇠에 묶인 등록도 같이 지운다
+    devices.register(2, K3, T3)
+
+    assert devices.remove_for_guardian(1) == 2
+
+    assert devices.tokens_for(1) == []
+    assert devices.unregister(1, T1) is False and devices.unregister(1, T2) is False  # 행이 없다
+    assert devices.tokens_for(2) == [T3]
+    assert devices.remove_for_guardian(1) == 0
+
+
 def test_remove_token_deletes_an_unknown_token_quietly(world):
     devices, add_key, _ = world
     add_key(K1)

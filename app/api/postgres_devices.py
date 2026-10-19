@@ -51,6 +51,12 @@ class PostgresDeviceStore:
                 "DELETE FROM guardian_devices WHERE key_hash = %s", (key_hash,)
             ).rowcount
 
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "DELETE FROM guardian_devices WHERE guardian_id = %s", (guardian_id,)
+            ).rowcount
+
     def tokens_for(self, guardian_id: int) -> list[str]:
         with self._pool.connection() as conn:
             rows = conn.execute(

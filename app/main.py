@@ -48,6 +48,7 @@ from app.api.reports import InMemoryReports
 from app.api.calls import DEFAULT_MANUAL_CALLS_PER_DAY
 from app.api.db import check, connect, database_url
 from app.archiver import RecordingArchiver, archiver_from_env
+from app.recordings import recording_deleter_from_env
 from app.api.dialer import answer_url_for, place_scheduled_call, status_callback_url_for
 from app.api.elder_directory import ElderDirectory, InMemoryElderDirectory
 from app.api.guardian_auth import GuardianAuth, InMemoryGuardianKeyStore, KeyAuth
@@ -755,7 +756,9 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
     return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
 
 
-def app_data_for(pool, *, guardian_auth, elders, push_sender=None, email_verifier=None) -> tuple[AppData, AlertRules]:
+def app_data_for(
+    pool, *, guardian_auth, elders, push_sender=None, email_verifier=None, recording_deleter=None
+) -> tuple[AppData, AlertRules]:
     """풀이 있으면 DB 저장소를, 없으면 빈 메모리 저장소를 묶는다.
 
     메모리 모드에는 열쇠도 연결 코드도 만들 방법이 없어 보호자·어르신 주소가 전부 401이다.
@@ -777,6 +780,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None, email_verifie
             invites=InMemoryInviteStore(),
             devices=InMemoryDeviceStore(is_key_active=is_key_active),
             email_verifier=email_verifier,
+            recording_deleter=recording_deleter,
         )
         notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
         return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -809,6 +813,7 @@ def app_data_for(pool, *, guardian_auth, elders, push_sender=None, email_verifie
         devices=PostgresDeviceStore(pool=pool),
         links=PostgresLinkCodeStore(pool=pool),
         email_verifier=email_verifier,
+        recording_deleter=recording_deleter,
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -825,12 +830,17 @@ if _push_sender is None:
 _email_verifier = verifier_from_env(os.environ)
 if _email_verifier is None:
     logger.info("이메일 인증 꺼짐 — FIREBASE_PROJECT_ID가 없다")
+# 녹음 보관기(archiver_from_env)와 같은 버킷 설정을 읽는다. 여기서는 S3에 닿지 않는다(지울 때 처음 닿는다).
+_recording_deleter = recording_deleter_from_env()
+if _recording_deleter is None:
+    logger.info("탈퇴한 어르신의 S3 녹음 삭제 꺼짐 — RECORDINGS_BUCKET이 없다(버킷의 30일 수명 규칙이 지운다)")
 _app_data, _alert_rules = app_data_for(
     _pool,
     guardian_auth=_guardian_auth,
     elders=_elders,
     push_sender=_push_sender,
     email_verifier=_email_verifier,
+    recording_deleter=_recording_deleter,
 )
 
 app = build_server(

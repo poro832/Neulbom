@@ -265,6 +265,20 @@ def test_call_lines_respect_the_limit_and_the_elder(world):
     assert [l.call_id for l in lines] == [5, 4, 3]
 
 
+def test_removing_an_elders_calls_leaves_other_elders(world):
+    world.add_call(call_id=1, elder_id=12, status="completed", created_at=kst(2026, 10, 5, 9), score=10)
+    world.add_call(call_id=2, elder_id=12, status="no_answer", created_at=kst(2026, 10, 6, 9))
+    world.add_call(call_id=3, elder_id=13, status="completed", created_at=kst(2026, 10, 5, 9), score=50)
+
+    assert world.reports.remove_for_elder(12) == 2
+
+    assert world.reports.call_lines(12, 10) == []
+    assert all(d.calls == 0 for d in world.reports.weekly(12, SUNDAY))
+    assert world.reports.baseline_calls(12) == 0
+    assert [l.call_id for l in world.reports.call_lines(13, 10)] == [3]
+    assert world.reports.remove_for_elder(12) == 0
+
+
 # ------------------------------------------------ 상태와 대기 번호
 
 

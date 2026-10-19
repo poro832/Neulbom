@@ -33,6 +33,10 @@ class InviteStore(Protocol):
         """활성 코드의 보호자. 폐기됐거나 모르는 코드면 None."""
         ...
 
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        """그 보호자의 코드를 폐기된 것까지 모두 지운다(탈퇴). 지운 수. Postgres에서는 CASCADE도 같은 일을 한다."""
+        ...
+
 
 class InMemoryInviteStore:
     def __init__(self) -> None:
@@ -54,3 +58,10 @@ class InMemoryInviteStore:
             if row is None or row["revoked"]:
                 return None
             return row["guardian_id"]
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._lock:
+            gone = [h for h, row in self._rows.items() if row["guardian_id"] == guardian_id]
+            for code_hash in gone:
+                del self._rows[code_hash]
+            return len(gone)

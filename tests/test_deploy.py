@@ -160,6 +160,7 @@ APP_PATHS = {
     "/v1/elders/*/monthly",
     "/v1/elders/*/call-time",
     "/v1/guardian/password/reset",
+    "/v1/me",
 }
 
 
@@ -191,6 +192,9 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     assert client.post("/v1/guardian/logout").status_code == 401
     assert client.get("/v1/guardian/me").status_code == 401
     assert client.post("/v1/guardian/password", json={"current": "a", "new": "long-enough-1"}).status_code == 401
+    # 탈퇴는 열쇠 없이는 아무것도 지우지 않는다(어르신은 confirm, 보호자는 비밀번호까지 맞아야 한다)
+    assert client.request("DELETE", "/v1/me", json={"confirm": True}).status_code == 401
+    assert client.request("DELETE", "/v1/guardian/me", json={"password": "x"}).status_code == 401
     # 비밀번호 재설정은 열쇠 대신 방금 받은 Firebase 증명서가 맞아야 한다. 확인기(FIREBASE_PROJECT_ID)가 없는
     # 서버에서는 본문이 맞아도 닫혀 있다(503) — 확인기가 있으면 이 가짜 증명서는 401이다.
     reset = client.post("/v1/guardian/password/reset", json={"id_token": "x" * 30, "new_password": "longenough1"})

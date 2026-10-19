@@ -59,6 +59,14 @@ class AlertStore(Protocol):
         """since(유닉스 시각) 이후 그 어르신께 생긴 알림 수."""
         ...
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        """그 어르신의 알림을 모두 지운다(어르신 탈퇴). 지운 수. Postgres에서는 CASCADE도 같은 일을 한다."""
+        ...
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        """그 보호자에게 간 알림을 모두 지운다(보호자 탈퇴). 지운 수. Postgres에서는 CASCADE도 같은 일을 한다."""
+        ...
+
 
 class InMemoryAlertStore:
     def __init__(self, clock: Callable[[], float] = time.time) -> None:
@@ -105,3 +113,15 @@ class InMemoryAlertStore:
     def count_since(self, elder_id: int, since: float) -> int:
         with self._lock:
             return sum(1 for row in self._rows if row.elder_id == elder_id and row.created_at >= since)
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._lock:
+            before = len(self._rows)
+            self._rows = [row for row in self._rows if row.elder_id != elder_id]
+            return before - len(self._rows)
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._lock:
+            before = len(self._rows)
+            self._rows = [row for row in self._rows if row.guardian_id != guardian_id]
+            return before - len(self._rows)

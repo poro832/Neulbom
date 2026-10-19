@@ -103,6 +103,32 @@ def test_alerts_without_a_call_are_never_deduplicated(make):
     assert raise_one(store) is True
 
 
+def test_removing_an_elders_alerts_leaves_other_elders(make):
+    store, _ = make(Clock())
+    raise_one(store, elder_id=12)
+    raise_one(store, elder_id=12, call_id=1)
+    raise_one(store, elder_id=13)
+
+    assert store.remove_for_elder(12) == 2
+
+    assert [a.elder_id for a in store.recent_for_guardian(1, 10)] == [13]
+    assert store.count_since(12, 0) == 0
+    assert store.remove_for_elder(12) == 0
+
+
+def test_removing_a_guardians_alerts_leaves_other_guardians(make):
+    store, _ = make(Clock())
+    raise_one(store, elder_id=12, guardian_id=1)
+    raise_one(store, elder_id=13, guardian_id=1)
+    raise_one(store, elder_id=14, guardian_id=2)
+
+    assert store.remove_for_guardian(1) == 2
+
+    assert store.recent_for_guardian(1, 10) == []
+    assert [a.elder_id for a in store.recent_for_guardian(2, 10)] == [14]
+    assert store.remove_for_guardian(1) == 0
+
+
 def test_count_since_counts_only_that_elders_recent_alerts(make):
     clock = Clock()
     store, _ = make(clock)

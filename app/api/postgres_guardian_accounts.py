@@ -107,3 +107,25 @@ class PostgresGuardianAccounts:
                 (email, password_hash, guardian_id),
             )
             return cur.rowcount == 1
+
+    def delete(self, guardian_id: int) -> bool:
+        """guardian_keys·guardian_devices·guardian_invites·alerts·transcript_views는 CASCADE로 같이 지워지고
+        calls.requested_by_guardian_id는 NULL이 된다.
+
+        **반드시 먼저 ElderDirectory.detach_all_from을 부른다.** elders.guardian_id도 ON DELETE CASCADE라, 남은
+        어르신이 있으면 어르신과 그 통화·연락처까지 지워진다. 그래서 어르신이 하나라도 남아 있으면 지우지 않는다.
+        행을 먼저 잠근다 — 그 사이 이 보호자에게 어르신을 붙이는 쓰기(외래 키 확인이 이 행을 잠근다)가 있으면 끝나기를
+        기다렸다가 새로 본 상태로 확인하고, 잠근 뒤에 붙이려는 쓰기는 이 삭제가 끝나면 외래 키 오류로 실패한다.
+        """
+        with self._pool.connection() as conn:
+            locked = conn.execute(
+                "SELECT 1 FROM guardians WHERE guardian_id = %s FOR UPDATE", (guardian_id,)
+            ).fetchone()
+            if locked is None:
+                return False
+            cur = conn.execute(
+                "DELETE FROM guardians g WHERE g.guardian_id = %s "
+                "AND NOT EXISTS (SELECT 1 FROM elders e WHERE e.guardian_id = g.guardian_id)",
+                (guardian_id,),
+            )
+            return cur.rowcount == 1

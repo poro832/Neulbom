@@ -245,6 +245,42 @@ def test_mentions_reject_values_outside_the_rules_and_change_nothing(setup):
     assert store.mentions([CALL]) == {CALL: [M_BODY]}
 
 
+def own_call(store, call_id, elder_id):
+    """그 어르신의 통화를 하나 더 만든다. 메모리는 주인만 적고, Postgres는 통화 행을 넣는다."""
+    if isinstance(store, InMemoryCallContent):
+        store.set_owner(call_id, elder_id)
+        return
+    from tests.pg_helpers import insert_call
+
+    insert_call(store._pool, call_id=call_id, elder_id=elder_id, status="completed", created_at=START)
+
+
+def test_removing_an_elders_content_leaves_other_elders(setup):
+    store, _ = setup
+    other = 2
+    own_call(store, other, 13)
+    for call_id in (CALL, other):
+        store.save_turns(call_id, [("ai", "a"), ("elder", "b")])
+        store.save_summary(call_id, "요약", "m")
+        store.save_medication(call_id, "taken", "m")
+        store.save_mentions(call_id, [M_BODY], "m")
+        store.record_view(call_id, 1)
+    store.agree_share(12)
+    store.agree_share(13)
+
+    # 대화 2줄 + 요약 + 복용 확인 + 언급 1개 + 열람 1번
+    assert store.remove_for_elder(12) == 6
+
+    assert store.turns(CALL) == [] and store.calls_with_turns([CALL]) == set()
+    assert store.summaries([CALL]) == {} and store.medication([CALL]) == {} and store.mentions([CALL]) == {}
+    assert store.view_count(CALL) == 0
+    assert store.share_agreed(12) is False
+    assert len(store.turns(other)) == 2 and store.summaries([other]) == {other: "요약"}
+    assert store.medication([other]) == {other: "taken"} and store.mentions([other]) == {other: [M_BODY]}
+    assert store.view_count(other) == 1 and store.share_agreed(13) is True
+    assert store.remove_for_elder(12) == 0
+
+
 def test_purge_removes_old_mentions_and_keeps_recent(setup):
     store, clock = setup
     store.save_mentions(CALL, [M_BODY, M_SLEEP], "m")

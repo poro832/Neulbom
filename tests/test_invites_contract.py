@@ -72,6 +72,20 @@ def test_issuing_again_revokes_the_previous_code_of_the_same_guardian_only(store
     assert store.find_guardian(hash_invite_code("22222222")) == 2
 
 
+def test_removing_a_guardians_codes_deletes_them_and_leaves_other_guardians(store):
+    store.issue(1, hash_invite_code("11111111"))
+    store.issue(1, hash_invite_code("33333333"))  # 앞 코드는 폐기된 채 남아 있다
+    store.issue(2, hash_invite_code("22222222"))
+
+    assert store.remove_for_guardian(1) == 2
+
+    assert store.find_guardian(hash_invite_code("33333333")) is None
+    assert store.find_guardian(hash_invite_code("22222222")) == 2
+    assert store.remove_for_guardian(1) == 0
+    store.issue(2, hash_invite_code("11111111"))  # 폐기가 아니라 삭제다 — 같은 지문을 다시 낼 수 있다
+    assert store.find_guardian(hash_invite_code("11111111")) == 2
+
+
 def test_the_same_hash_cannot_be_issued_twice(store):
     store.issue(1, hash_invite_code("11111111"))
 

@@ -81,6 +81,13 @@ class CallContentStore(Protocol):
         """cutoff(유닉스 시각)보다 먼저 저장된 턴·요약을 지운다. 지운 행 수를 돌려준다."""
         ...
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        """그 어르신 통화의 대화·요약·복용 확인·언급·열람 기록을 지우고 공유 동의를 거둔다(탈퇴). 지운 행 수.
+
+        Postgres에서는 어르신 행을 지우면 CASCADE가 같은 일을 한다 — 메모리 모드에서도 결과가 같도록 둔다.
+        """
+        ...
+
 
 class InMemoryCallContent:
     def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
@@ -171,4 +178,18 @@ class InMemoryCallContent:
                 removed += 1
             for call_id in [c for c, (_, at) in self._mentions.items() if at < cutoff]:
                 removed += len(self._mentions.pop(call_id)[0])
+        return removed
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        removed = 0
+        with self._lock:
+            for call_id in [c for c, owner in self._owners.items() if owner == elder_id]:
+                turns = self._turns.pop(call_id, None)
+                removed += 0 if turns is None else len(turns[0])
+                removed += self._summaries.pop(call_id, None) is not None
+                removed += self._medication.pop(call_id, None) is not None
+                mentions = self._mentions.pop(call_id, None)
+                removed += 0 if mentions is None else len(mentions[0])
+                removed += self._views.pop(call_id, 0)
+            self._shared.discard(elder_id)
         return removed

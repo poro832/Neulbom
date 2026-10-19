@@ -44,6 +44,10 @@ class PostgresElderKeyStore:
             ).fetchone()
         return None if row is None else row[0]
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM elder_keys WHERE elder_id = %s", (elder_id,)).rowcount
+
     def reset_for_tests(self) -> None:
         """규약 테스트용. 원격 DB에서는 거부한다(app/api/db.py)."""
         assert_local()

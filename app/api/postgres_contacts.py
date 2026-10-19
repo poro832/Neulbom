@@ -39,3 +39,7 @@ class PostgresContactStore:
                 (elder_id, contact_id),
             ).rowcount
         return deleted == 1
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM contacts WHERE elder_id = %s", (elder_id,)).rowcount

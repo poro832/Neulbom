@@ -39,6 +39,10 @@ class ContactStore(Protocol):
         """그 어르신의 연락처일 때만 지우고 True. 남의 것이거나 없으면 False."""
         ...
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        """그 어르신의 연락처를 모두 지운다(탈퇴). 지운 수. Postgres에서는 CASCADE도 같은 일을 한다."""
+        ...
+
 
 class InMemoryContactStore:
     def __init__(self) -> None:
@@ -67,3 +71,7 @@ class InMemoryContactStore:
                     del rows[index]
                     return True
             return False
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._lock:
+            return len(self._rows.pop(elder_id, []))

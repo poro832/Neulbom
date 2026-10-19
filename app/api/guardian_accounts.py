@@ -69,6 +69,15 @@ class GuardianAccounts(Protocol):
         """운영 도구가 만든 보호자에게 이메일과 비밀번호를 붙인다(열린 상태가 된다). 보호자가 없으면 False."""
         ...
 
+    def delete(self, guardian_id: int) -> bool:
+        """보호자 계정을 지운다(탈퇴). 지웠으면 True, 없으면 False. 이메일은 다시 가입할 수 있게 풀린다.
+
+        **반드시 ElderDirectory.detach_all_from을 먼저 부른다.** Postgres에서는 열쇠·폰 등록·개인 코드·알림이
+        CASCADE로 같이 지워지는데, elders.guardian_id도 CASCADE라 연결된 어르신이 남아 있으면 어르신까지 지워진다.
+        그래서 Postgres 구현은 어르신이 하나라도 남아 있으면 지우지 않고 False다(안전장치).
+        """
+        ...
+
 
 class InMemoryGuardianAccounts:
     def __init__(self) -> None:
@@ -139,3 +148,8 @@ class InMemoryGuardianAccounts:
                 self._rows[guardian_id], email=email, password_hash=password_hash, activated=True, email_verified=True
             )
             return True
+
+    def delete(self, guardian_id: int) -> bool:
+        # 메모리 계정 표는 어르신을 모른다(CASCADE가 없다). 그래도 호출 순서는 Postgres와 같게 한다.
+        with self._lock:
+            return self._rows.pop(guardian_id, None) is not None

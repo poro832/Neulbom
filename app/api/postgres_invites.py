@@ -28,3 +28,9 @@ class PostgresInviteStore:
                 (code_hash,),
             ).fetchone()
         return None if row is None else row[0]
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "DELETE FROM guardian_invites WHERE guardian_id = %s", (guardian_id,)
+            ).rowcount
