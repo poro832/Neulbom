@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:eldercare/screens/elderly_home_page.dart';
@@ -267,6 +268,32 @@ void main() {
       expect(deleteCalls, 0);
     });
 
+    testWidgets('삭제 요청이 가는 동안 뒤로가기를 눌러도 대화상자가 닫히지 않고, 끝나면 처음 화면으로 간다', (tester) async {
+      AuthService.firebaseAccountDeleter = ({String? knownPassword, String? email}) async {};
+      final gate = Completer<void>();
+      await openScreen(tester, MockClient((request) async {
+        if (request.method == 'DELETE') {
+          await gate.future; // 서버 응답이 아직 안 왔다
+          return noContent();
+        }
+        return json(me);
+      }));
+
+      await tester.enterText(find.byKey(const Key('delete-password')), 'correct-horse-1');
+      await tester.tap(find.text('삭제'));
+      await tester.pump();
+      await tester.binding.handlePopRoute(); // 안드로이드 뒤로가기
+      await tester.pump();
+
+      expect(find.byKey(const Key('delete-password')), findsOneWidget); // 아직 열려 있다
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RoleSelectionScreen), findsOneWidget);
+      expect(NulbomApi.guardianKey, '');
+    });
+
     testWidgets('취소하면 아무 일도 일어나지 않는다', (tester) async {
       var deleteCalls = 0;
       await openScreen(tester, MockClient((request) async {
@@ -345,6 +372,44 @@ void main() {
 
       expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
       expect(await NulbomApi.elderKey(), 'nle_saved');
+    });
+
+    testWidgets('지우는 동안 뒤로가기를 눌러도 화면을 떠나지 않고, 끝나면 로그인 화면으로 간다', (tester) async {
+      final gate = Completer<void>();
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved', 'ai_friend_name': '봄이'});
+      NulbomApi.client = MockClient((request) async {
+        if (request.method == 'DELETE' && request.url.path == '/v1/me') {
+          await gate.future;
+          return noContent();
+        }
+        if (request.url.path == '/v1/me/calls') return json({'calls': []});
+        if (request.url.path == '/v1/me/contacts') return json({'guardians': [], 'contacts': []});
+        return json({'detail': 'x'}, 404);
+      });
+      await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage()));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('탈퇴하기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('계속'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('탈퇴하기').last);
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget); // 진행 표시가 그대로다
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ElderlyLoginScreen), findsOneWidget);
+      expect(await NulbomApi.elderKey(), isNull);
     });
 
     testWidgets('서버가 거절하면 문장을 보이고 어르신 화면에 남는다', (tester) async {

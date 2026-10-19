@@ -218,7 +218,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
+        // 삭제 요청이 가는 동안은 뒤로가기로도 닫지 못하게 한다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
+        builder: (context, setLocal) => PopScope(
+          canPop: !busy,
+          child: AlertDialog(
           backgroundColor: eCard,
           title: Text(
             '계정 삭제',
@@ -285,6 +288,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               child: const Text('삭제', style: TextStyle(color: Color(0xFFF44336))),
             ),
           ],
+        ),
         ),
       ),
     );
