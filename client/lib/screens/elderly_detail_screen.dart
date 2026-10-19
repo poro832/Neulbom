@@ -276,7 +276,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   Widget _buildRealStatRow(String callsSubtitle) {
     final loading = _statsLoading;
-    final hint = loading || _statsError != null ? null : _baselineHint(_baselineCalls);
+    final hint = loading || _statsError != null
+        ? null
+        : _baselineHint(_baselineCalls);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -290,41 +292,72 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             ),
           ),
         // 부제 길이가 달라도 세 카드의 높이를 맞춘다.
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: _buildStatCard(
-                  title: '평소와 다른 정도',
-                  value: loading || _statScore == null ? '-' : '${_shown(_statScore!)}점',
-                  subtitle: _isDaily ? '낮을수록 평소와 같아요' : '평균 · 낮을수록 평소와 같아요',
-                  // 평균 숫자는 평균 자신의 구간 색으로 칠한다(차트 범례와 같게). 상태 카드가 가장 높았던 날을 맡는다.
-                  color: _colorFor(_statScore),
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // 제목이 줄바꿈돼도 모든 카드의 수치가 같은 높이에서 시작한다.
+            final titleWidth = ((constraints.maxWidth - 16) / 3 - 30).clamp(
+              1.0,
+              double.infinity,
+            );
+            final titleStyle = DefaultTextStyle.of(context).style.merge(
+              const TextStyle(
+                fontSize: 12,
+                color: eInkSoft,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildStatCard(
-                  title: '통화 횟수',
-                  value: loading ? '-' : '$_statCalls회',
-                  subtitle: callsSubtitle,
-                  color: eAccent,
-                ),
+            );
+            var titleHeight = 0.0;
+            for (final title in ['평소와 다른 정도', '통화 횟수', '상태']) {
+              final painter = TextPainter(
+                text: TextSpan(text: title, style: titleStyle),
+                textDirection: Directionality.of(context),
+                textScaler: MediaQuery.textScalerOf(context),
+              )..layout(maxWidth: titleWidth);
+              if (painter.height > titleHeight) titleHeight = painter.height;
+              painter.dispose();
+            }
+            return IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _buildStatCard(
+                      title: '평소와 다른 정도',
+                      titleHeight: titleHeight,
+                      value: loading || _statScore == null
+                          ? '-'
+                          : '${_shown(_statScore!)}점',
+                      subtitle: _isDaily ? '낮을수록 평소와 같아요' : '평균 · 낮을수록 평소와 같아요',
+                      // 평균 숫자는 평균 자신의 구간 색으로 칠한다(차트 범례와 같게). 상태 카드가 가장 높았던 날을 맡는다.
+                      color: _colorFor(_statScore),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildStatCard(
+                      title: '통화 횟수',
+                      titleHeight: titleHeight,
+                      value: loading ? '-' : '$_statCalls회',
+                      subtitle: callsSubtitle,
+                      color: eAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildStatCard(
+                      title: '상태',
+                      titleHeight: titleHeight,
+                      value: loading ? '-' : _statusLabel,
+                      subtitle: _isDaily
+                          ? '30점부터 주의, 60점부터 경보'
+                          : '가장 높았던 날 기준 · 30점부터 주의, 60점부터 경보',
+                      color: _statusColor,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildStatCard(
-                  title: '상태',
-                  value: loading ? '-' : _statusLabel,
-                  subtitle: _isDaily
-                      ? '30점부터 주의, 60점부터 경보'
-                      : '가장 높았던 날 기준 · 30점부터 주의, 60점부터 경보',
-                  color: _statusColor,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
         if (hint != null) ...[
           const SizedBox(height: 8),
@@ -336,7 +369,11 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               Expanded(
                 child: Text(
                   hint,
-                  style: const TextStyle(fontSize: 12, color: eInkSoft, height: 1.5),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: eInkSoft,
+                    height: 1.5,
+                  ),
                 ),
               ),
             ],
@@ -1343,6 +1380,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   Widget _buildStatCard({
     required String title,
+    double? titleHeight,
     required String value,
     required String subtitle,
     required Color color,
@@ -1355,14 +1393,18 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       ),
       padding: const EdgeInsets.all(14),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 12,
-              color: eInkSoft,
-              fontWeight: FontWeight.w600,
+          SizedBox(
+            height: titleHeight,
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 12,
+                color: eInkSoft,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           const SizedBox(height: 8),

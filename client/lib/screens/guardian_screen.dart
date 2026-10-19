@@ -721,6 +721,8 @@ class _GuardianScreenState extends State<GuardianScreen> {
   }
 
   Widget _buildElderCard(BuildContext context, Map<String, dynamic> elder) {
+    final hasTalked = elder['hasTalked'] as bool;
+    const pendingColor = Color(0xFFFF0000);
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -748,13 +750,13 @@ class _GuardianScreenState extends State<GuardianScreen> {
               height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: elder['hasTalked']
+                color: hasTalked
                     ? const Color(0xFF4CAF50).withOpacity(0.1)
                     : const Color(0xFFFFA726).withOpacity(0.1),
               ),
               child: Icon(
                 Icons.person_rounded,
-                color: elder['hasTalked']
+                color: hasTalked
                     ? const Color(0xFF4CAF50)
                     : const Color(0xFFFFA726),
                 size: 24,
@@ -765,7 +767,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         elder['name'],
@@ -775,25 +780,37 @@ class _GuardianScreenState extends State<GuardianScreen> {
                           color: eInk,
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
+                          horizontal: 8,
+                          vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: elder['hasTalked']
+                          color: hasTalked
                               ? const Color(0xFF4CAF50)
-                              : const Color(0xFFFFA726),
-                          borderRadius: BorderRadius.circular(4),
+                              : pendingColor,
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Text(
-                          elder['hasTalked'] ? '완료' : '미완료',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!hasTalked) ...[
+                              const Icon(
+                                Icons.schedule_rounded,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Text(
+                              hasTalked ? '완료' : '미완료',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
