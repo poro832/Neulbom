@@ -757,7 +757,14 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
 
 
 def app_data_for(
-    pool, *, guardian_auth, elders, push_sender=None, email_verifier=None, recording_deleter=None
+    pool,
+    *,
+    guardian_auth,
+    elders,
+    push_sender=None,
+    email_verifier=None,
+    recording_deleter=None,
+    recordings_dir: Path | None = None,
 ) -> tuple[AppData, AlertRules]:
     """풀이 있으면 DB 저장소를, 없으면 빈 메모리 저장소를 묶는다.
 
@@ -781,6 +788,7 @@ def app_data_for(
             devices=InMemoryDeviceStore(is_key_active=is_key_active),
             email_verifier=email_verifier,
             recording_deleter=recording_deleter,
+            recordings_dir=recordings_dir,
         )
         notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
         return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -814,6 +822,7 @@ def app_data_for(
         links=PostgresLinkCodeStore(pool=pool),
         email_verifier=email_verifier,
         recording_deleter=recording_deleter,
+        recordings_dir=recordings_dir,
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
@@ -841,6 +850,8 @@ _app_data, _alert_rules = app_data_for(
     push_sender=_push_sender,
     email_verifier=_email_verifier,
     recording_deleter=_recording_deleter,
+    # 아래 build_server가 녹음을 쓰고 보관기가 훑는 폴더와 같다 — 탈퇴하면 그 어르신의 남은 파일을 지운다.
+    recordings_dir=RECORDINGS_DIR,
 )
 
 app = build_server(

@@ -345,7 +345,7 @@ def test_detaching_a_guardians_elders_unlinks_them_and_keeps_their_data(director
     theirs = make_pending(directory, guardian_id=other, phone="010-9999-2222")
     directory.set_call_time(13, 1, time(7, 30))
 
-    assert directory.detach_all_from(1) == 2
+    assert directory.detach_all_from(1) == [12, 13]  # 푼 어르신 번호(오름차순) — 그 어르신들의 안 쓴 연결 코드를 지운다
 
     for elder_id, name in ((12, "어르신 12"), (13, "어르신 13")):
         access = directory.get(elder_id)
@@ -356,8 +356,8 @@ def test_detaching_a_guardians_elders_unlinks_them_and_keeps_their_data(director
     assert directory.elders_of(1) == []
     # 다른 보호자의 어르신은 그대로다
     assert directory.get(theirs).guardian_id == other and directory.get(theirs).status == "pending"
-    assert directory.detach_all_from(1) == 0
-    assert directory.detach_all_from(99999) == 0
+    assert directory.detach_all_from(1) == []
+    assert directory.detach_all_from(99999) == []
 
 
 def test_a_detached_elder_who_agreed_can_be_linked_by_another_guardian(directory):

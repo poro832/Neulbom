@@ -167,7 +167,7 @@ def test_postgres_refuses_to_delete_a_guardian_who_still_has_elders():
     with pool.connection() as conn:
         assert conn.execute("SELECT count(*) FROM elders WHERE elder_id IN (12, 13)").fetchone()[0] == 2
 
-    assert PostgresElderDirectory(pool=pool).detach_all_from(1) == 2
+    assert PostgresElderDirectory(pool=pool).detach_all_from(1) == [12, 13]
     assert accounts.delete(1) is True
     with pool.connection() as conn:
         assert conn.execute("SELECT count(*) FROM elders WHERE elder_id IN (12, 13)").fetchone()[0] == 2

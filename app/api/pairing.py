@@ -12,7 +12,7 @@ import hmac
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 CODE_DIGITS = 6
@@ -37,6 +37,13 @@ class PairingStore(Protocol):
         """맞으면 코드를 소진하고 True. 틀리면 False이고 활성 코드의 실패 횟수를 올린다.
 
         만료됐거나, 이미 썼거나, 틀린 횟수가 한도에 닿은 코드는 맞아도 False다.
+        """
+        ...
+
+    def remove_unused_for(self, elder_ids: Sequence[int]) -> int:
+        """그 어르신들의 아직 안 쓴 코드를 지운다(보호자 탈퇴 — 그 보호자가 내준 코드로 폰을 잇지 못하게). 지운 수.
+
+        이미 쓴(또는 새 코드로 무효가 된) 코드는 기록으로 남긴다. 어르신은 지우지 않으므로 CASCADE가 하지 않는 일이다.
         """
         ...
 
@@ -83,3 +90,14 @@ class InMemoryPairingStore:
                 return True
             active["failed"] += 1
             return False
+
+    def remove_unused_for(self, elder_ids: Sequence[int]) -> int:
+        removed = 0
+        with self._lock:
+            for elder_id in set(elder_ids):
+                rows = self._rows.get(elder_id, [])
+                kept = [row for row in rows if row["used"]]
+                removed += len(rows) - len(kept)
+                if elder_id in self._rows:
+                    self._rows[elder_id] = kept
+        return removed

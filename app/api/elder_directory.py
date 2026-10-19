@@ -142,9 +142,10 @@ class ElderDirectory(Protocol):
 
     # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
 
-    def detach_all_from(self, guardian_id: int) -> int:
-        """보호자 탈퇴: 그 보호자의 어르신을 **지우지 않고** 연결 전으로 돌린다(보호자·전화 동의를 비운다). 돌린 수.
+    def detach_all_from(self, guardian_id: int) -> list[int]:
+        """보호자 탈퇴: 그 보호자의 어르신을 **지우지 않고** 연결 전으로 돌린다(보호자·전화 동의를 비운다).
 
+        돌린 어르신 번호를 오름차순으로 돌려준다 — 호출부가 그 어르신들의 안 쓴 연결 코드(그 보호자가 내준 것)를 지운다.
         안부 전화가 멈춘다. 가입 동의(agreed_at)·공유 동의·통화 시각·통화 기록은 그대로라, 가입 동의가 있는
         어르신은 새 연결 코드로 다른 보호자가 이어받을 수 있다.
         """
@@ -322,12 +323,12 @@ class InMemoryElderDirectory:
             self._call_times[elder_id] = value
             return True
 
-    def detach_all_from(self, guardian_id: int) -> int:
+    def detach_all_from(self, guardian_id: int) -> list[int]:
         with self._lock:
-            mine = [eid for eid, access in self._entries.items() if access.guardian_id == guardian_id]
+            mine = sorted(eid for eid, access in self._entries.items() if access.guardian_id == guardian_id)
             for eid in mine:
                 self._entries[eid] = replace(self._entries[eid], guardian_id=None, consenting=False)
-            return len(mine)
+            return mine
 
     def delete_elder(self, elder_id: int) -> bool:
         with self._lock:

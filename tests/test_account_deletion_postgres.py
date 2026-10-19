@@ -106,6 +106,11 @@ def seed_everything(pool):
                 "INSERT INTO elder_link_codes (elder_id, code_hash, expires_at) VALUES (%s, %s, now() + interval '1 hour')",
                 (elder_id, f"link-{elder_id}"),
             )
+        # 어르신 12에게는 이미 쓴 연결 코드도 하나 있다(기록 — 보호자 탈퇴가 지우지 않는다)
+        conn.execute(
+            "INSERT INTO elder_pairings (elder_id, code_hash, expires_at, used_at) "
+            "VALUES (12, 'pair-12-used', now(), now())"
+        )
         for guardian_id in (1, 2):
             conn.execute(
                 "INSERT INTO guardian_devices (token, guardian_id, key_hash) VALUES (%s, %s, 'h')",
@@ -148,6 +153,13 @@ def counts_for_guardian(pool, guardian_id):
         }
 
 
+def unused_pairings(pool, elder_id):
+    with pool.connection() as conn:
+        return conn.execute(
+            "SELECT count(*) FROM elder_pairings WHERE elder_id = %s AND used_at IS NULL", (elder_id,)
+        ).fetchone()[0]
+
+
 def elder_row(pool, elder_id):
     with pool.connection() as conn:
         return conn.execute(
@@ -172,11 +184,15 @@ def test_a_guardian_withdrawal_keeps_every_elder_row_and_its_data():
         # 통화를 누가 눌렀는지는 비워지고 통화는 남는다
         assert conn.execute("SELECT requested_by_guardian_id FROM calls WHERE call_id = 1").fetchone() == (None,)
     assert counts_for_guardian(pool, 1) == dict.fromkeys(PER_GUARDIAN, 0)
-    # 어르신 12·13은 연결 전으로 남고, 그 데이터도 남는다(보호자에게 간 알림만 같이 지워진다)
+    # 어르신 12·13은 연결 전으로 남고, 그 데이터도 남는다. 보호자에게 간 알림과, 그 보호자가 내준 안 쓴 연결 코드만
+    # 지워진다(이미 쓴 코드는 기록으로 남는다).
     assert elder_row(pool, 12) == (None, False, "어르신 12", "070-1111-2222")
     assert elder_row(pool, 13) == (None, False, "어르신 13", "070-3333-4444")
-    for elder_id in (12, 13):
-        assert counts_for_elder(pool, elder_id) == {**before[elder_id], "alerts": 0}
+    assert before[12]["elder_pairings"] == 2 and before[13]["elder_pairings"] == 1
+    for elder_id, used in ((12, 1), (13, 0)):
+        assert counts_for_elder(pool, elder_id) == {**before[elder_id], "alerts": 0, "elder_pairings": used}
+        assert unused_pairings(pool, elder_id) == 0
+    assert unused_pairings(pool, 14) == 1
     assert counts_for_call(pool, 1) == {**dict.fromkeys(PER_CALL, 1), "transcript_views": 0}
     # 다른 보호자와 그 어르신은 그대로다
     assert elder_row(pool, 14) == (2, True, "어르신 14", "070-5555-6666")
@@ -198,6 +214,7 @@ def test_the_operator_tool_deletes_a_guardian_without_touching_the_elders():
     from app.api.postgres_devices import PostgresDeviceStore
     from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
     from app.api.postgres_invites import PostgresInviteStore
+    from app.api.postgres_pairing import PostgresPairingStore
 
     client, pool, data, guardian_keys, elder_keys, deleter = make()
     seed_everything(pool)
@@ -206,14 +223,26 @@ def test_the_operator_tool_deletes_a_guardian_without_touching_the_elders():
     code = run(
         ["guardian", "delete", "1", "--yes"], keys=PostgresGuardianKeyStore(pool=pool), directory=data.elders,
         accounts=data.accounts, devices=PostgresDeviceStore(pool=pool), invites=PostgresInviteStore(pool=pool),
-        out=lines.append, err=lines.append,
+        pairings=PostgresPairingStore(pool=pool), out=lines.append, err=lines.append,
     )
 
     assert code == 0, lines
     assert elder_row(pool, 12)[0] is None and elder_row(pool, 13)[0] is None
     assert counts_for_elder(pool, 12)["calls"] == 1
     assert counts_for_guardian(pool, 1) == dict.fromkeys(PER_GUARDIAN, 0)
+    assert unused_pairings(pool, 12) == 0 and unused_pairings(pool, 13) == 0 and unused_pairings(pool, 14) == 1
     assert elder_row(pool, 14) == (2, True, "어르신 14", "070-5555-6666")
+    pool.close()
+
+
+def test_a_pairing_code_issued_before_the_withdrawal_cannot_pair_a_phone_afterwards():
+    client, pool, data, guardian_keys, elder_keys, deleter = make()
+    code = client.post("/v1/elders/12/pairing-code", headers=guardian_keys[1]).json()["code"]
+
+    assert client.request("DELETE", "/v1/guardian/me", json={"password": PASSWORD}, headers=guardian_keys[1]).status_code == 204
+
+    assert client.post("/v1/pair", json={"code": code, "phone": "070-1111-2222"}).status_code == 401
+    assert unused_pairings(pool, 12) == 0
     pool.close()
 
 

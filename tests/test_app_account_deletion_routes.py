@@ -15,7 +15,9 @@ from app.api.call_content import Mention
 from app.api.elder_directory import ElderAccess
 from app.api.guardian_auth import generate_key, hash_key, parse_bearer
 from app.api.invites import hash_invite_code
+from app.api.pairing import hash_code, new_code
 from app.api.passwords import hash_password
+from app.archiver import MARKER_SUFFIX
 from tests.app_data_helpers import kst, make_app_kit
 
 ME = "/v1/guardian/me"
@@ -206,6 +208,20 @@ def test_the_personal_code_the_phones_and_the_alerts_go_with_the_account():
     assert signup.status_code == 401  # 그 코드로는 더 이상 가입할 수 없다
 
 
+def test_pairing_codes_the_guardian_issued_stop_working_after_withdrawal():
+    """탈퇴 전에 내준 연결 코드(6자리)로 어르신 폰을 잇지 못한다 — 남은 코드를 가진 사람이 어르신 열쇠를 받지 못하게."""
+    w = GuardianWorld()
+    mine = w.kit.client.post("/v1/elders/12/pairing-code", headers=w.kit.guardian_headers).json()["code"]
+    theirs = w.kit.client.post("/v1/elders/14/pairing-code", headers=w.other).json()["code"]
+
+    assert w.withdraw().status_code == 204
+
+    voided = w.kit.client.post("/v1/pair", json={"code": mine, "phone": "070-1111-2222"})
+    assert voided.status_code == 401 and voided.json() == {"detail": "연결 코드를 확인해 주세요"}
+    # 다른 보호자가 내준 코드는 그대로다
+    assert w.kit.client.post("/v1/pair", json={"code": theirs, "phone": "070-5555-6666"}).status_code == 200
+
+
 def test_the_same_email_can_sign_up_again_as_a_fresh_account():
     w = GuardianWorld()
     assert w.withdraw().status_code == 204
@@ -274,6 +290,8 @@ def test_an_elder_attached_at_the_last_moment_is_unlinked_too_never_deleted():
             late["id"] = data.elders.create_pending(
                 guardian_id=1, name="늦게 온 어르신", phone="010-4444-5555", max_pending=5
             )
+            late["code"] = new_code()
+            data.pairings.issue(late["id"], hash_code(late["code"]))
             return False
         return real_delete(guardian_id)
 
@@ -284,6 +302,9 @@ def test_an_elder_attached_at_the_last_moment_is_unlinked_too_never_deleted():
     assert data.accounts.profile(1) is None
     access = data.elders.get(late["id"])
     assert access is not None and access.status == "unlinked"
+    # 다시 푼 어르신의 안 쓴 연결 코드도 지워졌다
+    paired = w.kit.client.post("/v1/pair", json={"code": late["code"], "phone": "010-4444-5555"})
+    assert paired.status_code == 401
 
 
 def test_an_account_that_still_cannot_be_deleted_is_a_503_not_a_success():
@@ -468,6 +489,67 @@ def test_an_elder_with_no_recordings_does_not_call_the_deleter(caplog):
     assert r.status_code == 204
     assert deleter.calls == []
     assert "녹음=0개 삭제시도 실패=0" in caplog.text
+
+
+def test_the_recordings_still_on_the_server_disk_are_removed_too(tmp_path, caplog):
+    """보관기는 올린 뒤 24시간(못 올렸으면 30일) 로컬에 둔다. 남겨 두면 안 올린 녹음이 탈퇴 뒤에 S3로 올라간다."""
+    deleter = FakeDeleter()
+    w = ElderWorld(deleter)
+    folder = tmp_path / "recordings"
+    folder.mkdir()
+    w.kit.data.recordings_dir = folder
+    for name in (A, A + MARKER_SUFFIX, B, C, C + MARKER_SUFFIX):  # B는 아직 못 올렸다(표시 없음)
+        (folder / name).write_bytes(b"RIFF")
+
+    with caplog.at_level(logging.DEBUG):
+        assert w.withdraw().status_code == 204
+
+    assert not (folder / A).exists() and not (folder / (A + MARKER_SUFFIX)).exists() and not (folder / B).exists()
+    assert (folder / C).exists() and (folder / (C + MARKER_SUFFIX)).exists()  # 다른 어르신의 녹음은 그대로다
+    assert "서버 파일 삭제=2개" in caplog.text
+    assert A not in caplog.text and B not in caplog.text
+
+
+def test_a_recording_key_that_is_not_a_plain_file_name_never_touches_other_paths(tmp_path):
+    w = ElderWorld(FakeDeleter())
+    folder = tmp_path / "recordings"
+    (folder / "sub").mkdir(parents=True)
+    w.kit.data.recordings_dir = folder
+    outside = tmp_path / "outside.wav"
+    nested = folder / "sub" / "x.wav"
+    for path in (outside, nested):
+        path.write_bytes(b"RIFF")
+    for key in ("../outside.wav", "sub/x.wav", "..", "."):
+        w.kit.data.elders.add_audio_key(12, key)
+
+    assert w.withdraw().status_code == 204
+
+    assert outside.exists() and nested.exists() and folder.is_dir()
+    assert w.kit.data.elders.get(12) is None
+
+
+def test_a_local_file_that_cannot_be_removed_never_stops_the_deletion(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+
+    w = ElderWorld(FakeDeleter())
+    folder = tmp_path / "recordings"
+    folder.mkdir()
+    w.kit.data.recordings_dir = folder
+    (folder / A).write_bytes(b"RIFF")
+    real_unlink = Path.unlink
+
+    def refuse(self, *args, **kwargs):
+        if self.name == A:
+            raise PermissionError(f"거부 {self}")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+
+    with caplog.at_level(logging.DEBUG):
+        assert w.withdraw().status_code == 204
+
+    assert w.kit.data.elders.get(12) is None
+    assert A not in caplog.text  # 파일 이름(키)은 로그에 남기지 않는다
 
 
 @pytest.mark.parametrize(

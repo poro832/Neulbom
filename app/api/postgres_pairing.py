@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from app.api.pairing import CODE_TTL_SECONDS, MAX_FAILED_ATTEMPTS
 
@@ -65,3 +65,12 @@ class PostgresPairingStore:
                 (pairing_id,),
             )
             return False
+
+    def remove_unused_for(self, elder_ids: Sequence[int]) -> int:
+        if not elder_ids:
+            return 0
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "DELETE FROM elder_pairings WHERE elder_id = ANY(%s) AND used_at IS NULL",
+                (list(elder_ids),),
+            ).rowcount

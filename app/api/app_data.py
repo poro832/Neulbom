@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from datetime import time as time_of_day
+from pathlib import Path as PathType  # fastapi.Path(주소 인자)와 이름이 겹친다
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, Field, StrictBool, field_validator
@@ -158,6 +159,8 @@ class AppData:
     password_reset_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
     # 어르신 탈퇴 때 S3 녹음을 지운다(RECORDINGS_BUCKET이 없으면 None — 녹음은 버킷의 30일 수명 규칙에 맡긴다).
     recording_deleter: RecordingDeleter | None = None
+    # 어르신 탈퇴 때 서버 디스크에 남은 녹음 파일도 지운다(보관기가 쓰는 폴더). None이면 건드리지 않는다.
+    recordings_dir: PathType | None = None
 
 
 def iso_kst(epoch: float) -> str:
@@ -873,6 +876,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 elders=data.elders,
                 accounts=data.accounts,
                 keys=key_store(),
+                pairings=data.pairings,
                 devices=data.devices,
                 invites=data.invites,
                 alerts=data.alerts,
@@ -884,8 +888,8 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.delete("/v1/me")
     @guarded
     def withdraw_elder_me(body: ElderWithdrawRequest, authorization: str | None = Header(default=None)) -> Response:
-        """어르신 탈퇴 — 어르신 열쇠와 {"confirm": true}. 녹음(S3)은 최선으로 지우고, 어르신과 통화·점수·요약·언급·
-        연락처·열쇠·코드를 지운다. 연결 전·승인 대기 어르신도 탈퇴할 수 있다."""
+        """어르신 탈퇴 — 어르신 열쇠와 {"confirm": true}. 녹음(서버 디스크·S3)은 최선으로 지우고, 어르신과 통화·점수·
+        요약·언급·연락처·열쇠·코드를 지운다. 연결 전·승인 대기 어르신도 탈퇴할 수 있다."""
         elder_id = elder_id_of(authorization)
         if data.elders.get(elder_id) is None:
             # 지워진 어르신의 열쇠다(Postgres에서는 CASCADE로 열쇠도 지워져 위에서 이미 401이다).
@@ -894,6 +898,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             elder_id,
             elders=data.elders,
             recording_deleter=data.recording_deleter,
+            recordings_dir=data.recordings_dir,
             elder_keys=data.elder_keys,
             contacts=data.contacts,
             content=data.content,
@@ -901,7 +906,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             alerts=data.alerts,
         )
         logger.info(
-            "어르신이 탈퇴했다 elder_id=%s 녹음=%s개 삭제시도 실패=%s", elder_id, result.recordings, result.failed
+            "어르신이 탈퇴했다 elder_id=%s 녹음=%s개 삭제시도 실패=%s 서버 파일 삭제=%s개",
+            elder_id,
+            result.recordings,
+            result.failed,
+            result.local_removed,
         )
         return Response(status_code=204)
 
