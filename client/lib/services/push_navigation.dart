@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../screens/elderly_detail_screen.dart';
 import '../models/nulbom_models.dart' show ElderSummary;
+import '../screens/elderly_detail_screen.dart';
 import 'nulbom_api.dart';
 
 /// 푸시 메시지 수신을 단순 맵으로 감싼 입구. 각 항목은 `{'elder_id': ..., 'body': ...}`처럼
@@ -45,7 +45,7 @@ class PushNavigation {
 
   /// 앱이 막 시작됐으면 화면(Navigator)이 아직 없을 수 있어 잠시 기다린다.
   Future<NavigatorState?> _navigator() async {
-    for (var i = 0; i < 100; i++) {
+    for (var i = 0; i < 100 && !_disposed; i++) {
       final n = navigatorKey.currentState;
       if (n != null) return n;
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -66,7 +66,10 @@ class PushNavigation {
     }
   }
 
+  bool _disposed = false;
+
   Future<void> dispose() async {
+    _disposed = true;
     for (final s in _subs) {
       await s.cancel();
     }
@@ -82,7 +85,9 @@ class PushNavigation {
   Future<void> _open(Map<String, String> message) async {
     try {
       final id = _parseId(message);
-      if (id == null || !await isGuardianLoggedIn()) return;
+      if (_disposed || id == null || !await isGuardianLoggedIn()) return;
+      // 조회·기다림 사이에 로그아웃하거나 다른 보호자가 로그인하면 옛 보호자 정보로 열지 않는다.
+      final key = NulbomApi.guardianKey;
 
       final elders = await loadElders();
       ElderSummary? found;
@@ -95,7 +100,9 @@ class PushNavigation {
       if (found == null) return;
 
       final navigator = await _navigator();
-      if (navigator == null) return;
+      if (navigator == null || _disposed) return;
+      if (NulbomApi.guardianKey != key || !await isGuardianLoggedIn()) return;
+      if (NulbomApi.guardianKey != key || _disposed) return;
 
       // 같은 어르신 화면이 이미 맨 위면 쌓지 않는다.
       String? topName;
@@ -117,7 +124,7 @@ class PushNavigation {
 
   Future<void> _showSnack(Map<String, String> message) async {
     try {
-      if (!await isGuardianLoggedIn()) return;
+      if (_disposed || !await isGuardianLoggedIn() || _disposed) return;
       final messenger = scaffoldMessengerKey?.currentState ??
           (navigatorKey.currentContext == null
               ? null

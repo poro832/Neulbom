@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:eldercare/models/nulbom_models.dart' show ElderSummary;
 import 'package:eldercare/screens/elderly_detail_screen.dart';
 import 'package:eldercare/services/nulbom_api.dart';
 import 'package:eldercare/services/push_navigation.dart';
@@ -206,5 +207,68 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.widget<ElderlyDetailScreen>(detail(21)).elderlyName, '김영희');
+  });
+
+  testWidgets('목록을 불러오는 동안 다른 보호자가 로그인하면 이동하지 않는다', (tester) async {
+    final gate = Completer<List<ElderSummary>>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('홈')),
+    ));
+    nav = PushNavigation(
+      source: source,
+      navigatorKey: navKey,
+      loadElders: () => gate.future,
+    );
+    await nav.start();
+    source.opened.add({'elder_id': '20'});
+    await tester.pump();
+
+    NulbomApi.guardianKey = 'nlb_other';
+    gate.complete([ElderSummary.fromJson(elder(20, '홍길동'))]);
+    await tester.pumpAndSettle();
+
+    expect(detail(), findsNothing);
+  });
+
+  testWidgets('화면이 뜨기를 기다리는 동안 로그아웃하면 이동하지 않는다', (tester) async {
+    nav = PushNavigation(source: source, navigatorKey: navKey);
+    await nav.start();
+    source.opened.add({'elder_id': '20'});
+    await tester.pump(const Duration(milliseconds: 250));
+
+    NulbomApi.guardianKey = '';
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('홈')),
+    ));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    expect(detail(), findsNothing);
+  });
+
+  testWidgets('dispose된 뒤에는 이동도 SnackBar도 없다', (tester) async {
+    final gate = Completer<List<ElderSummary>>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('홈')),
+    ));
+    nav = PushNavigation(
+      source: source,
+      navigatorKey: navKey,
+      loadElders: () => gate.future,
+    );
+    await nav.start();
+    source.opened.add({'elder_id': '20'});
+    await tester.pump();
+    unawaited(nav.dispose());
+    gate.complete([ElderSummary.fromJson(elder(20, '홍길동'))]);
+    await tester.pumpAndSettle();
+    expect(detail(), findsNothing);
+
+    source.foreground.add({'elder_id': '20', 'body': '본문'});
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(SnackBar), findsNothing);
   });
 }
