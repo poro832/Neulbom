@@ -116,6 +116,104 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
     }
   }
 
+  Future<bool> _askTwice(String title, String message, String confirmLabel) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: eCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          title,
+          style: GoogleFonts.notoSansKr(fontSize: 26, fontWeight: FontWeight.w800, color: eInk),
+        ),
+        content: Text(
+          message,
+          style: GoogleFonts.notoSansKr(
+              fontSize: 19, fontWeight: FontWeight.w700, color: eInk, height: 1.5),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: eInk,
+                    side: const BorderSide(color: eLine, width: 1.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text('취소',
+                      style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD92D20),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(confirmLabel,
+                      style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  /// 어르신 탈퇴. 되돌릴 수 없어서 두 번 묻는다.
+  Future<void> _confirmDeleteAccount() async {
+    if (!await _askTwice(
+      '탈퇴하기',
+      '탈퇴하면 이 폰의 정보와 지금까지의 통화 기록이 모두 지워지고, 안부 전화도 멈춰요.',
+      '계속',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    if (!await _askTwice('정말 탈퇴할까요?', '지운 기록은 다시 볼 수 없어요.', '탈퇴하기')) return;
+    if (!mounted) return;
+    // 지우는 동안은 뒤로가기로 빠져나가지 못하게 막는다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final messenger = ScaffoldMessenger.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    );
+    try {
+      await AuthService.deleteElderAccount();
+    } on ApiException catch (e) {
+      navigator.pop(); // 진행 표시 닫기
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    } catch (_) {
+      navigator.pop();
+      messenger.showSnackBar(
+          const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
+      return;
+    }
+    // 화면이 닫혔어도(mounted 아님) 가져다 둔 navigator로 처음 화면으로 돌아간다.
+    navigator.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
+      (route) => false,
+    );
+    messenger.showSnackBar(const SnackBar(content: Text('탈퇴했어요.')));
+  }
+
   Widget _buildMenuRow({
     required IconData icon,
     required String label,
@@ -263,6 +361,8 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                             _showConnectionCode();
                           } else if (value == 'logout') {
                             _confirmLogout();
+                          } else if (value == 'delete_account') {
+                            _confirmDeleteAccount();
                           }
                         },
                         itemBuilder: (context) => [
@@ -279,6 +379,14 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                             child: _buildMenuRow(
                               icon: Icons.logout_rounded,
                               label: '로그아웃',
+                            ),
+                          ),
+                          const PopupMenuDivider(height: 1),
+                          PopupMenuItem(
+                            value: 'delete_account',
+                            child: _buildMenuRow(
+                              icon: Icons.person_remove_alt_1_rounded,
+                              label: '탈퇴하기',
                             ),
                           ),
                         ],
