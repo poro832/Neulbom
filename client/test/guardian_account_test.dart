@@ -586,7 +586,7 @@ void emailPendingTests() {
 
       expect(find.text('이메일 인증 대기 중'), findsOneWidget);
       expect(find.text('이메일 인증하기'), findsOneWidget);
-      expect(find.text('활성 중'), findsOneWidget); // 운영자 확인 표시는 그대로 있다
+      expect(find.text('활성 중'), findsNothing);
     });
 
     testWidgets('인증됐으면(또는 옛 응답이면) 표시와 버튼이 없다', (tester) async {

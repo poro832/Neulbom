@@ -443,34 +443,34 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                   color: eInkSoft,
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              if (_guardianInfo['activated'] == false || _emailPending)
+                                const SizedBox(height: 8),
                               // 표시가 둘이면 좁은 폰에서 줄을 넘긴다.
                               Wrap(
                                 spacing: 6,
                                 runSpacing: 6,
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(
-                                        0xFF4CAF50,
-                                      ).withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      _guardianInfo['activated'] == false
-                                          ? '운영자 확인 대기 중'
-                                          : '활성 중',
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF4CAF50),
+                                  if (_guardianInfo['activated'] == false)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(
+                                          0xFF4CAF50,
+                                        ).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '운영자 확인 대기 중',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF4CAF50),
+                                        ),
                                       ),
                                     ),
-                                  ),
                                   if (_emailPending)
                                     Container(
                                       padding: const EdgeInsets.symmetric(
@@ -730,19 +730,21 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               SizedBox(
                 width: double.infinity,
                 height: 56,
-                child: ElevatedButton.icon(
+                child: TextButton.icon(
                   onPressed: _logout,
                   icon: const Icon(Icons.logout_rounded, size: 20),
                   label: Text(
                     '로그아웃',
                     style: GoogleFonts.notoSansKr(
                       fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFF44336),
+                  style: TextButton.styleFrom(
+                    backgroundColor: const Color(0xFFF1F5F9),
+                    foregroundColor: eInkSoft,
+                    disabledBackgroundColor: const Color(0xFFE2E8F0),
+                    disabledForegroundColor: const Color(0xFF64748B),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -850,8 +852,15 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
         Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: eAccent,
-          inactiveThumbColor: eInkSoft,
+          activeThumbColor: Colors.white,
+          activeTrackColor: eAccent,
+          inactiveThumbColor: Colors.white,
+          inactiveTrackColor: const Color(0xFFCBD5E1),
+          trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+            return states.contains(WidgetState.selected)
+                ? eAccent
+                : const Color(0xFF94A3B8);
+          }),
         ),
       ],
     );

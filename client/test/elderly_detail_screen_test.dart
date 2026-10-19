@@ -162,6 +162,23 @@ void main() {
   });
   tearDown(() => NulbomApi.guardianKey = '');
 
+  testWidgets('좁은 화면에서도 일간·주간·월간 통계 제목과 수치의 상단이 맞는다', (tester) async {
+    NulbomApi.client = serverWithOneCallPerDay();
+    await open(tester, now: () => DateTime(2026, 10, 8), size: const Size(340, 2400));
+
+    for (final (period, count) in [('일간', '1회'), ('주간', '7회'), ('월간', '31회')]) {
+      await tester.tap(find.text(period));
+      await tester.pumpAndSettle();
+      final titleTop = tester.getTopLeft(find.text('평소와 다른 정도')).dy;
+      expect(tester.getTopLeft(find.text('통화 횟수')).dy, closeTo(titleTop, 0.1));
+      expect(tester.getTopLeft(find.text('상태')).dy, closeTo(titleTop, 0.1));
+      final valueTop = tester.getTopLeft(find.text('40점')).dy;
+      expect(tester.getTopLeft(find.text(count)).dy, closeTo(valueTop, 0.1));
+      expect(tester.getTopLeft(find.text('주의').first).dy, closeTo(valueTop, 0.1));
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('일간: 그날의 실제 통화 수와 평소와 다른 정도를 보여 준다', (tester) async {
     NulbomApi.client = serverWithOneCallPerDay();
 
