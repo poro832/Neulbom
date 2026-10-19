@@ -11,6 +11,10 @@ class AuthService {
   /// 로그아웃 때 이 폰의 Firebase(이메일 인증) 세션도 끝낸다. 테스트에서 가짜로 바꾼다.
   static EmailProof emailProof = FirebaseEmailProof();
 
+  /// 보호자 계정을 서버에서 지운 뒤 Firebase 계정도 최선으로 지운다. 테스트에서 바꾼다.
+  static Future<void> Function({String? knownPassword, String? email}) firebaseAccountDeleter =
+      deleteFirebaseAccountQuietly;
+
   /// Firebase 세션 끝내기를 기다리는 최대 시간 — 멈춰도 로그아웃을 붙잡지 않는다.
   static const Duration _signOutWait = Duration(seconds: 2);
 
@@ -182,17 +186,40 @@ class AuthService {
       if (NulbomApi.guardianKey.isNotEmpty) {
         await NulbomApi.guardianLogout();
       }
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_userTypeKey);
-      await prefs.remove(_phoneKey);
-      await prefs.remove(_nameKey);
-      await prefs.remove(_isLoggedInKey);
-      await prefs.remove(_tokenKey);
-      await prefs.remove('email');
+      await _clearPrefs();
       return true;
     } catch (e) {
       return false;
     }
+  }
+
+  static Future<void> _clearPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_userTypeKey);
+    await prefs.remove(_phoneKey);
+    await prefs.remove(_nameKey);
+    await prefs.remove(_isLoggedInKey);
+    await prefs.remove(_tokenKey);
+    await prefs.remove('email');
+  }
+
+  /// 보호자 탈퇴. 서버가 거절하면(비밀번호 틀림 등) [ApiException]을 그대로 올리고 아무것도 지우지 않는다.
+  /// 서버에서 지워진 뒤에는 Firebase 계정(최선)과 이 폰의 로그인 정보를 지운다.
+  static Future<void> deleteGuardianAccount({required String password}) async {
+    final email = (await getUserInfo())['email'];
+    await NulbomApi.deleteGuardianAccount(password: password);
+    try {
+      await firebaseAccountDeleter(knownPassword: password, email: email);
+    } catch (_) {}
+    await NulbomApi.clearGuardianKey();
+    await _clearPrefs();
+  }
+
+  /// 어르신 탈퇴. 서버가 거절하면 [ApiException]을 올리고 아무것도 지우지 않는다.
+  static Future<void> deleteElderAccount() async {
+    await NulbomApi.deleteElderAccount();
+    await NulbomApi.clearElderKey();
+    await _clearPrefs();
   }
 
   // 로그인 상태 확인

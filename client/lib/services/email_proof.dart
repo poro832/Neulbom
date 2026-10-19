@@ -256,3 +256,38 @@ class FirebaseEmailProof implements EmailProof {
     }
   }
 }
+
+/// 서버가 계정을 지운 뒤 Firebase 쪽 계정을 기다리는 최대 시간.
+const Duration deleteFirebaseAccountWait = Duration(seconds: 6);
+
+/// 서버에서 보호자 계정을 지운 뒤 같은 이메일의 Firebase 계정도 최선으로 지운다(서버에는 Firebase 관리자 권한이 없다).
+/// 이 폰에 그 보호자의 Firebase 세션이 있으면 그것으로, 없으면 [email]과 [knownPassword]로 로그인해 지운다.
+/// 인증을 마친 계정은 Firebase 비밀번호를 아무도 모르는 값으로 바꿔 두기 때문에 로그인이 실패해 계정이 남을 수 있다 —
+/// 그때는 Firebase 콘솔에서 지운다. 다른 사람의 세션은 건드리지 않고, 실패·멈춤은 밖으로 내지 않는다.
+Future<void> deleteFirebaseAccountQuietly({
+  String? knownPassword,
+  String? email,
+  FirebaseAuth? auth,
+}) async {
+  try {
+    await _deleteFirebaseAccount(auth ?? FirebaseAuth.instance, knownPassword, email)
+        .timeout(deleteFirebaseAccountWait);
+  } catch (_) {}
+}
+
+Future<void> _deleteFirebaseAccount(FirebaseAuth auth, String? password, String? email) async {
+  var user = auth.currentUser;
+  if (user != null && email != null && (user.email ?? '').toLowerCase() != email.toLowerCase()) {
+    return; // 다른 사람의 세션이다.
+  }
+  if (user == null) {
+    if (email == null || password == null || password.isEmpty) return;
+    user = (await auth.signInWithEmailAndPassword(email: email, password: password)).user;
+  } else if (password != null && password.isNotEmpty && user.email != null) {
+    try {
+      await user.reauthenticateWithCredential(
+          EmailAuthProvider.credential(email: user.email!, password: password));
+    } catch (_) {}
+  }
+  await user?.delete();
+}
