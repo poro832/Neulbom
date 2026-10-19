@@ -183,19 +183,31 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
     if (!mounted) return;
     if (!await _askTwice('정말 탈퇴할까요?', '지운 기록은 다시 볼 수 없어요.', '탈퇴하기')) return;
     if (!mounted) return;
+    // 지우는 동안은 뒤로가기로 빠져나가지 못하게 막는다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
+    final navigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+    );
     try {
       await AuthService.deleteElderAccount();
     } on ApiException catch (e) {
+      navigator.pop(); // 진행 표시 닫기
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
       return;
     } catch (_) {
+      navigator.pop();
       messenger.showSnackBar(
           const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
       return;
     }
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
+    // 화면이 닫혔어도(mounted 아님) 가져다 둔 navigator로 처음 화면으로 돌아간다.
+    navigator.pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
       (route) => false,
     );
