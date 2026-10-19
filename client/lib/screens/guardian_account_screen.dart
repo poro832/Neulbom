@@ -210,6 +210,99 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     );
   }
 
+  Future<void> _deleteAccount() async {
+    final password = TextEditingController();
+    String? error;
+    var busy = false;
+    final deleted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        // 삭제 요청이 가는 동안은 뒤로가기로도 닫지 못하게 한다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
+        builder: (context, setLocal) => PopScope(
+          canPop: !busy,
+          child: AlertDialog(
+          backgroundColor: eCard,
+          title: Text(
+            '계정 삭제',
+            style: GoogleFonts.notoSansKr(
+                fontSize: 18, fontWeight: FontWeight.w700, color: const Color(0xFFF44336)),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '계정을 삭제하면 로그인 정보가 사라지고 되돌릴 수 없어요.\n'
+                '연결된 어르신은 지워지지 않고 \'연결 전\' 상태로 돌아가며, 안부 전화가 멈춰요. '
+                '다른 보호자가 연결 코드로 이어받을 수 있어요.',
+                style: TextStyle(fontSize: 13, color: eInkSoft, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('delete-password'),
+                controller: password,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '비밀번호를 입력해 확인해 주세요'),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(error!,
+                      style: const TextStyle(color: Color(0xFFF44336), fontSize: 13)),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(dialogContext, false),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (password.text.isEmpty) {
+                        setLocal(() => error = '비밀번호를 입력해 주세요.');
+                        return;
+                      }
+                      setLocal(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        await AuthService.deleteGuardianAccount(password: password.text);
+                        if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+                      } on ApiException catch (e) {
+                        setLocal(() {
+                          busy = false;
+                          error = e.message;
+                        });
+                      } catch (_) {
+                        setLocal(() {
+                          busy = false;
+                          error = '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+                        });
+                      }
+                    },
+              child: const Text('삭제', style: TextStyle(color: Color(0xFFF44336))),
+            ),
+          ],
+        ),
+        ),
+      ),
+    );
+    if (deleted != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const RoleSelectionScreen()),
+      (route) => false,
+    );
+    messenger.showSnackBar(
+      const SnackBar(content: Text('계정을 삭제했어요.'), duration: Duration(seconds: 3)),
+    );
+  }
+
   void _logout() {
     showDialog(
       context: context,
@@ -652,6 +745,22 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                     backgroundColor: const Color(0xFFF44336),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: TextButton(
+                  key: const Key('delete-account'),
+                  onPressed: _deleteAccount,
+                  child: Text(
+                    '계정 삭제',
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: eInkSoft,
+                      decoration: TextDecoration.underline,
                     ),
                   ),
                 ),
