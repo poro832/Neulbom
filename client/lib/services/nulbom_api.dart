@@ -132,6 +132,9 @@ class NulbomApi {
   /// 서버가 이메일 인증 증명서를 못 믿을 때 401과 함께 돌려주는 문구.
   static const String badEmailProofMessage = '이메일 인증을 확인하지 못했어요';
 
+  /// 계정 삭제 때 비밀번호가 틀리면 서버가 401과 함께 돌려주는 문구 — 열쇠가 거절된 것이 아니다.
+  static const String badPasswordMessage = '비밀번호를 확인해 주세요';
+
   static String? _detailOf(http.Response response) {
     try {
       final body = jsonDecode(utf8.decode(response.bodyBytes));
@@ -167,7 +170,9 @@ class NulbomApi {
             .put(uri, headers: headers, body: body == null ? null : jsonEncode(body))
             .timeout(_timeout);
       case 'DELETE':
-        response = await client.delete(uri, headers: headers).timeout(_timeout);
+        response = await client
+            .delete(uri, headers: headers, body: body == null ? null : jsonEncode(body))
+            .timeout(_timeout);
       default:
         throw ArgumentError('지원하지 않는 메서드: $method');
     }
@@ -249,6 +254,15 @@ class NulbomApi {
   }
 
   /// 다른 폰의 열쇠는 서버가 폐기한다. 이 폰은 그대로 쓴다. 돌려주는 값은 로그아웃된 폰 수.
+  /// 보호자 계정 삭제: 비밀번호를 한 번 더 확인한다. 연결된 어르신은 지워지지 않고 '연결 전'으로 돌아간다.
+  /// 비밀번호가 틀려 401이 와도 로그아웃시키지 않는다.
+  static Future<void> deleteGuardianAccount({required String password, String? key}) async {
+    await _send('DELETE', '/v1/guardian/me',
+        key: _guardianKeyOrThrow(key),
+        body: {'password': password},
+        keepKeyOn401: {badPasswordMessage});
+  }
+
   static Future<int> changeGuardianPassword({
     required String current,
     required String next,
@@ -362,6 +376,11 @@ class NulbomApi {
 
   static Future<void> deleteContact(int contactId, {String? key}) async {
     await _send('DELETE', '/v1/me/contacts/$contactId', key: await _elderKeyOrThrow(key));
+  }
+
+  /// 어르신 탈퇴: 서버가 이 어르신의 통화 기록·연락처·열쇠를 모두 지운다. 되돌릴 수 없다.
+  static Future<void> deleteElderAccount({String? key}) async {
+    await _send('DELETE', '/v1/me', key: await _elderKeyOrThrow(key), body: {'confirm': true});
   }
 
   // ------------------------------------------------------------ 보호자 코드로 가입
