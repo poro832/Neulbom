@@ -182,3 +182,21 @@ class PostgresCallContent:
         except Exception:
             logger.exception("건강·기분 언급 삭제에 실패했다")
         return turns + reports + medication + mentions_removed
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        # 탈퇴 순서에서는 어르신 행이 먼저 지워져 CASCADE가 이미 비웠다 — 메모리 저장소와 같은 규약을 지키려는 것이다.
+        of_elder = "call_id IN (SELECT call_id FROM calls WHERE elder_id = %s)"
+        with self._pool.connection() as conn:
+            removed = sum(
+                conn.execute(f"DELETE FROM {table} WHERE {of_elder}", (elder_id,)).rowcount
+                for table in ("call_turns", "call_reports", "transcript_views")
+            )
+            conn.execute("UPDATE elders SET share_agreed_at = NULL WHERE elder_id = %s", (elder_id,))
+        # 약 복용·언급 표는 따로 지운다 — 표가 아직 없는 배포 순서에서도 위 삭제는 확정되게(purge_older_than과 같은 이유).
+        for table in ("call_medication", "call_mentions"):
+            try:
+                with self._pool.connection() as conn:
+                    removed += conn.execute(f"DELETE FROM {table} WHERE {of_elder}", (elder_id,)).rowcount
+            except Exception:
+                logger.exception("탈퇴한 어르신의 %s 행을 지우지 못했다 elder_id=%s", table, elder_id)
+        return removed

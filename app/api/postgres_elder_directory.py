@@ -227,3 +227,29 @@ class PostgresElderDirectory:
                 (value, elder_id, guardian_id),
             ).rowcount
         return updated == 1
+
+    def detach_all_from(self, guardian_id: int) -> int:
+        # 보호자 행을 지우기 **전에** 부른다. elders.guardian_id가 ON DELETE CASCADE라 그대로 지우면 어르신까지
+        # 지워진다. consent_at을 비우면 스케줄러 명부(consent_at IS NOT NULL)에서 빠져 안부 전화가 멈춘다.
+        # agreed_at·share_agreed_at·call_time과 통화 기록은 건드리지 않는다.
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "UPDATE elders SET guardian_id = NULL, consent_at = NULL WHERE guardian_id = %s",
+                (guardian_id,),
+            ).rowcount
+
+    def delete_elder(self, elder_id: int) -> bool:
+        # calls(→ call_metrics·call_transcripts·call_turns·call_reports·call_medication·call_mentions·
+        # transcript_views)·alerts·contacts·elder_keys·elder_pairings·elder_link_codes가 ON DELETE CASCADE로
+        # 같이 지워진다(db/schema.sql). S3 녹음은 남으므로 호출부가 먼저 지운다.
+        with self._pool.connection() as conn:
+            deleted = conn.execute("DELETE FROM elders WHERE elder_id = %s", (elder_id,)).rowcount
+        return deleted == 1
+
+    def audio_keys_of(self, elder_id: int) -> list[str]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT audio_key FROM calls WHERE elder_id = %s AND audio_key IS NOT NULL ORDER BY call_id",
+                (elder_id,),
+            ).fetchall()
+        return [row[0] for row in rows]

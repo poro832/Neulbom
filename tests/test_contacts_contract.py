@@ -74,6 +74,18 @@ def test_removing_a_missing_contact_is_false(store):
     assert store.remove(12, 424242) is False
 
 
+def test_removing_an_elders_contacts_leaves_other_elders(store):
+    store.add(12, name="가", relation="", phone="111-1111")
+    store.add(12, name="나", relation="", phone="222-2222")
+    theirs = store.add(13, name="다", relation="", phone="333-3333")
+
+    assert store.remove_for_elder(12) == 2
+
+    assert store.list(12) == []
+    assert store.list(13) == [theirs]
+    assert store.remove_for_elder(12) == 0
+
+
 def test_the_twenty_first_contact_is_refused(store):
     for i in range(MAX_CONTACTS):
         store.add(12, name=f"c{i}", relation="", phone="111-1111")

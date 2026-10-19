@@ -140,6 +140,28 @@ class ElderDirectory(Protocol):
         """그 보호자의 어르신일 때만 안부 전화 시각을 바꾸고 True. 스케줄러는 이 값을 매분 새로 읽는다."""
         ...
 
+    # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
+
+    def detach_all_from(self, guardian_id: int) -> int:
+        """보호자 탈퇴: 그 보호자의 어르신을 **지우지 않고** 연결 전으로 돌린다(보호자·전화 동의를 비운다). 돌린 수.
+
+        안부 전화가 멈춘다. 가입 동의(agreed_at)·공유 동의·통화 시각·통화 기록은 그대로라, 가입 동의가 있는
+        어르신은 새 연결 코드로 다른 보호자가 이어받을 수 있다.
+        """
+        ...
+
+    def delete_elder(self, elder_id: int) -> bool:
+        """어르신 탈퇴: 어르신 행을 지우고 True. 없으면 False.
+
+        Postgres에서는 통화·점수·요약·언급·열람 기록·알림·연락처·열쇠·코드가 CASCADE로 같이 지워진다.
+        S3 녹음은 지워지지 않는다 — 먼저 audio_keys_of로 키를 읽어 지운다.
+        """
+        ...
+
+    def audio_keys_of(self, elder_id: int) -> list[str]:
+        """그 어르신 통화의 녹음 키(S3 객체 키). 녹음이 없는 통화는 빠진다."""
+        ...
+
 
 class DirectoryAdmin(Protocol):
     """운영 도구(`python -m app.admin`)가 쓴다. 동의는 여기서 바꾸지 않는다."""
@@ -163,11 +185,29 @@ class InMemoryElderDirectory:
         self._profiles = dict(guardians or {})
         # 바꾼 안부 전화 시각만 둔다. 없으면 DEFAULT_CALL_TIME이다(DB의 기본값과 같게).
         self._call_times: dict[int, time] = {}
+        # 메모리 모드에는 통화 표가 없다. 녹음 키는 시험이 add_audio_key로 심는다.
+        self._audio_keys: dict[int, list[str]] = {}
         self._guardians = {
             access.guardian_id for access in self._entries.values() if access.guardian_id is not None
         } | set(self._profiles)
         self._lock = threading.Lock()
         self._next_guardian = max(self._guardians, default=0) + 1
+        self._next_elder = max(self._entries, default=0) + 1
+
+    def _new_elder_id(self) -> int:
+        """잠금 안에서 부른다. 지운 어르신의 번호는 다시 쓰지 않는다(Postgres의 BIGSERIAL처럼) —
+        다시 쓰면 다른 저장소에 남은 옛 기록(연결 코드 등)이 새 어르신에게 붙는다."""
+        elder_id = max(self._next_elder, max(self._entries, default=0) + 1)
+        self._next_elder = elder_id + 1
+        return elder_id
+
+    def _forget(self, elder_id: int) -> None:
+        """잠금 안에서 부른다. 어르신 행과 그 번호에 딸린 것을 모두 지운다."""
+        del self._entries[elder_id]
+        self._phone_text.pop(elder_id, None)
+        self._phones.pop(elder_id, None)
+        self._call_times.pop(elder_id, None)
+        self._audio_keys.pop(elder_id, None)
 
     def get(self, elder_id: int) -> ElderAccess | None:
         return self._entries.get(elder_id)
@@ -210,7 +250,7 @@ class InMemoryElderDirectory:
             )
             if pending >= max_pending:
                 raise PendingLimit(guardian_id)
-            elder_id = max(self._entries, default=0) + 1
+            elder_id = self._new_elder_id()
             self._entries[elder_id] = ElderAccess(guardian_id, False, name, agreed=True)
             self._phone_text[elder_id] = phone
             self._phones[elder_id] = wanted
@@ -231,7 +271,7 @@ class InMemoryElderDirectory:
             wanted = digits_of(phone)
             if any(digits == wanted for digits in self._phones.values()):
                 raise PhoneTaken(wanted)
-            elder_id = max(self._entries, default=0) + 1
+            elder_id = self._new_elder_id()
             self._entries[elder_id] = ElderAccess(None, False, name, agreed=True)
             self._phone_text[elder_id] = phone
             self._phones[elder_id] = wanted
@@ -242,10 +282,7 @@ class InMemoryElderDirectory:
             access = self._entries.get(elder_id)
             if access is None or access.guardian_id is not None or access.consenting:
                 return False
-            del self._entries[elder_id]
-            self._phone_text.pop(elder_id, None)
-            self._phones.pop(elder_id, None)
-            self._call_times.pop(elder_id, None)
+            self._forget(elder_id)
             return True
 
     def link(self, elder_id: int, guardian_id: int) -> bool:
@@ -269,10 +306,7 @@ class InMemoryElderDirectory:
         with self._lock:
             if self._pending_of(elder_id, guardian_id) is None:
                 return False
-            del self._entries[elder_id]
-            self._phone_text.pop(elder_id, None)
-            self._phones.pop(elder_id, None)
-            self._call_times.pop(elder_id, None)
+            self._forget(elder_id)
             return True
 
     def call_time_of(self, elder_id: int) -> time | None:
@@ -287,6 +321,29 @@ class InMemoryElderDirectory:
                 return False
             self._call_times[elder_id] = value
             return True
+
+    def detach_all_from(self, guardian_id: int) -> int:
+        with self._lock:
+            mine = [eid for eid, access in self._entries.items() if access.guardian_id == guardian_id]
+            for eid in mine:
+                self._entries[eid] = replace(self._entries[eid], guardian_id=None, consenting=False)
+            return len(mine)
+
+    def delete_elder(self, elder_id: int) -> bool:
+        with self._lock:
+            if elder_id not in self._entries:
+                return False
+            self._forget(elder_id)
+            return True
+
+    def add_audio_key(self, elder_id: int, key: str) -> None:
+        """시험용. Postgres는 calls.audio_key를 읽는다."""
+        with self._lock:
+            self._audio_keys.setdefault(elder_id, []).append(key)
+
+    def audio_keys_of(self, elder_id: int) -> list[str]:
+        with self._lock:
+            return list(self._audio_keys.get(elder_id, []))
 
     def add_guardian(self, name: str, phone: str) -> int:
         with self._lock:

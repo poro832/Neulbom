@@ -137,6 +137,43 @@ def test_set_login_marks_the_email_verified(accounts):
     assert accounts.profile(gid).email_verified is True
 
 
+def test_deleting_an_account_removes_it_and_frees_the_email(accounts):
+    gid = accounts.create("가", "del@example.com", "010-1", "H")
+    other = accounts.create("나", "keep@example.com", "010-2", "H2")
+
+    assert accounts.delete(gid) is True
+
+    assert accounts.profile(gid) is None
+    assert accounts.find_by_email("del@example.com") is None
+    assert gid not in [a.guardian_id for a in accounts.pending()]
+    assert accounts.profile(other).email == "keep@example.com"
+    assert accounts.delete(gid) is False
+    assert accounts.delete(999_999) is False
+    again = accounts.create("가", "del@example.com", "010-1", "H")  # 같은 이메일로 다시 가입할 수 있다
+    assert again != gid
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_postgres_refuses_to_delete_a_guardian_who_still_has_elders():
+    """elders.guardian_id가 ON DELETE CASCADE라 그냥 지우면 어르신까지 지워진다. 연결을 먼저 풀어야만 지운다."""
+    from app.api.postgres_elder_directory import PostgresElderDirectory
+
+    accounts = _postgres()  # 보호자 1에게 어르신 12·13이 있다
+    pool = accounts._pool
+
+    assert accounts.delete(1) is False
+
+    assert accounts.profile(1) is not None
+    with pool.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM elders WHERE elder_id IN (12, 13)").fetchone()[0] == 2
+
+    assert PostgresElderDirectory(pool=pool).detach_all_from(1) == 2
+    assert accounts.delete(1) is True
+    with pool.connection() as conn:
+        assert conn.execute("SELECT count(*) FROM elders WHERE elder_id IN (12, 13)").fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM guardians WHERE guardian_id = 1").fetchone()[0] == 0
+
+
 def test_pending_reports_the_real_verification_state(accounts):
     gid = accounts.create("가", "v5@example.com", "010-1", "H")
     assert [(a.guardian_id, a.email_verified) for a in accounts.pending() if a.guardian_id == gid] == [(gid, False)]

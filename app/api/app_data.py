@@ -17,8 +17,9 @@ from datetime import date, datetime
 from datetime import time as time_of_day
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, StrictBool, field_validator
 
+from app.api.account_deletion import withdraw_elder, withdraw_guardian
 from app.api.alerts import AlertStore
 from app.api.call_content import CallContentStore, InMemoryCallContent, MENTION_CATEGORIES
 from app.api.calls import MAX_ELDER_ID
@@ -55,6 +56,7 @@ from app.api.reports import (
     week_bounds,
 )
 from app.firebase_verify import EmailVerifier
+from app.recordings import RecordingDeleter
 from app.scheduler import DEFAULT_GRACE_SECONDS, KST
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,8 @@ ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
 TOO_MANY_ELDERS = "더 이상 어르신을 연결할 수 없어요"
 PHONE_USED = "이미 등록된 번호예요"
 BAD_MONTH = "달을 확인해 주세요"
+BAD_PASSWORD = "비밀번호를 확인해 주세요"
+NO_ACCOUNT = "삭제할 계정이 없어요"
 CALL_TIME_RANGE = "안부 전화 시간은 오전 7시부터 오후 9시까지 30분 단위로 고를 수 있어요"
 CALL_TIME_JUST_PASSED = (
     "방금 지난 시간이라 곧바로 전화가 걸릴 수 있어요. "
@@ -152,6 +156,8 @@ class AppData:
     # 열쇠 없는 요청이 몰려도 로그인한 보호자의 이메일 인증 자리를 빼앗지 못하게.
     password_reset_failures: FailureLimiter = field(default_factory=FailureLimiter)
     password_reset_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
+    # 어르신 탈퇴 때 S3 녹음을 지운다(RECORDINGS_BUCKET이 없으면 None — 녹음은 버킷의 30일 수명 규칙에 맡긴다).
+    recording_deleter: RecordingDeleter | None = None
 
 
 def iso_kst(epoch: float) -> str:
@@ -252,6 +258,22 @@ class EmailProofRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     id_token: str = Field(min_length=20, max_length=4096)
     new_password: str = Field(min_length=MIN_PASSWORD, max_length=128)
+
+
+class GuardianWithdrawRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+class ElderWithdrawRequest(BaseModel):
+    # 실수로 지우지 않게 JSON의 true 그대로만 받는다(1, "true", null은 422).
+    confirm: StrictBool
+
+    @field_validator("confirm")
+    @classmethod
+    def _must_be_true(cls, value: bool) -> bool:
+        if value is not True:
+            raise ValueError("confirm은 true여야 한다")
+        return value
 
 
 class ContactRequest(BaseModel):
@@ -808,6 +830,80 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             data.password_reset_slots.release(slot)
         logger.info("비밀번호를 재설정했다 guardian_id=%s 폐기=%s", account.guardian_id, revoked)
         return {"reset": True}
+
+    # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
+
+    @app.delete("/v1/guardian/me")
+    @guarded
+    def withdraw_guardian_me(
+        body: GuardianWithdrawRequest, authorization: str | None = Header(default=None)
+    ) -> Response:
+        """보호자 탈퇴 — 열쇠와 현재 비밀번호. 어르신은 지우지 않고 연결 전으로 돌린다(안부 전화가 멈춘다).
+
+        비밀번호 검사는 로그인과 같은 규칙이다(같은 이메일 실패 한도, 틀리면 같은 기록). Firebase 계정은 서버가
+        지우지 못한다 — 앱이 지운다.
+        """
+        guardian_id = guardian_id_of(authorization)
+        account = data.accounts.profile(guardian_id)
+        if account is None:
+            # 계정 표에 없는 열쇠 전용 보호자다. Postgres에서는 운영 도구가 만든 보호자도 표에 있지만 비밀번호가 없어
+            # (NO_LOGIN) 아래에서 401이다 — 어느 쪽이든 운영 도구(`guardian delete N --yes`)로 지운다.
+            raise HTTPException(status_code=404, detail=NO_ACCOUNT)
+        if data.login_limiter.blocked(account.email):
+            # 잠긴 요청은 비밀번호를 검사하지 않는다.
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        if not verify_password(body.password, account.password_hash):  # 느린 해시는 잠금 밖에서
+            record_bad_password(account.email, known=True)
+            logger.warning("보호자 탈퇴 비밀번호 확인 실패 guardian_id=%s", guardian_id)
+            raise HTTPException(status_code=401, detail=BAD_PASSWORD)
+        key_hash = hash_key(parse_bearer(authorization))
+        with credential_lock:
+            # 비밀번호 변경과 같은 다시 보기: 검사한 뒤 비밀번호가 바뀌었거나(재설정·다른 폰·운영 도구) 이 열쇠가
+            # 폐기됐으면 옛 비밀번호·옛 열쇠로 한 요청이다 — 아무것도 지우지 않는다. 이유는 알리지 않는다.
+            current = data.accounts.profile(guardian_id)
+            if (
+                current is None
+                or current.password_hash != account.password_hash
+                or not key_store().is_active(key_hash)
+            ):
+                logger.warning("보호자 탈퇴 중 비밀번호나 열쇠가 바뀌어 거절했다 guardian_id=%s", guardian_id)
+                raise HTTPException(status_code=401, detail=NEED_KEY)
+            detached = withdraw_guardian(
+                guardian_id,
+                elders=data.elders,
+                accounts=data.accounts,
+                keys=key_store(),
+                devices=data.devices,
+                invites=data.invites,
+                alerts=data.alerts,
+            )
+        data.login_limiter.clear(account.email)  # 같은 이메일로 다시 가입하면 새로 센다
+        logger.info("보호자가 탈퇴했다 guardian_id=%s 어르신 연결 해제=%s", guardian_id, detached)
+        return Response(status_code=204)
+
+    @app.delete("/v1/me")
+    @guarded
+    def withdraw_elder_me(body: ElderWithdrawRequest, authorization: str | None = Header(default=None)) -> Response:
+        """어르신 탈퇴 — 어르신 열쇠와 {"confirm": true}. 녹음(S3)은 최선으로 지우고, 어르신과 통화·점수·요약·언급·
+        연락처·열쇠·코드를 지운다. 연결 전·승인 대기 어르신도 탈퇴할 수 있다."""
+        elder_id = elder_id_of(authorization)
+        if data.elders.get(elder_id) is None:
+            # 지워진 어르신의 열쇠다(Postgres에서는 CASCADE로 열쇠도 지워져 위에서 이미 401이다).
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        result = withdraw_elder(
+            elder_id,
+            elders=data.elders,
+            recording_deleter=data.recording_deleter,
+            elder_keys=data.elder_keys,
+            contacts=data.contacts,
+            content=data.content,
+            reports=data.reports,
+            alerts=data.alerts,
+        )
+        logger.info(
+            "어르신이 탈퇴했다 elder_id=%s 녹음=%s개 삭제시도 실패=%s", elder_id, result.recordings, result.failed
+        )
+        return Response(status_code=204)
 
     # ------------------------------------------------ 보호자 코드로 어르신 가입
 

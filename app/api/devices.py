@@ -33,6 +33,10 @@ class DeviceStore(Protocol):
         """그 열쇠에 묶인 토큰을 모두 지운다(로그아웃). 지운 수."""
         ...
 
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        """그 보호자의 토큰을 모두 지운다(탈퇴). 지운 수. Postgres에서는 보호자 행을 지울 때 CASCADE도 같은 일을 한다."""
+        ...
+
     def tokens_for(self, guardian_id: int) -> list[str]:
         """푸시를 보낼 토큰. 폐기되지 않은 열쇠에 묶인 것만."""
         ...
@@ -75,6 +79,13 @@ class InMemoryDeviceStore:
     def remove_for_key(self, key_hash: str) -> int:
         with self._lock:
             gone = [t for t, (_, h) in self._rows.items() if h == key_hash]
+            for token in gone:
+                del self._rows[token]
+            return len(gone)
+
+    def remove_for_guardian(self, guardian_id: int) -> int:
+        with self._lock:
+            gone = [t for t, (g, _) in self._rows.items() if g == guardian_id]
             for token in gone:
                 del self._rows[token]
             return len(gone)

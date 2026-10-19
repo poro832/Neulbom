@@ -326,6 +326,123 @@ def test_an_unlinked_elder_has_no_guardian_to_change_the_call_time(directory):
     assert directory.call_time_of(elder_id) == time(9, 0)
 
 
+# ------------------------------------------------ 탈퇴: 연결 해제 · 어르신 삭제 · 녹음 키
+
+
+def seed_audio(directory, elder_id, key):
+    """그 어르신 통화의 녹음 키를 심는다. 메모리는 직접, Postgres는 통화 행으로."""
+    if isinstance(directory, InMemoryElderDirectory):
+        directory.add_audio_key(elder_id, key)
+        return
+    with directory._pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO calls (elder_id, status, audio_key) VALUES (%s, 'completed', %s)", (elder_id, key)
+        )
+
+
+def test_detaching_a_guardians_elders_unlinks_them_and_keeps_their_data(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+    theirs = make_pending(directory, guardian_id=other, phone="010-9999-2222")
+    directory.set_call_time(13, 1, time(7, 30))
+
+    assert directory.detach_all_from(1) == 2
+
+    for elder_id, name in ((12, "어르신 12"), (13, "어르신 13")):
+        access = directory.get(elder_id)
+        assert access.guardian_id is None and access.consenting is False and access.status == "unlinked"
+        assert access.name == name
+    assert directory.phone_of(13) == "070-0000-0013"
+    assert directory.call_time_of(13) == time(7, 30)
+    assert directory.elders_of(1) == []
+    # 다른 보호자의 어르신은 그대로다
+    assert directory.get(theirs).guardian_id == other and directory.get(theirs).status == "pending"
+    assert directory.detach_all_from(1) == 0
+    assert directory.detach_all_from(99999) == 0
+
+
+def test_a_detached_elder_who_agreed_can_be_linked_by_another_guardian(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+    assert directory.link(elder_id, 1) is True
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    directory.detach_all_from(1)
+
+    access = directory.get(elder_id)
+    assert access.status == "unlinked" and access.agreed is True
+    assert directory.link(elder_id, other) is True
+    assert directory.get(elder_id).guardian_id == other and directory.get(elder_id).status == "active"
+
+
+def test_deleting_an_elder_removes_it_and_frees_the_number(directory):
+    directory.set_call_time(13, 1, time(7, 30))
+
+    assert directory.delete_elder(13) is True
+
+    assert directory.get(13) is None
+    assert directory.phone_of(13) is None and directory.find_by_phone("070-0000-0013") is None
+    assert directory.call_time_of(13) is None
+    assert [e.elder_id for e in directory.elders_of(1)] == [12]
+    assert directory.get(12) == ElderAccess(guardian_id=1, consenting=False, name="어르신 12")
+    assert directory.delete_elder(13) is False
+    assert directory.delete_elder(4242) is False
+    again = directory.create_unlinked(name="다시", phone="070-0000-0013")
+    assert again != 13  # 지운 어르신의 번호는 다시 쓰지 않는다(다른 저장소에 남은 옛 기록이 붙지 않게)
+
+
+def test_deleting_works_for_unlinked_and_pending_elders_too(directory):
+    unlinked = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+    pending = make_pending(directory, phone="010-9999-2222")
+
+    assert directory.delete_elder(unlinked) is True
+    assert directory.delete_elder(pending) is True
+
+    assert directory.get(unlinked) is None and directory.get(pending) is None
+
+
+def test_audio_keys_are_listed_per_elder_and_go_with_the_elder(directory):
+    assert directory.audio_keys_of(12) == []
+    seed_audio(directory, 12, "12-a.wav")
+    seed_audio(directory, 12, "12-b.wav")
+    seed_audio(directory, 13, "13-a.wav")
+
+    assert sorted(directory.audio_keys_of(12)) == ["12-a.wav", "12-b.wav"]
+    assert directory.audio_keys_of(13) == ["13-a.wav"]
+    assert directory.audio_keys_of(4242) == []
+
+    directory.delete_elder(12)
+
+    assert directory.audio_keys_of(12) == []
+    assert directory.audio_keys_of(13) == ["13-a.wav"]
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_calls_without_a_recording_have_no_audio_key():
+    directory = _postgres()
+    with directory._pool.connection() as conn:
+        conn.execute("INSERT INTO calls (elder_id, status) VALUES (12, 'no_answer')")
+        conn.execute("INSERT INTO calls (elder_id, status, audio_key) VALUES (12, 'completed', '12-a.wav')")
+
+    assert directory.audio_keys_of(12) == ["12-a.wav"]
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
+def test_detaching_clears_only_the_guardian_and_the_call_consent_columns():
+    """보호자 탈퇴는 전화 동의만 비운다. 가입 동의·공유 동의·통화 시각·통화 기록은 그대로다."""
+    directory = _postgres()
+    with directory._pool.connection() as conn:
+        conn.execute("UPDATE elders SET agreed_at = now(), share_agreed_at = now() WHERE elder_id = 13")
+        conn.execute("INSERT INTO calls (elder_id, status, audio_key) VALUES (13, 'completed', '13-a.wav')")
+
+    directory.detach_all_from(1)
+
+    with directory._pool.connection() as conn:
+        row = conn.execute(
+            "SELECT guardian_id, consent_at, agreed_at IS NOT NULL, share_agreed_at IS NOT NULL, "
+            "(SELECT count(*) FROM calls WHERE elder_id = 13) FROM elders WHERE elder_id = 13"
+        ).fetchone()
+    assert row == (None, None, True, True, 1)
+
+
 @pytest.mark.skipif(not DATABASE_URL, reason="DATABASE_URL이 없다")
 def test_the_new_call_time_lands_in_the_column_the_scheduler_reads():
     """스케줄러의 명부(PostgresRoster)는 elders.call_time을 매분 읽는다. 바꾼 값이 그 칸에 실제로 들어가야 바로 적용된다."""

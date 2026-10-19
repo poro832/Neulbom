@@ -107,6 +107,20 @@ def test_the_same_hash_cannot_be_added_twice(make_store):
         store.replace(elder_id=13, key_prefix=new.key_prefix, key_hash=new.key_hash)
 
 
+def test_removing_an_elders_keys_blocks_them_and_leaves_other_elders(make_store):
+    store = make_store(Clock())
+    old = add(store, 12)
+    new = add(store, 12)
+    other = add(store, 13)
+
+    assert store.remove_for_elder(12) == 2  # 폐기된 옛 열쇠도 지운다
+
+    assert store.find_elder(new.key_hash) is None and store.find_elder(old.key_hash) is None
+    assert store.last_used_at(new.key_hash) is None
+    assert store.find_elder(other.key_hash) == 13
+    assert store.remove_for_elder(12) == 0
+
+
 class ExplodingStore:
     def find_elder(self, key_hash):
         raise AssertionError("저장소를 부르면 안 된다")

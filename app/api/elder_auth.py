@@ -58,6 +58,10 @@ class ElderKeyStore(Protocol):
 
     def last_used_at(self, key_hash: str) -> float | None: ...
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        """그 어르신의 열쇠를 폐기된 것까지 모두 지운다(탈퇴). 지운 수. Postgres에서는 CASCADE도 같은 일을 한다."""
+        ...
+
 
 class InMemoryElderKeyStore:
     def __init__(self, wall_clock: Callable[[], float] = time.time) -> None:
@@ -91,6 +95,13 @@ class InMemoryElderKeyStore:
         with self._lock:
             row = self._rows.get(key_hash)
             return None if row is None else row["last_used_at"]
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._lock:
+            gone = [h for h, row in self._rows.items() if row["elder_id"] == elder_id]
+            for key_hash in gone:
+                del self._rows[key_hash]
+            return len(gone)
 
 
 class ElderAuth(Protocol):

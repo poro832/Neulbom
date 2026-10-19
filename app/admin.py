@@ -11,9 +11,13 @@
     guardian verify N   보호자의 이메일을 수동으로 인증한 것으로 기록한다 (Firebase를 못 쓰는 사람용)
     check                                         서버 반영 점검 — DB 표·칸, 설정, 푸시 열쇠(비밀 값은 출력하지 않는다)
     guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
+    guardian delete N --yes                       보호자 N을 지운다 — 어르신은 연결 전으로 돌리고(지우지 않는다) 계정·열쇠·폰 등록·개인 코드·알림을 지운다
     elder assign --elder-id N --guardian-id M     어르신을 그 보호자에게 옮긴다
+    elder delete N --yes                          어르신 N을 지운다 — 녹음(S3)을 최선으로 지우고 통화·점수·요약·언급·연락처·열쇠·코드를 지운다
 
 **동의(`consent_at`)는 여기서 채우지 않는다.** 동의는 사람이 받는 것이다.
+**지우기(`delete`)는 `--yes`가 있어야 한다.** 없으면 무엇이 지워지는지 보여 주기만 하고 아무것도 지우지 않는다.
+되돌릴 수 없다. 앱의 탈퇴(app/api/account_deletion.py)와 같은 순서로 지운다.
 """
 
 from __future__ import annotations
@@ -25,11 +29,15 @@ import sys
 from collections.abc import Callable
 from datetime import datetime
 
+from app.api.account_deletion import withdraw_elder, withdraw_guardian
 from app.api.db import connect, database_url
+from app.api.devices import DeviceStore
 from app.api.elder_directory import DirectoryAdmin
 from app.api.guardian_accounts import EmailTaken, GuardianAccounts
 from app.api.guardian_auth import AmbiguousPrefix, GuardianKeyStore, generate_key
+from app.api.invites import InviteStore
 from app.api.passwords import hash_password
+from app.recordings import RecordingDeleter, recording_deleter_from_env
 from app.scheduler import KST
 
 MIN_PASSWORD = 8
@@ -66,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     set_login = guardian.add_parser("set-login", help="보호자에게 이메일 로그인을 붙인다")
     set_login.add_argument("guardian_id", type=int)
     set_login.add_argument("--email", required=True)
+    delete_guardian = guardian.add_parser(
+        "delete", help="보호자를 지운다(어르신은 연결 전으로 돌린다, --yes가 있어야 지운다)"
+    )
+    delete_guardian.add_argument("guardian_id", type=int)
+    delete_guardian.add_argument("--yes", action="store_true", help="정말 지운다(되돌릴 수 없다)")
 
     groups.add_parser("check", help="서버 반영 점검(DB 표·칸, 설정, 푸시 열쇠)")
 
@@ -73,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     assign = elder.add_parser("assign", help="어르신을 보호자에게 옮긴다")
     assign.add_argument("--elder-id", type=int, required=True)
     assign.add_argument("--guardian-id", type=int, required=True)
+    delete_elder = elder.add_parser(
+        "delete", help="어르신과 그 통화·연락처·녹음을 지운다(--yes가 있어야 지운다)"
+    )
+    delete_elder.add_argument("elder_id", type=int)
+    delete_elder.add_argument("--yes", action="store_true", help="정말 지운다(되돌릴 수 없다)")
     return parser
 
 
@@ -86,6 +104,9 @@ def run(
     accounts: GuardianAccounts | None = None,
     read_password: Callable[[str], str] = getpass.getpass,
     pool=None,
+    devices: DeviceStore | None = None,
+    invites: InviteStore | None = None,
+    recording_deleter: RecordingDeleter | None = None,
 ) -> int:
     err = err or (lambda text="": print(text, file=sys.stderr))
     args = build_parser().parse_args(argv)
@@ -211,12 +232,52 @@ def run(
         out(f"보호자 {args.guardian_id}번에게 이메일 로그인을 붙였다. 연결된 어르신과 열쇠는 그대로다.")
         return 0
 
+    if (args.group, args.action) == ("guardian", "delete"):
+        if accounts is None:
+            err("계정 저장소가 없다.")
+            return 1
+        if accounts.profile(args.guardian_id) is None:
+            err(f"그런 보호자가 없다 — 보호자 번호 {args.guardian_id}.")
+            return 1
+        linked = len(directory.elders_of(args.guardian_id))
+        if not args.yes:
+            err(
+                f"보호자 {args.guardian_id}번을 지우면 계정·열쇠·폰 등록·개인 코드·알림이 지워지고 되돌릴 수 없다. "
+                f"연결된 어르신 {linked}명은 지우지 않고 연결 전으로 돌린다(안부 전화가 멈춘다)."
+            )
+            err(f"정말 지우려면 `guardian delete {args.guardian_id} --yes`로 다시 실행한다.")
+            return 1
+        detached = withdraw_guardian(
+            args.guardian_id, elders=directory, accounts=accounts, keys=keys, devices=devices, invites=invites
+        )
+        out(f"보호자 {args.guardian_id}번을 지웠다 — 어르신 {detached}명은 지우지 않고 연결 전으로 돌렸다.")
+        return 0
+
     if (args.group, args.action) == ("elder", "assign"):
         if not directory.assign_elder(args.elder_id, args.guardian_id):
             err("옮기지 못했다 — 어르신이나 보호자가 없다.")
             return 1
         out(f"어르신 {args.elder_id}번을 보호자 {args.guardian_id}번에게 옮겼다.")
         out("동의(consent_at)는 바뀌지 않았다. 동의는 사람이 받아서 직접 찍는다.")
+        return 0
+
+    if (args.group, args.action) == ("elder", "delete"):
+        if directory.get(args.elder_id) is None:
+            err(f"그런 어르신이 없다 — 어르신 번호 {args.elder_id}.")
+            return 1
+        recordings = len(directory.audio_keys_of(args.elder_id))
+        if not args.yes:
+            err(
+                f"어르신 {args.elder_id}번을 지우면 통화·점수·요약·언급·연락처·열쇠·코드가 지워지고 되돌릴 수 없다. "
+                f"녹음 {recordings}개는 S3에서 지운다(실패하면 버킷의 30일 규칙이 지운다)."
+            )
+            err(f"정말 지우려면 `elder delete {args.elder_id} --yes`로 다시 실행한다.")
+            return 1
+        result = withdraw_elder(args.elder_id, elders=directory, recording_deleter=recording_deleter)
+        out(
+            f"어르신 {args.elder_id}번을 지웠다 — 녹음 {result.recordings}개 삭제 시도, 실패 {result.failed}개"
+            + ("(버킷의 30일 규칙이 지운다)." if result.failed else ".")
+        )
         return 0
 
     raise AssertionError("도달할 수 없다 — argparse가 걸러야 한다")
@@ -236,9 +297,11 @@ def main(argv: list[str] | None = None) -> int:
         print("DATABASE_URL이 없다 — 열쇠를 만들 DB가 없다.", file=sys.stderr)
         return 1
 
+    from app.api.postgres_devices import PostgresDeviceStore
     from app.api.postgres_elder_directory import PostgresElderDirectory
     from app.api.postgres_guardian_accounts import PostgresGuardianAccounts
     from app.api.postgres_guardian_keys import PostgresGuardianKeyStore
+    from app.api.postgres_invites import PostgresInviteStore
 
     pool = connect(url)
     try:
@@ -248,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
             directory=PostgresElderDirectory(pool=pool),
             accounts=PostgresGuardianAccounts(pool=pool),
             pool=pool,
+            devices=PostgresDeviceStore(pool=pool),
+            invites=PostgresInviteStore(pool=pool),
+            # 서버와 같은 버킷 설정(.env의 RECORDINGS_BUCKET). 여기서는 S3에 닿지 않고 `elder delete --yes`에서만 닿는다.
+            recording_deleter=recording_deleter_from_env(),
         )
     finally:
         pool.close()

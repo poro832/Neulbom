@@ -98,6 +98,14 @@ class Reports(Protocol):
         """
         ...
 
+    def remove_for_elder(self, elder_id: int) -> int:
+        """그 어르신의 통화를 모두 지운다(탈퇴). 지운 통화 수.
+
+        Postgres에서는 통화의 점수·전사·대화·요약·언급도 CASCADE로 같이 지워지고, 어르신 행을 지우면 이 통화들도
+        CASCADE로 지워진다 — 메모리 모드에서도 결과가 같도록 둔다.
+        """
+        ...
+
 
 def _mean(values: list[int]) -> float | None:
     return None if not values else sum(values) / len(values)
@@ -203,3 +211,9 @@ class InMemoryReports:
         completed = [c for c in self._of(elder_id) if c["status"] == "completed"]
         window = sorted(completed, key=lambda c: c["call_id"], reverse=True)[:BASELINE_WINDOW]
         return sum(1 for c in window if c["has_metrics"] and not c["degraded"])
+
+    def remove_for_elder(self, elder_id: int) -> int:
+        with self._lock:
+            before = len(self._calls)
+            self._calls = [c for c in self._calls if c["elder_id"] != elder_id]
+            return before - len(self._calls)
