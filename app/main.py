@@ -466,6 +466,7 @@ def build_server(
         lifecycle=lifecycle,
         guardian_auth=guardian_auth,
         elders=elders,
+        elder_auth=None if app_data is None else app_data.elder_auth,
         manual_calls_per_day=manual_calls_per_day,
     )
 

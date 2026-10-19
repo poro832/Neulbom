@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url_for
+from app.api.elder_auth import ElderAuth, elder_key_label
 from app.api.elder_directory import ElderDirectory
 from app.api.guardian_auth import GuardianAuth, attempt_label
 from app.api.lifecycle import CallLifecycle
@@ -84,6 +85,7 @@ def build_app(
     lifecycle: CallLifecycle | None = None,
     guardian_auth: GuardianAuth | None = None,
     elders: ElderDirectory | None = None,
+    elder_auth: ElderAuth | None = None,
     manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
     wall_clock: Callable[[], float] = time.time,
 ) -> FastAPI:
@@ -158,6 +160,39 @@ def build_app(
                     content={"call_id": call.call_id, "status": "in_progress"},
                 )
 
+            return _dial(call)
+
+    if elder_auth is not None and elders is not None:
+
+        @app.post("/v1/me/call-request")
+        def request_my_call(authorization: str | None = Header(default=None)) -> JSONResponse:
+            """어르신 본인이 "통화하기"를 눌러 안부 전화를 요청한다.
+
+            보호자의 `/v1/calls/request`와 같은 문들을 지난다 — 열쇠, 연결과 동의,
+            하루 횟수(같은 한도를 나눠 쓴다). 걸리는 번호는 언제나 열쇠 주인의 것이다.
+            """
+            elder_id = elder_auth.authenticate(authorization)
+            if elder_id is None:
+                logger.warning("어르신 열쇠 인증 실패 key=%s", elder_key_label(authorization))
+                raise HTTPException(status_code=401, detail="열쇠가 필요합니다")
+
+            access = elders.get(elder_id)
+            if access is None or access.guardian_id is None or not access.consenting:
+                # 보호자가 연결하고 승인하기 전에는 전화가 나가지 않는다.
+                raise HTTPException(status_code=403, detail="보호자가 연결하기 전에는 전화를 걸 수 없어요")
+
+            since = kst_day_start(wall_clock())
+            if store.count_requested_since(elder_id, since) >= manual_calls_per_day:
+                raise HTTPException(status_code=429, detail="오늘 요청 횟수를 넘었습니다")
+            if store.find_elder(elder_id) is None:
+                raise HTTPException(status_code=404, detail="등록되지 않은 어르신입니다")
+
+            call, created = store.find_active_or_create(elder_id, trigger_type="requested")
+            if not created:
+                return JSONResponse(
+                    status_code=409,
+                    content={"call_id": call.call_id, "status": "in_progress"},
+                )
             return _dial(call)
 
     def _dial(call: CallRecord) -> JSONResponse:

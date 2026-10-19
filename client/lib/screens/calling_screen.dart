@@ -36,6 +36,7 @@ class _CallingScreenState extends State<CallingScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   _Phase _phase = _Phase.requesting;
+  String? _failure;
 
   @override
   void initState() {
@@ -55,12 +56,25 @@ class _CallingScreenState extends State<CallingScreen>
 
   Future<void> _request() async {
     try {
-      await NulbomApi.requestCall(elderId: widget.elderId);
+      await NulbomApi.requestMyCall();
       // 409(이미 진행 중)도 성공으로 다룬다. 어르신 입장에서는
       // "전화가 오고 있다"로 똑같다.
       if (mounted) setState(() => _phase = _Phase.waiting);
+    } on ApiException catch (e) {
+      // 서버가 알려 준 이유(연결 전, 오늘 횟수 초과 등)를 그대로 보인다.
+      if (mounted) {
+        setState(() {
+          _failure = e.message;
+          _phase = _Phase.failed;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _phase = _Phase.failed);
+      if (mounted) {
+        setState(() {
+          _failure = null;
+          _phase = _Phase.failed;
+        });
+      }
     }
   }
 
@@ -135,7 +149,7 @@ class _CallingScreenState extends State<CallingScreen>
       case _Phase.waiting:
         return '전화기가 울리면 받아 주세요.\n대화 내용은 보호자에게 전해집니다.';
       case _Phase.failed:
-        return '잠시 후 다시 시도해 주세요';
+        return _failure ?? '잠시 후 다시 시도해 주세요';
     }
   }
 

@@ -509,6 +509,17 @@ class NulbomApi {
     throw Exception(callRequestMessage(response.statusCode));
   }
 
+  /// 어르신 본인이 "통화하기"로 안부 전화를 요청한다 — 어르신 열쇠로 부른다.
+  /// 이미 전화가 오는 중(409)인 것은 오류가 아니라 같은 "곧 전화가 갑니다"다.
+  static Future<void> requestMyCall({String? key}) async {
+    try {
+      await _send('POST', '/v1/me/call-request', key: await _elderKeyOrThrow(key));
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) return;
+      rethrow;
+    }
+  }
+
   /// 전화 요청이 거절된 이유를 보호자가 알아볼 말로 바꾼다.
   /// 서버는 401을 열쇠의 없음, 틀림, 폐기에 똑같이 쓴다(이유를 알려 주지 않으려고).
   static String callRequestMessage(int statusCode) {
