@@ -285,6 +285,10 @@ class ContactRequest(BaseModel):
     phone: str = Field(pattern=r"^[0-9+\- ]{5,20}$")
 
 
+class PhoneChangeRequest(BaseModel):
+    phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
+
+
 class CallTimeRequest(BaseModel):
     # HH:MM, 정각이나 30분. 숫자는 [0-9]만 받는다(\d는 전각·다른 문자의 숫자도 맞는다).
     call_time: str = Field(pattern=r"^([01][0-9]|2[0-3]):(00|30)$")
@@ -511,6 +515,47 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             "안부 전화 시간을 바꿨다 elder_id=%s guardian_id=%s 시각=%s", elder_id, guardian_id, hhmm(value)
         )
         return {"call_time": hhmm(value)}
+
+    # ------------------------------------------------ 어르신 전화번호
+
+    @app.get("/v1/elders/{elder_id}/phone")
+    @guarded
+    def elder_phone(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        guardian_id = guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        phone = data.elders.phone_of(elder_id)
+        if phone is None:
+            raise HTTPException(status_code=404, detail=NO_ELDER)
+        return {"phone": phone}
+
+    @app.put("/v1/elders/{elder_id}/phone")
+    @guarded
+    def change_elder_phone(
+        body: PhoneChangeRequest,
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        """어르신이 폰(번호)을 바꿨을 때 보호자가 새 번호로 고친다.
+
+        옛 번호의 폰이 남의 손에 넘어가도 어르신 기록을 못 보도록 어르신 열쇠를 모두 지운다. 어르신은 새 폰에서
+        연결 코드로 다시 들어온다(보호자가 코드를 새로 만든다).
+        """
+        guardian_id = active_guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        phone = body.phone.strip()
+        try:
+            changed = data.elders.set_phone(elder_id, guardian_id, phone)
+        except PhoneTaken:
+            raise HTTPException(status_code=409, detail=PHONE_USED)
+        if not changed:
+            raise HTTPException(status_code=404, detail=NO_ELDER)
+        removed = data.elder_keys.remove_for_elder(elder_id)
+        # 번호·이름은 남기지 않는다.
+        logger.info("어르신 전화번호를 바꿨다 elder_id=%s guardian_id=%s 지운 열쇠=%s", elder_id, guardian_id, removed)
+        return {"phone": phone}
 
     @app.get("/v1/guardian/alerts")
     @guarded

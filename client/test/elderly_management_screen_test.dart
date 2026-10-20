@@ -171,4 +171,125 @@ void main() {
 
     expect(find.text('열쇠가 필요합니다'), findsOneWidget);
   });
+
+  group('어르신 정보 수정', () {
+    /// 목록과 번호 읽기·바꾸기·연결 코드 만들기에 답한다. 부른 요청("메서드 경로")을 남긴다.
+    http.Client server(List<String> requests, {int changeStatus = 200, String? changeDetail}) =>
+        MockClient((request) async {
+          requests.add('${request.method} ${request.url.path}');
+          final path = request.url.path;
+          if (path == '/v1/guardian/elders') {
+            return json({
+              'elders': [elder(20, '홍길동', calls: 3), elder(21, '김영희')],
+            });
+          }
+          if (path == '/v1/elders/20/phone' && request.method == 'GET') {
+            return json({'phone': '010-1111-2222'});
+          }
+          if (path == '/v1/elders/20/phone' && request.method == 'PUT') {
+            if (changeStatus != 200) return json({'detail': changeDetail}, changeStatus);
+            return json({'phone': jsonDecode(request.body)['phone']});
+          }
+          if (path == '/v1/elders/20/pairing-code') {
+            return json({'code': '048213', 'expires_at': '2026-10-21T09:00:00+09:00'});
+          }
+          return json({});
+        });
+
+    testWidgets('이름을 눌러도 다른 화면으로 가지 않는다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests);
+
+      await open(tester);
+      await tester.tap(find.text('홍길동'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('어르신 관리'), findsOneWidget);
+      expect(find.byType(ElderlyManagementScreen), findsOneWidget);
+      expect(requests, ['GET /v1/guardian/elders']);
+    });
+
+    testWidgets('수정을 누르면 지금 번호가 채워져 열리고, 바꾸면 새 연결 코드를 보여 준다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests);
+
+      await open(tester);
+      await tester.tap(find.byKey(const Key('edit-20')));
+      await tester.pumpAndSettle();
+      expect(find.text('홍길동 어르신 정보 수정'), findsOneWidget);
+      expect(find.widgetWithText(TextField, '010-1111-2222'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('elder-phone')), '010-9999-8888');
+      await tester.tap(find.text('저장'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('전화번호를 바꿨어요'), findsOneWidget);
+      expect(find.text('048213'), findsOneWidget);
+      expect(requests, containsAllInOrder(['PUT /v1/elders/20/phone', 'POST /v1/elders/20/pairing-code']));
+
+      await tester.tap(find.text('확인'));
+      await tester.pumpAndSettle();
+      // 목록을 다시 읽는다
+      expect(requests.where((r) => r == 'GET /v1/guardian/elders').length, 2);
+    });
+
+    testWidgets('번호를 안 바꾸고 저장하면 서버를 부르지 않고 닫힌다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests);
+
+      await open(tester);
+      await tester.tap(find.byKey(const Key('edit-20')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('저장'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('홍길동 어르신 정보 수정'), findsNothing);
+      expect(requests, isNot(contains('PUT /v1/elders/20/phone')));
+    });
+
+    testWidgets('다른 어르신이 쓰는 번호면 서버 문장을 보여 주고 코드는 만들지 않는다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests, changeStatus: 409, changeDetail: '이미 등록된 번호예요');
+
+      await open(tester);
+      await tester.tap(find.byKey(const Key('edit-20')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('elder-phone')), '010-3333-4444');
+      await tester.tap(find.text('저장'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('이미 등록된 번호예요'), findsOneWidget);
+      expect(find.text('홍길동 어르신 정보 수정'), findsOneWidget);
+      expect(requests, isNot(contains('POST /v1/elders/20/pairing-code')));
+    });
+
+    testWidgets('전화번호 모양이 틀리면 서버를 부르지 않는다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests);
+
+      await open(tester);
+      await tester.tap(find.byKey(const Key('edit-20')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('elder-phone')), '123');
+      await tester.tap(find.text('저장'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('전화번호를 확인해 주세요.'), findsOneWidget);
+      expect(requests, isNot(contains('PUT /v1/elders/20/phone')));
+    });
+
+    testWidgets('취소하면 아무것도 바꾸지 않는다', (tester) async {
+      final requests = <String>[];
+      NulbomApi.client = server(requests);
+
+      await open(tester);
+      await tester.tap(find.byKey(const Key('edit-20')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('홍길동 어르신 정보 수정'), findsNothing);
+      expect(requests, isNot(contains('PUT /v1/elders/20/phone')));
+    });
+  });
 }

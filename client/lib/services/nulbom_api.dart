@@ -300,6 +300,19 @@ class NulbomApi {
     return PairingCode.fromJson(json);
   }
 
+  /// 어르신 전화번호를 읽는다(보호자가 자기 어르신의 번호를 고치기 전에 보여 준다).
+  static Future<String> elderPhone(int elderId, {String? key}) async {
+    final json = await _send('GET', '/v1/elders/$elderId/phone', key: _guardianKeyOrThrow(key));
+    return json['phone'] as String;
+  }
+
+  /// 어르신 전화번호를 바꾼다. 서버가 옛 폰의 어르신 열쇠를 모두 지운다.
+  static Future<String> changeElderPhone(int elderId, String phone, {String? key}) async {
+    final json = await _send('PUT', '/v1/elders/$elderId/phone',
+        key: _guardianKeyOrThrow(key), body: {'phone': phone});
+    return json['phone'] as String;
+  }
+
   static Future<List<ElderSummary>> guardianElders({String? key}) async {
     final json = await _send('GET', '/v1/guardian/elders', key: _guardianKeyOrThrow(key));
     return (json['elders'] as List<dynamic>)
