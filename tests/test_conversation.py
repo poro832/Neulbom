@@ -356,3 +356,14 @@ def test_each_stage_of_a_turn_is_timed_in_the_log(caplog):
     assert "인식=1200ms" in message
     assert "생성=900ms" in message
     assert "합성=2100ms" in message
+
+
+def test_the_greeting_is_one_sentence_so_no_pause_opens_between_sentences():
+    """문장 사이 무음에 어르신이 말을 시작하면 인사와 겹친다(시끄러운 현장 피드백, 2026-10-20)."""
+    from app.media.clova_chat import _join_sentences
+    from app.media.conversation import GREETING
+
+    assert _join_sentences(GREETING) == GREETING  # 문장 경계가 하나도 없다
+    assert GREETING.count(".") == 0
+    assert GREETING.endswith("?")
+    assert len(GREETING) <= 40
