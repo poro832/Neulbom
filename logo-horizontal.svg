@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" role="img" aria-labelledby="t">
+  <title id="t">늘봄 NUELBOM</title>
+  <g transform="translate(20 20) scale(0.3125)">
+    <rect width="512" height="512" rx="120" fill="#1A6BFF"/>
+    <circle cx="136" cy="136" r="38" fill="#FFC21A"/>
+    <path d="M256 404V268" fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
+    <path d="M256 282C196 282 146 244 136 182C204 176 256 214 256 282Z" fill="#FFFFFF"/>
+    <path d="M256 262C256 184 312 126 392 124C398 204 344 262 256 262Z" fill="#FFFFFF"/>
+    <path d="M170 404C206 436 306 436 342 404" fill="none" stroke="#FFFFFF" stroke-opacity=".55" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <!-- 글꼴이 없는 환경에서는 대체 글꼴로 보입니다. 정확한 모양이 필요하면 글자를 윤곽선으로 바꿔 쓰세요. -->
+  <text x="200" y="112" font-family="'IBM Plex Sans KR','Noto Sans KR','Malgun Gothic',sans-serif" font-size="84" font-weight="700" fill="#0E2548" letter-spacing="-2">늘봄</text>
+  <text x="204" y="152" font-family="'IBM Plex Sans KR','Noto Sans KR','Malgun Gothic',sans-serif" font-size="30" font-weight="500" fill="#3C5C8C" letter-spacing="6">NUELBOM</text>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+  <title id="t">늘봄 로고</title>
+  <rect width="512" height="512" rx="120" fill="#1A6BFF"/>
+  <!-- 햇빛 -->
+  <circle cx="136" cy="136" r="38" fill="#FFC21A"/>
+  <!-- 새싹: 줄기 -->
+  <path d="M256 404V268" fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
+  <!-- 새싹: 왼쪽 잎 -->
+  <path d="M256 282C196 282 146 244 136 182C204 176 256 214 256 282Z" fill="#FFFFFF"/>
+  <!-- 새싹: 오른쪽 잎 -->
+  <path d="M256 262C256 184 312 126 392 124C398 204 344 262 256 262Z" fill="#FFFFFF"/>
+  <!-- 땅(흙) 곡선: 전화 신호처럼 퍼지는 호 -->
+  <path d="M170 404C206 436 306 436 342 404" fill="none" stroke="#FFFFFF" stroke-opacity=".55" stroke-width="18" stroke-linecap="round"/>
+</svg>
