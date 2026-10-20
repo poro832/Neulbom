@@ -323,6 +323,21 @@ CREATE TABLE elder_link_codes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 어르신 탈퇴 요청: 보호자 전원이 승인해야 어르신이 지워진다. 어르신당 하나, 승인은 보호자마다 하나.
+CREATE TABLE elder_withdrawals (
+    elder_id     BIGINT PRIMARY KEY REFERENCES elders(elder_id) ON DELETE CASCADE,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- 보호자가 한 명이라도 거절하면 채운다. 어르신 앱에 거절됐다고 보이고, 어르신은 다시 요청할 수 있다.
+    rejected_at  TIMESTAMPTZ
+);
+
+CREATE TABLE elder_withdrawal_approvals (
+    elder_id    BIGINT NOT NULL REFERENCES elder_withdrawals(elder_id) ON DELETE CASCADE,
+    guardian_id BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    approved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (elder_id, guardian_id)
+);
+
 -- 어르신 폰 전용 열쇠. 지문만 저장한다(app/api/elder_auth.py).
 CREATE TABLE elder_keys (
     key_id       BIGSERIAL PRIMARY KEY,

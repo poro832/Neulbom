@@ -792,6 +792,7 @@ def app_data_for(
             recordings_dir=recordings_dir,
         )
         notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
+        data.notifier = notifier
         return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
     from app.api.postgres_alerts import PostgresAlertStore
@@ -804,6 +805,7 @@ def app_data_for(
     from app.api.postgres_link_codes import PostgresLinkCodeStore
     from app.api.postgres_pairing import PostgresPairingStore
     from app.api.postgres_reports import PostgresReports
+    from app.api.postgres_withdrawals import PostgresWithdrawalStore
 
     alerts = PostgresAlertStore(pool=pool)
     elder_keys = PostgresElderKeyStore(pool=pool)
@@ -821,11 +823,13 @@ def app_data_for(
         accounts=PostgresGuardianAccounts(pool=pool),
         devices=PostgresDeviceStore(pool=pool),
         links=PostgresLinkCodeStore(pool=pool),
+        withdrawals=PostgresWithdrawalStore(pool=pool),
         email_verifier=email_verifier,
         recording_deleter=recording_deleter,
         recordings_dir=recordings_dir,
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
+    data.notifier = notifier
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
 

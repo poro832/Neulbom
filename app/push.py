@@ -172,18 +172,25 @@ class PushNotifier:
         self._spawn = spawn
 
     def notify(self, guardian_id: int, elder_id: int) -> None:
+        self._notify(guardian_id, elder_id, "확인이 필요해요")
+
+    def notify_withdrawal(self, guardian_id: int, elder_id: int) -> None:
+        """어르신이 탈퇴를 요청했다 — 보호자의 승인이 필요하다."""
+        self._notify(guardian_id, elder_id, "탈퇴를 요청했어요. 승인이 필요해요")
+
+    def _notify(self, guardian_id: int, elder_id: int, what: str) -> None:
         if self._sender is None:
             return
         try:
-            self._spawn(lambda: self._send_all(guardian_id, elder_id))
+            self._spawn(lambda: self._send_all(guardian_id, elder_id, what))
         except Exception:
             logger.exception("푸시 작업을 시작하지 못했다 guardian_id=%s", guardian_id)
 
-    def _send_all(self, guardian_id: int, elder_id: int) -> None:
+    def _send_all(self, guardian_id: int, elder_id: int, what: str = "확인이 필요해요") -> None:
         try:
             access = self._elders.get(elder_id)
             name = (access.name or "").strip() if access is not None else ""
-            body = f"{name} 어르신 확인이 필요해요" if name else "어르신 확인이 필요해요"
+            body = f"{name} 어르신 {what}" if name else f"어르신 {what}"
             tokens = self._devices.tokens_for(guardian_id)
         except Exception:
             logger.exception("푸시 대상을 읽지 못했다 guardian_id=%s", guardian_id)
