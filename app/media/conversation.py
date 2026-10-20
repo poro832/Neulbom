@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -44,10 +45,14 @@ class TooShortSound(Exception):
 #          그때 정상 흐름으로 돌아온다.
 # 단계 수(3)에 근거는 없다 — 실제 통화를 들어 보고 정할 숫자다. 대화 예절이라
 # 틀려도 점수가 틀리지는 않는다.
+# 되묻기는 최대한 하지 않는다(2026-10-20 엑스포 현장 피드백). 시끄러운 곳에서는 소음이 빈 전사로 이어지는 일이
+# 잦은데, 그때마다 "잘 못 들었어요"를 하면 AI가 어르신 말 위에 얹혀 통화가 더 엉킨다. 그래서 연속으로
+# RETRY_AFTER_FAILURES번 못 알아들었을 때만 한 문장으로 되묻고, 한 통화에서 RETRY_PROMPTS의 개수만큼만 한다.
+# 그 사이에는 조용히 기다린다 — 어르신이 다시 말하면 정상 흐름으로 돌아온다.
+RETRY_AFTER_FAILURES = 3
 RETRY_PROMPTS = (
-    "죄송해요, 잘 못 들었어요. 다시 말씀해 주시겠어요?",
+    "죄송한데 잘 못 들었어요, 다시 말씀해 주시겠어요?",
     "전화기를 입 가까이 대고 천천히 말씀해 주시겠어요?",
-    "괜찮아요, 편하실 때 말씀해 주세요. 기다리고 있을게요.",
 )
 
 # 전화를 받으면 AI가 먼저 건네는 말. 어르신의 "여보세요"를 기다려 인식하지 않는다 —
@@ -58,6 +63,14 @@ RETRY_PROMPTS = (
 # 한 문장이다. 문장 사이에 음성 합성이 무음을 넣는데, 시끄러운 곳에서는 어르신이 그 틈에 말을 시작해
 # 인사와 겹친다(2026-10-20 엑스포 현장 피드백). 질문은 끝에 둔다 — 어르신이 곧바로 대답할 자리다.
 GREETING = "안녕하세요 어르신, 늘봄에서 안부 전화 드렸는데 오늘 하루는 어떠세요?"
+
+
+# 전화를 받자마자 하는 "여보세요?". 첫 인사가 이미 나가고 있으므로 이 말에는 따로 답하지 않는다.
+_PICKUP_GREETING = re.compile(r"^(여보세[요여용오]+|여부세요|여보시오|여보)+$")
+
+
+def _is_pickup_greeting(text: str) -> bool:
+    return _PICKUP_GREETING.match(re.sub(r"[\s.,!?~…]+", "", text)) is not None
 
 
 @dataclass(frozen=True)
@@ -111,6 +124,9 @@ class ConversationResponder:
         self._clock = clock
         self.history: list[Turn] = []
         self._consecutive_failures = 0
+        self._retries_spoken = 0
+        # 어르신이 첫 인사에 "여보세요"만 한 횟수. 대본 인사 말고는 아무 말도 하지 않는 데 쓴다.
+        self._pickup_greetings = 0
 
     def greet(self, sample_rate: int) -> bytes:
         """통화가 연결되면 어르신보다 먼저 건네는 인사.
@@ -148,6 +164,8 @@ class ConversationResponder:
             return self._ask_again(sample_rate)
 
         self._consecutive_failures = 0
+        if self._pickup_only(said):
+            return self._script_greeting_only(sample_rate)
         # 어르신 발화를 먼저 넣어야 모델이 방금 한 말을 보고 답한다.
         self.history.append(Turn("elder", said, interrupted))
         transcribed = self._clock()
@@ -179,19 +197,44 @@ class ConversationResponder:
             self.history.append(Turn("ai", reply))
         return audio_out
 
+    def _pickup_only(self, said: str) -> bool:
+        """어르신이 전화를 받으며 '여보세요?'만 했는가 — 첫 인사가 나간 뒤, 본격적으로 말하기 전에."""
+        if not _is_pickup_greeting(said):
+            return False
+        if self._pickup_greetings >= 2:
+            return False  # 두 번 응했는데도 "여보세요"만 하신다 — 이제는 모델이 받는다
+        spoke_greeting = any(turn.speaker == "ai" for turn in self.history)
+        elder_said_something = any(turn.speaker == "elder" for turn in self.history)
+        return spoke_greeting and not elder_said_something
+
+    def _script_greeting_only(self, sample_rate: int) -> bytes:
+        """'여보세요?'에는 모델이 답하지 않는다. 짜여 있는 첫 인사만 들려준다.
+
+        첫 인사는 이미 나갔거나 나가는 중이므로 처음 한 번은 조용히 있는다. 어르신이 인사를 못 들어 한 번 더
+        '여보세요?'를 하셨다면 같은 대본을 한 번 다시 들려준다. 그 뒤로는 일반 대화로 넘긴다(계속 같은 말만
+        하면 고장 난 것으로 보인다). 기록에는 넣지 않는다 — 인사는 이미 대화 기록에 있다.
+        """
+        self._pickup_greetings += 1
+        logger.info("전화를 받으며 하신 인사에는 대본 인사로만 답한다 횟수=%d", self._pickup_greetings)
+        if self._pickup_greetings == 2:
+            return self._speak(self._greeting, sample_rate)
+        return b""
+
     def _ask_again(self, sample_rate: int) -> bytes:
-        """못 알아들었다. 연속 실패 횟수에 맞는 단계의 말을 한다."""
+        """못 알아들었다. 되묻기는 최대한 하지 않는다 — 연속으로 여러 번 못 알아들었을 때만 한 문장으로 되묻는다."""
         self._consecutive_failures += 1
-        if self._consecutive_failures > len(self._retry_prompts):
-            # 안내를 끝까지 했다. 더 말하는 것보다 조용히 기다리는 편이 낫다.
-            logger.warning(
-                "연속 %d회 못 알아들었다 — 안내를 마치고 기다린다",
-                self._consecutive_failures,
-            )
+        if self._consecutive_failures < RETRY_AFTER_FAILURES:
+            logger.info("못 알아들었지만 되묻지 않고 기다린다 연속=%d", self._consecutive_failures)
             return b""
-        return self._speak(
-            self._retry_prompts[self._consecutive_failures - 1], sample_rate
-        )
+        if self._retries_spoken >= len(self._retry_prompts):
+            # 되물을 만큼 물었다. 더 말하는 것보다 조용히 기다리는 편이 낫다.
+            logger.warning("연속 %d회 못 알아들었다 — 되물음을 마치고 기다린다", self._consecutive_failures)
+            return b""
+        prompt = self._retry_prompts[self._retries_spoken]
+        self._retries_spoken += 1
+        # 되물은 뒤에는 다시 처음부터 센다. 곧바로 또 되묻지 않는다.
+        self._consecutive_failures = 0
+        return self._speak(prompt, sample_rate)
 
     def _speak(self, text: str, sample_rate: int) -> bytes:
         try:
