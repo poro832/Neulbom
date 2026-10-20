@@ -330,7 +330,9 @@ CREATE TABLE elder_withdrawals (
     request_id   BIGINT GENERATED ALWAYS AS IDENTITY,
     requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- 보호자가 한 명이라도 거절하면 채운다. 어르신 앱에 거절됐다고 보이고, 어르신은 다시 요청할 수 있다.
-    rejected_at  TIMESTAMPTZ
+    rejected_at  TIMESTAMPTZ,
+    -- 전원이 승인한 순간 채운다. 이후에는 취소·재요청·거절이 닿지 않고 삭제가 끝날 때까지 남는다.
+    locked_at    TIMESTAMPTZ
 );
 
 CREATE TABLE elder_withdrawal_approvals (

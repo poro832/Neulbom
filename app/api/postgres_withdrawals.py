@@ -11,20 +11,29 @@ class PostgresWithdrawalStore:
 
     def open(self, elder_id: int, now: float) -> WithdrawalRequest:
         # 한 연결 안에서 이전 기록을 지우고 새로 만든다 — 중간에 실패하면 둘 다 되돌아간다. 번호는 새로 매겨진다.
+        # 잠긴(전원이 승인한) 요청은 지우지 않는다: DELETE가 0행이면 INSERT가 PK 충돌하므로, 그때는 그 요청을 돌려준다.
         with self._pool.connection() as conn:
-            conn.execute("DELETE FROM elder_withdrawals WHERE elder_id = %s", (elder_id,))
+            conn.execute(
+                "DELETE FROM elder_withdrawals WHERE elder_id = %s AND locked_at IS NULL", (elder_id,)
+            )
             row = conn.execute(
                 "INSERT INTO elder_withdrawals (elder_id, requested_at) VALUES (%s, to_timestamp(%s)) "
-                "RETURNING request_id",
+                "ON CONFLICT (elder_id) DO NOTHING RETURNING request_id",
                 (elder_id, now),
             ).fetchone()
+        if row is None:
+            existing = self.get(elder_id)
+            if existing is not None:
+                return existing
+            return self.open(elder_id, now)  # 그 사이 지워졌다 — 다시 시도한다
         return WithdrawalRequest(elder_id=elder_id, request_id=row[0], requested_at=now)
 
     def get(self, elder_id: int) -> WithdrawalRequest | None:
         with self._pool.connection() as conn:
             row = conn.execute(
                 "SELECT request_id, extract(epoch from requested_at)::float8, "
-                "extract(epoch from rejected_at)::float8 FROM elder_withdrawals WHERE elder_id = %s",
+                "extract(epoch from rejected_at)::float8, extract(epoch from locked_at)::float8 "
+                "FROM elder_withdrawals WHERE elder_id = %s",
                 (elder_id,),
             ).fetchone()
             if row is None:
@@ -37,6 +46,7 @@ class PostgresWithdrawalStore:
             request_id=row[0],
             requested_at=row[1],
             rejected_at=row[2],
+            locked_at=row[3],
             approved_by=frozenset(item[0] for item in approved),
         )
 
@@ -61,14 +71,31 @@ class PostgresWithdrawalStore:
         with self._pool.connection() as conn:
             updated = conn.execute(
                 "UPDATE elder_withdrawals SET rejected_at = to_timestamp(%s) "
-                "WHERE elder_id = %s AND request_id = %s AND rejected_at IS NULL",
+                "WHERE elder_id = %s AND request_id = %s AND rejected_at IS NULL AND locked_at IS NULL",
                 (now, elder_id, request_id),
             ).rowcount
         return updated == 1
 
+    def lock(self, elder_id: int, request_id: int, now: float) -> bool:
+        # 한 문장이다: 그 번호의 거절되지 않은 요청이 지금도 있을 때만 잠그고(이미 잠겼으면 그대로 두고) True.
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "UPDATE elder_withdrawals SET locked_at = COALESCE(locked_at, to_timestamp(%s)) "
+                "WHERE elder_id = %s AND request_id = %s AND rejected_at IS NULL RETURNING 1",
+                (now, elder_id, request_id),
+            ).fetchone()
+        return row is not None
+
     def cancel(self, elder_id: int) -> bool:
         with self._pool.connection() as conn:
-            return conn.execute("DELETE FROM elder_withdrawals WHERE elder_id = %s", (elder_id,)).rowcount == 1
+            return (
+                conn.execute(
+                    "DELETE FROM elder_withdrawals WHERE elder_id = %s AND locked_at IS NULL", (elder_id,)
+                ).rowcount
+                == 1
+            )
 
     def remove_for_elder(self, elder_id: int) -> int:
-        return 1 if self.cancel(elder_id) else 0
+        # 어르신이 지워진 뒤 정리다 — 잠긴 요청도 함께 지운다.
+        with self._pool.connection() as conn:
+            return conn.execute("DELETE FROM elder_withdrawals WHERE elder_id = %s", (elder_id,)).rowcount

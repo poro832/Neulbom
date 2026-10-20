@@ -406,3 +406,84 @@ def test_approving_again_after_a_failure_finishes_it_too(monkeypatch):
     # 요청이 이미 이어서 지워졌거나 다시 승인으로 끝났다 — 어느 쪽이든 어르신은 지워진다
     assert again.status_code in (200, 404)
     assert kit.data.elders.get(12) is None
+
+
+# ------------------------------------------------ 마지막 승인과 삭제 사이의 취소·재요청 (Codex 검토)
+
+
+def test_a_cancel_and_new_request_between_the_last_approval_and_the_delete_spare_the_elder(monkeypatch):
+    """보호자의 마지막 승인이 요청을 잠그려는 순간 어르신이 취소하고 다시 요청했다. 옛 승인으로 새 요청의 어르신을 지우면 안 된다."""
+    kit = make_app_kit()
+    ask(kit)
+    real_lock = kit.data.withdrawals.lock
+    elder = kit.elder_headers(12)
+
+    def lock_after_the_elder_changes_their_mind(elder_id, request_id, now):
+        kit.client.delete(REQUEST, headers=elder)  # 어르신이 취소하고
+        ask(kit)  # 다시 요청했다
+        return real_lock(elder_id, request_id, now)
+
+    monkeypatch.setattr(kit.data.withdrawals, "lock", lock_after_the_elder_changes_their_mind)
+
+    response = approve(kit)
+
+    assert response.status_code == 404
+    assert kit.data.elders.get(12) is not None
+    fresh = kit.data.withdrawals.get(12)
+    assert fresh is not None and fresh.approved_by == frozenset() and not fresh.locked
+
+
+def test_after_the_last_approval_the_elder_can_no_longer_cancel(monkeypatch):
+    """삭제가 실패해 잠긴 요청이 남았다. 그 뒤 어르신이 취소해도 이미 승인된 탈퇴는 되돌릴 수 없다."""
+    kit = make_app_kit()
+    ask(kit)
+    real_delete = kit.data.elders.delete_elder
+    calls = []
+
+    def flaky(elder_id):
+        calls.append(elder_id)
+        if len(calls) == 1:
+            raise RuntimeError("저장소 오류")
+        return real_delete(elder_id)
+
+    monkeypatch.setattr(kit.data.elders, "delete_elder", flaky)
+    elder = kit.elder_headers(12)
+    assert approve(kit).status_code == 503
+    assert kit.data.withdrawals.get(12).locked
+
+    cancelled = kit.client.delete(REQUEST, headers=elder)
+
+    assert cancelled.status_code == 409
+    assert cancelled.json() == {"detail": "보호자가 이미 승인해서 곧 탈퇴돼요"}
+    assert kit.data.withdrawals.get(12) is not None  # 요청은 그대로다
+    # 이어서 지워진다
+    kit.client.get(GUARDIAN_LIST, headers=kit.guardian_headers)
+    assert kit.data.elders.get(12) is None
+
+
+def test_a_locked_request_cannot_be_replaced_by_asking_again(monkeypatch):
+    kit = make_app_kit()
+    ask(kit)
+    monkeypatch.setattr(kit.data.elders, "delete_elder", lambda elder_id: (_ for _ in ()).throw(RuntimeError("저장소 오류")))
+    assert approve(kit).status_code == 503
+    locked_id = kit.data.withdrawals.get(12).request_id
+
+    again = ask(kit)
+
+    # 잠긴 요청이 있으면 이어서 지우려다 다시 실패해 503이다 — 새 요청으로 바뀌지는 않는다
+    assert again.status_code == 503
+    assert kit.data.withdrawals.get(12).request_id == locked_id
+    assert kit.data.withdrawals.get(12).locked
+
+
+def test_a_guardian_cannot_reject_after_the_last_approval_locked_the_request(monkeypatch):
+    kit = make_app_kit()
+    ask(kit)
+    monkeypatch.setattr(kit.data.elders, "delete_elder", lambda elder_id: (_ for _ in ()).throw(RuntimeError("저장소 오류")))
+    request_id = current_id(kit)
+    assert approve(kit, request_id=request_id).status_code == 503
+
+    rejected = reject(kit, request_id=request_id)
+
+    assert rejected.status_code in (404, 503)  # 거절은 닿지 않는다(이어서 지우려다 실패하면 503)
+    assert not kit.data.withdrawals.get(12).rejected
