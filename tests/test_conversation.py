@@ -7,8 +7,15 @@
 import logging
 
 import numpy as np
+import pytest
 
-from app.media.conversation import GREETING, RETRY_PROMPTS, ConversationResponder, Turn
+from app.media.conversation import (
+    GREETING,
+    NO_REPEAT_FALLBACK,
+    RETRY_PROMPTS,
+    ConversationResponder,
+    Turn,
+)
 
 AUDIO = np.zeros(160, dtype=np.float32)
 
@@ -147,21 +154,6 @@ def test_hello_when_picking_up_gets_no_reply_from_the_model():
     assert chat.seen == []
     assert voice.spoken == []
     assert responder.history == [Turn("ai", GREETING)]  # 인사는 한 번만 기록된다
-
-
-def test_a_second_hello_replays_only_the_scripted_greeting_once():
-    """인사를 못 들어서 한 번 더 "여보세요?"를 하신 것이다. 같은 대본만 다시 들려준다."""
-    responder, _, chat, voice = make(stt=FakeStt("여보세요", "여보세요?", "여보세요??"))
-    responder.history.append(Turn("ai", GREETING))
-
-    first = responder.respond(AUDIO, 8000)
-    second = responder.respond(AUDIO, 8000)
-
-    assert first == b""
-    assert second == GREETING.encode()
-    assert voice.spoken == [GREETING]
-    assert chat.seen == []
-    assert responder.history == [Turn("ai", GREETING)]
 
 
 def test_a_third_hello_goes_to_the_normal_conversation():
@@ -432,3 +424,96 @@ def test_the_greeting_is_one_sentence_so_no_pause_opens_between_sentences():
     assert GREETING.count(".") == 0
     assert GREETING.endswith("?")
     assert len(GREETING) <= 40
+
+
+# ------------------------------------------------- 같은 질문은 두 번 하지 않는다 (2026-10-20 현장 피드백)
+
+
+def history_with_question():
+    return [Turn("ai", "안녕하세요 어르신, 늘봄에서 안부 전화 드렸는데 오늘 하루는 어떠세요?")]
+
+
+def test_it_does_not_ask_the_same_question_again_and_remakes_the_reply():
+    chat = FakeChat("네, 그러시군요. 오늘 하루는 어떠세요?", "그러셨군요, 점심은 드셨어요?")
+    responder, _, _, voice = make(stt=FakeStt("그냥 그래요"), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert len(chat.seen) == 2  # 한 번 다시 만들었다
+    assert voice.spoken[-1] == "그러셨군요, 점심은 드셨어요?"
+    assert responder.history[-1] == Turn("ai", "그러셨군요, 점심은 드셨어요?")
+    # 다시 만들 때만 모델에게 당부를 붙이고, 대화 기록에는 남기지 않는다
+    assert chat.seen[1][-1].note
+    assert not chat.seen[0][-1].note
+    assert all(not turn.note for turn in responder.history)
+
+
+def test_when_the_remake_repeats_too_it_only_acknowledges_without_a_question():
+    chat = FakeChat("오늘 하루는 어떠세요?", "오늘 하루 어떠세요?")
+    responder, _, _, voice = make(stt=FakeStt("그냥 그래요"), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert voice.spoken[-1] == NO_REPEAT_FALLBACK
+    assert "?" not in NO_REPEAT_FALLBACK
+
+
+@pytest.mark.parametrize(
+    "said",
+    ["다시 말해줘", "다시 한번 말씀해 주세요", "못 들었어요", "뭐라고요?", "잘 안 들려요", "한 번 더 해 주세요"],
+)
+def test_it_repeats_the_question_only_when_the_elder_asks_to(said):
+    chat = FakeChat("오늘 하루는 어떠세요?")
+    responder, _, _, voice = make(stt=FakeStt(said), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert len(chat.seen) == 1  # 다시 만들지 않는다
+    assert voice.spoken[-1] == "오늘 하루는 어떠세요?"
+
+
+def test_a_different_question_is_fine():
+    chat = FakeChat("그러셨군요, 점심은 드셨어요?")
+    responder, _, _, voice = make(stt=FakeStt("그냥 그래요"), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert len(chat.seen) == 1
+    assert voice.spoken[-1] == "그러셨군요, 점심은 드셨어요?"
+
+
+def test_a_slightly_reworded_question_counts_as_the_same_question():
+    chat = FakeChat("그러세요, 오늘 하루는 어떠셨어요?", "그러세요, 몸은 좀 어떠세요?")
+    responder, _, _, voice = make(stt=FakeStt("그냥 그래요"), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert voice.spoken[-1] == "그러세요, 몸은 좀 어떠세요?"
+
+
+def test_a_reply_without_any_question_is_never_flagged():
+    chat = FakeChat("네, 알겠어요")
+    responder, _, _, _ = make(stt=FakeStt("그냥 그래요"), chat=chat)
+    responder.history.extend(history_with_question())
+
+    responder.respond(AUDIO, 8000)
+
+    assert len(chat.seen) == 1
+
+
+def test_hello_when_picking_up_never_replays_the_greeting_question():
+    """인사의 질문도 질문이다. 어르신이 다시 말해 달라고 하시지 않았으니 두 번 하지 않는다."""
+    responder, _, chat, voice = make(stt=FakeStt("여보세요", "여보세요?"))
+    responder.history.append(Turn("ai", GREETING))
+
+    first = responder.respond(AUDIO, 8000)
+    second = responder.respond(AUDIO, 8000)
+
+    assert first == b"" and second == b""
+    assert voice.spoken == []
+    assert chat.seen == []

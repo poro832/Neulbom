@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import time
@@ -65,6 +66,52 @@ RETRY_PROMPTS = (
 GREETING = "안녕하세요 어르신, 늘봄에서 안부 전화 드렸는데 오늘 하루는 어떠세요?"
 
 
+# 어르신이 다시 말해 달라고 하는 말. 이때만 앞서 한 질문을 다시 해도 된다.
+_ASKS_TO_REPEAT = re.compile(
+    r"다시\s*(한\s*번\s*)?(말|얘기|이야기)"
+    r"|못\s*(들|알아들)"
+    r"|안\s*들"
+    r"|들리지\s*(가\s*)?않"
+    r"|뭐라(고|구)"
+    r"|한\s*번\s*더"
+)
+
+# 같은 질문으로 보는 문장 모양 유사도. 어순만 조금 달라도 같은 질문이다.
+REPEATED_QUESTION_SIMILARITY = 0.75
+
+# 같은 질문을 두 번 하게 되는 답을 끝내 못 고쳤을 때 대신 하는 말. 새 질문이 아니다.
+NO_REPEAT_FALLBACK = "네, 알겠어요."
+
+NO_REPEAT_NOTE = "이미 한 질문은 다시 하지 말고 다른 이야기로 넘어가 주세요"
+
+
+def _asks_to_repeat(text: str) -> bool:
+    return _ASKS_TO_REPEAT.search(text) is not None
+
+
+def _normalized(text: str) -> str:
+    return re.sub(r"[\s.,!?~…]+", "", text)
+
+
+def _question_part(text: str) -> str:
+    """질문에 해당하는 끝부분(마지막 쉼표나 문장 끝 부호 뒤). 맞장구는 빼고 비교한다."""
+    pieces = [piece for piece in re.split(r"[,.!?。]+\s*", text.strip()) if piece.strip()]
+    return pieces[-1] if pieces else text
+
+
+def _is_same_question(reply: str, earlier: str) -> bool:
+    # 짧은 쪽 글자가 긴 쪽에 얼마나 들어 있는가. 긴 인사 속에 같은 질문이 들어 있어도,
+    # 어미만 조금 바뀐 같은 질문(어떠세요/어떠셨어요)도 잡고, 다른 질문(점심/몸)은 놓아 준다.
+    a = _normalized(_question_part(reply))
+    b = _normalized(_question_part(earlier))
+    if len(a) < 4 or len(b) < 4:
+        return False
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    matcher = difflib.SequenceMatcher(None, short, long, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return matched / len(short) >= REPEATED_QUESTION_SIMILARITY
+
+
 # 전화를 받자마자 하는 "여보세요?". 첫 인사가 이미 나가고 있으므로 이 말에는 따로 답하지 않는다.
 _PICKUP_GREETING = re.compile(r"^(여보세[요여용오]+|여부세요|여보시오|여보)+$")
 
@@ -79,6 +126,8 @@ class Turn:
     text: str
     # 어르신이 AI의 말이 끝나기 전에 끼어들어 답한 턴이다. 모델에게만 알린다(저장되는 기록은 따로 만든다).
     interrupted: bool = False
+    # 모델에게만 덧붙여 알리는 말(저장하지 않는다). 예: 같은 질문을 다시 하지 말라는 당부.
+    note: str = ""
 
 
 class SpeechToText(Protocol):
@@ -172,6 +221,7 @@ class ConversationResponder:
 
         try:
             reply = self.chat.reply(self.history).strip()
+            reply = self._without_repeated_question(reply, said)
         except Exception:
             logger.exception("응답 생성 실패 — 이 턴은 침묵한다")
             return b""
@@ -197,6 +247,27 @@ class ConversationResponder:
             self.history.append(Turn("ai", reply))
         return audio_out
 
+    def _repeats_earlier_question(self, reply: str) -> bool:
+        return any(
+            turn.speaker == "ai" and _is_same_question(reply, turn.text) for turn in self.history
+        )
+
+    def _without_repeated_question(self, reply: str, said: str) -> str:
+        """이미 한 질문을 또 하는 답이면 한 번 다시 만들고, 그래도 같으면 질문 없이 받아 주기만 한다.
+
+        어르신이 \"다시 말해줘\", \"못 들었어\"처럼 다시 말해 달라고 하셨을 때만 같은 질문을 되풀이한다.
+        """
+        if not reply or _asks_to_repeat(said) or not self._repeats_earlier_question(reply):
+            return reply
+        logger.info("이미 한 질문을 또 하려 한다 — 다시 만든다")
+        last = self.history[-1]
+        retry_history = [*self.history[:-1], Turn(last.speaker, last.text, last.interrupted, NO_REPEAT_NOTE)]
+        again = self.chat.reply(retry_history).strip()
+        if again and not self._repeats_earlier_question(again):
+            return again
+        logger.warning("다시 만들어도 같은 질문이다 — 질문 없이 받아 주기만 한다")
+        return NO_REPEAT_FALLBACK
+
     def _pickup_only(self, said: str) -> bool:
         """어르신이 전화를 받으며 '여보세요?'만 했는가 — 첫 인사가 나간 뒤, 본격적으로 말하기 전에."""
         if not _is_pickup_greeting(said):
@@ -208,16 +279,13 @@ class ConversationResponder:
         return spoke_greeting and not elder_said_something
 
     def _script_greeting_only(self, sample_rate: int) -> bytes:
-        """'여보세요?'에는 모델이 답하지 않는다. 짜여 있는 첫 인사만 들려준다.
+        """'여보세요?'에는 모델이 답하지 않는다. 짜여 있는 첫 인사가 이미 나갔거나 나가는 중이다.
 
-        첫 인사는 이미 나갔거나 나가는 중이므로 처음 한 번은 조용히 있는다. 어르신이 인사를 못 들어 한 번 더
-        '여보세요?'를 하셨다면 같은 대본을 한 번 다시 들려준다. 그 뒤로는 일반 대화로 넘긴다(계속 같은 말만
-        하면 고장 난 것으로 보인다). 기록에는 넣지 않는다 — 인사는 이미 대화 기록에 있다.
+        인사의 질문을 다시 들려주지도 않는다 — 같은 질문은 어르신이 \"다시 말해줘\"라고 하실 때만 한다.
+        두 번까지는 조용히 있고, 그 뒤로는 일반 대화로 넘긴다(계속 침묵하면 고장 난 것으로 보인다).
         """
         self._pickup_greetings += 1
         logger.info("전화를 받으며 하신 인사에는 대본 인사로만 답한다 횟수=%d", self._pickup_greetings)
-        if self._pickup_greetings == 2:
-            return self._speak(self._greeting, sample_rate)
         return b""
 
     def _ask_again(self, sample_rate: int) -> bytes:
