@@ -487,3 +487,81 @@ def test_a_guardian_cannot_reject_after_the_last_approval_locked_the_request(mon
 
     assert rejected.status_code in (404, 503)  # 거절은 닿지 않는다(이어서 지우려다 실패하면 503)
     assert not kit.data.withdrawals.get(12).rejected
+
+
+# ------------------------------------------------ 보호자가 바뀐 뒤에도 요청이 끝난다 (Codex 검토)
+
+
+def test_a_locked_request_still_finishes_after_the_guardian_is_gone(monkeypatch):
+    """전원 승인으로 잠겼는데 삭제가 실패했고, 그 사이 보호자가 계정을 지워 어르신에게 보호자가 없다. 승인할 사람이 없어도 끝나야 한다."""
+    kit = make_app_kit()
+    ask(kit)
+    real_delete = kit.data.elders.delete_elder
+    calls = []
+
+    def flaky(elder_id):
+        calls.append(elder_id)
+        if len(calls) == 1:
+            raise RuntimeError("저장소 오류")
+        return real_delete(elder_id)
+
+    monkeypatch.setattr(kit.data.elders, "delete_elder", flaky)
+    elder = kit.elder_headers(12)
+    assert approve(kit).status_code == 503
+    assert kit.data.withdrawals.get(12).locked
+
+    kit.data.elders.detach_all_from(1)  # 보호자가 탈퇴했다: 어르신 12는 연결 전이 된다
+    assert kit.data.elders.guardians_of(12) == []
+
+    status = kit.client.get(REQUEST, headers=elder)
+
+    assert status.status_code == 200 and status.json() == {"status": "none"}
+    assert kit.data.elders.get(12) is None
+    assert kit.client.get(REQUEST, headers=elder).status_code == 401
+
+
+def test_a_locked_request_finishes_even_when_a_different_guardian_took_over(monkeypatch):
+    kit = make_app_kit()
+    ask(kit)
+    real_delete = kit.data.elders.delete_elder
+    calls = []
+
+    def flaky(elder_id):
+        calls.append(elder_id)
+        if len(calls) == 1:
+            raise RuntimeError("저장소 오류")
+        return real_delete(elder_id)
+
+    monkeypatch.setattr(kit.data.elders, "delete_elder", flaky)
+    assert approve(kit).status_code == 503
+    kit.data.elders.detach_all_from(1)
+    kit.data.elders.link(12, 2)  # 다른 보호자가 연결했다 — 이 보호자는 승인한 적이 없다
+
+    # 잠긴 요청은 보호자 구성과 상관없이 끝난다(앞서 보호자가 승인한 탈퇴다). 어르신 폰이 상태를 읽으면 이어서 지운다.
+    assert kit.client.get(REQUEST, headers=kit.elder_headers(12)).json() == {"status": "none"}
+    assert kit.data.elders.get(12) is None
+
+
+def test_a_waiting_request_completes_once_nobody_is_left_to_approve():
+    """승인을 기다리던 보호자가 탈퇴해 어르신에게 보호자가 없어졌다. 승인할 사람이 없으니 어르신이 요청한 대로 끝낸다."""
+    kit = make_app_kit()
+    ask(kit)
+    elder = kit.elder_headers(12)
+    assert kit.data.elders.get(12) is not None
+
+    kit.data.elders.detach_all_from(1)
+
+    assert kit.client.get(REQUEST, headers=elder).json() == {"status": "none"}
+    assert kit.data.elders.get(12) is None
+
+
+def test_a_rejected_request_is_not_completed_when_the_guardian_leaves():
+    kit = make_app_kit()
+    ask(kit)
+    reject(kit)
+    elder = kit.elder_headers(12)
+
+    kit.data.elders.detach_all_from(1)
+
+    assert kit.client.get(REQUEST, headers=elder).json()["status"] == "rejected"
+    assert kit.data.elders.get(12) is not None  # 거절된 요청은 그대로 두고 어르신이 정한다
