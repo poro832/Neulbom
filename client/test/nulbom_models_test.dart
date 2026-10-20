@@ -129,10 +129,23 @@ void main() {
     expect(m.contacts.single.contactId, 3);
   });
 
-  test('연결 결과와 연결 코드', () {
+  test('새 폰 로그인 결과', () {
     expect(PairResult.fromJson({'elder_key': 'nle_x', 'elder_name': '어르신'}).elderName, '어르신');
-    final p = PairingCode.fromJson({'code': '000123', 'expires_at': '2026-10-09T09:00:00+09:00'});
-    expect(p.code, '000123'); // 앞자리 0이 살아 있어야 한다
+  });
+
+  test('가입 결과: 어르신 먼저 가입이면 고정 연결 코드가 오고(앞자리 0 그대로), 보호자 코드 가입이면 없다', () {
+    final first = SignupResult.fromJson(
+        {'elder_key': 'nle_x', 'status': 'unlinked', 'link_code': '00012345'});
+    expect(first.linkCode, '00012345');
+    expect(SignupResult.fromJson({'elder_key': 'nle_x', 'status': 'pending'}).linkCode, isNull);
+  });
+
+  test('전화번호 수정 결과: 새 폰이 로그인할 수 있는 시한', () {
+    final change = PhoneChange.fromJson(
+        {'phone': '010-9999-8888', 'new_phone_login_until': '2026-10-21T09:00:00+09:00'});
+    expect(change.phone, '010-9999-8888');
+    expect(change.newPhoneLoginUntil, isNotNull);
+    expect(PhoneChange.fromJson({'phone': '010-1'}).newPhoneLoginUntil, isNull);
   });
 
   test('어르신 요약: 상태가 없으면 활성이고, 승인 대기는 번호가 있다', () {

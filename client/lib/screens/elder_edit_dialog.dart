@@ -13,8 +13,9 @@ const Color _danger = Color(0xFFD92D20);
 
 /// 보호자가 어르신의 전화번호를 고친다(어르신이 새 폰을 쓸 때).
 ///
-/// 번호가 바뀌면 서버가 옛 폰의 열쇠를 모두 지운다. 그래서 이어서 새 연결 코드를 만들어 보여 준다 —
-/// 어르신은 새 폰의 로그인 화면에 새 번호와 이 코드를 넣는다. 고쳤으면 true를 돌려준다.
+/// 번호가 바뀌면 서버가 옛 폰의 열쇠를 모두 지우고, 새 폰이 24시간 안에 번호만으로 한 번 로그인할 수 있게 연다 —
+/// 어르신은 새 폰의 로그인 화면에 새 번호만 넣으면 된다. 같은 번호로 "새 폰 로그인 열기"를 누르면 그 시간을 다시 연다.
+/// 고쳤거나 열었으면 true를 돌려준다.
 Future<bool> showElderEditDialog(BuildContext context, ElderSummary elder) async {
   final changed = await showDialog<bool>(
     context: context,
@@ -42,8 +43,7 @@ class _ElderEditDialogState extends State<ElderEditDialog> {
   String? _error;
   String? _original;
   bool _changed = false;
-  String? _code;
-  String? _codeError;
+  DateTime? _loginUntil;
 
   @override
   void initState() {
@@ -85,35 +85,39 @@ class _ElderEditDialogState extends State<ElderEditDialog> {
       Navigator.pop(context, false);
       return;
     }
+    await _send(value);
+  }
+
+  /// 새 폰 로그인을 다시 연다(번호는 그대로). 옛 폰의 열쇠도 같이 지워진다.
+  Future<void> _reopen() async {
+    final value = _phone.text.trim();
+    if (!RegExp(r'^[0-9+\- ]{9,20}$').hasMatch(value)) {
+      setState(() => _error = '전화번호를 확인해 주세요.');
+      return;
+    }
+    await _send(value);
+  }
+
+  Future<void> _send(String value) async {
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
-      await NulbomApi.changeElderPhone(widget.elder.elderId, value);
+      final result = await NulbomApi.changeElderPhone(widget.elder.elderId, value);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _changed = true;
+        _loginUntil = result.newPhoneLoginUntil;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _saving = false;
         _error = error is ApiException ? error.message : _offline;
       });
-      return;
     }
-    // 번호는 바뀌었다. 새 폰이 들어올 코드를 이어서 만든다 — 실패해도 번호는 이미 바뀐 상태다.
-    String? code;
-    String? codeError;
-    try {
-      code = (await NulbomApi.issuePairingCode(widget.elder.elderId)).code;
-    } catch (error) {
-      codeError = error is ApiException ? error.message : _offline;
-    }
-    if (!mounted) return;
-    setState(() {
-      _saving = false;
-      _changed = true;
-      _code = code;
-      _codeError = codeError;
-    });
   }
 
   @override
@@ -123,7 +127,7 @@ class _ElderEditDialogState extends State<ElderEditDialog> {
       child: AlertDialog(
         backgroundColor: _card,
         title: Text(
-          _changed ? '전화번호를 바꿨어요' : '${widget.elder.name} 어르신 정보 수정',
+          _changed ? '새 폰에서 로그인할 수 있어요' : '${widget.elder.name} 어르신 정보 수정',
           style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700, color: _ink),
         ),
         content: _changed ? _doneBody() : _editBody(),
@@ -131,6 +135,7 @@ class _ElderEditDialogState extends State<ElderEditDialog> {
             ? [_button('확인', () => Navigator.pop(context, true))]
             : [
                 _button('취소', _saving ? null : () => Navigator.pop(context, false), muted: true),
+                _button('새 폰 로그인 열기', _loading || _saving ? null : _reopen, muted: true),
                 _button('저장', _loading || _saving ? null : _save),
               ],
       ),
@@ -166,35 +171,25 @@ class _ElderEditDialogState extends State<ElderEditDialog> {
     );
   }
 
+  static String _until(DateTime time) =>
+      '${time.month}월 ${time.day}일 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+
   Widget _doneBody() {
-    final code = _code;
+    final until = _loginUntil;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (code != null) ...[
-          Center(
-            child: SelectableText(
-              code,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.notoSansKr(
-                fontSize: 36,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 6,
-                color: _accent,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '새 폰의 로그인 화면에 새 번호와 이 코드를 입력하면 돼요. 24시간 안에 한 번만 쓸 수 있어요.',
-            style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: _inkSoft),
-          ),
-        ] else
-          Text(
-            '번호는 바뀌었어요. ${_codeError ?? '연결 코드를 만들지 못했어요.'}',
-            style: const TextStyle(fontSize: 14, color: _danger),
-          ),
+        Text(
+          '어르신이 새 폰의 로그인 화면에 새 번호만 입력하면 연결돼요.'
+          '${until == null ? '' : ' ${_until(until)}까지, 한 번만 쓸 수 있어요.'}',
+          style: GoogleFonts.notoSansKr(fontSize: 15, height: 1.6, color: _ink),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '옛 폰은 더 이상 어르신 기록을 볼 수 없어요.',
+          style: GoogleFonts.notoSansKr(fontSize: 14, color: _inkSoft),
+        ),
       ],
     );
   }

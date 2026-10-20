@@ -191,9 +191,10 @@ class NulbomApi {
 
   // ------------------------------------------------------------ 어르신 연결
 
-  /// 보호자가 알려 준 코드와 내 전화번호로 이 폰 전용 열쇠를 받는다. 성공하면 폰에 저장한다.
-  static Future<PairResult> pair({required String code, required String phone}) async {
-    final json = await _send('POST', '/v1/pair', body: {'code': code, 'phone': phone});
+  /// 새 폰에서 번호만으로 로그인한다. 보호자가 어르신 관리에서 번호를 고쳐 둔 번호가, 24시간 안에, 딱 한 번 받는다.
+  /// 성공하면 이 폰 전용 열쇠를 폰에 저장한다.
+  static Future<PairResult> claimNewPhone({required String phone}) async {
+    final json = await _send('POST', '/v1/elders/login', body: {'phone': phone});
     final result = PairResult.fromJson(json);
     await saveElderKey(result.elderKey);
     return result;
@@ -294,23 +295,18 @@ class NulbomApi {
 
   // ------------------------------------------------------------ 보호자
 
-  static Future<PairingCode> issuePairingCode(int elderId, {String? key}) async {
-    final json = await _send('POST', '/v1/elders/$elderId/pairing-code',
-        key: _guardianKeyOrThrow(key));
-    return PairingCode.fromJson(json);
-  }
-
   /// 어르신 전화번호를 읽는다(보호자가 자기 어르신의 번호를 고치기 전에 보여 준다).
   static Future<String> elderPhone(int elderId, {String? key}) async {
     final json = await _send('GET', '/v1/elders/$elderId/phone', key: _guardianKeyOrThrow(key));
     return json['phone'] as String;
   }
 
-  /// 어르신 전화번호를 바꾼다. 서버가 옛 폰의 어르신 열쇠를 모두 지운다.
-  static Future<String> changeElderPhone(int elderId, String phone, {String? key}) async {
+  /// 어르신 전화번호를 바꾼다. 서버가 옛 폰의 어르신 열쇠를 모두 지우고, 새 폰이 24시간 안에 번호만으로
+  /// 한 번 로그인할 수 있게 연다. 같은 번호로 다시 부르면 그 시간을 다시 연다.
+  static Future<PhoneChange> changeElderPhone(int elderId, String phone, {String? key}) async {
     final json = await _send('PUT', '/v1/elders/$elderId/phone',
         key: _guardianKeyOrThrow(key), body: {'phone': phone});
-    return json['phone'] as String;
+    return PhoneChange.fromJson(json);
   }
 
   static Future<List<ElderSummary>> guardianElders({String? key}) async {
@@ -429,10 +425,16 @@ class NulbomApi {
     return result;
   }
 
-  /// 어르신 화면에 띄울 8자리 연결 코드(24시간). 새로 받으면 이전 코드는 쓸 수 없다.
-  static Future<PairingCode> issueLinkCode({String? key}) async {
+  /// 내 고정 연결 코드(8자리). 바뀌지 않고 언제든 다시 볼 수 있다 — 연결된 뒤에도.
+  static Future<String> myLinkCode({String? key}) async {
+    final json = await _send('GET', '/v1/me/link-code', key: await _elderKeyOrThrow(key));
+    return json['code'] as String;
+  }
+
+  /// 새 연결 코드를 만든다. 코드가 새어 나갔을 때 쓴다 — 이전 코드는 바로 못 쓰고, 이미 연결된 보호자는 그대로다.
+  static Future<String> renewLinkCode({String? key}) async {
     final json = await _send('POST', '/v1/me/link-code', key: await _elderKeyOrThrow(key));
-    return PairingCode.fromJson(json);
+    return json['code'] as String;
   }
 
   /// 보호자: 코드의 어르신 이름과 가려진 번호를 본다. 아무것도 바꾸지 않는다.

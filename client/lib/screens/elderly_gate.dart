@@ -9,6 +9,7 @@ import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
 import 'elderly_home_page.dart' show ElderlyHomePage;
 import 'elderly_login_screen.dart' show ElderlyLoginScreen;
+import 'link_code_renew.dart';
 
 /// 어르신 홈으로 가는 문. 열 때마다 서버에 내 상태를 물어본다.
 ///
@@ -29,9 +30,8 @@ class ElderlyGate extends StatefulWidget {
   /// 활성 어르신이 들어갈 홈. 기본은 어르신 홈이고, 테스트는 가벼운 화면을 넣는다.
   final WidgetBuilder? homeBuilder;
 
-  /// 가입 화면이 방금 받은 연결 코드. 있으면 연결 대기 화면에 그대로 보여 준다 —
-  /// 새로 받으면 보호자에게 이미 알려 준 코드를 쓸 수 없게 되므로 저절로 새로 받지 않는다.
-  final PairingCode? linkCode;
+  /// 가입 화면이 방금 받은 고정 연결 코드. 있으면 연결 대기 화면에 그대로 보여 주고, 없으면 서버에서 읽어 온다.
+  final String? linkCode;
 
   @override
   State<ElderlyGate> createState() => _ElderlyGateState();
@@ -41,7 +41,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
   late Future<MyStatus> _status;
   bool _agreeing = false;
   String? _agreeError;
-  PairingCode? _linkCode;
+  String? _linkCode;
   bool _issuing = false;
   String? _codeError;
   Timer? _poll;
@@ -55,6 +55,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
     super.initState();
     _status = NulbomApi.myStatus();
     _linkCode = widget.linkCode;
+    if (_linkCode == null) _loadCode();
     _poll = Timer.periodic(widget.pollInterval, (_) => _checkWaiting());
   }
 
@@ -80,18 +81,30 @@ class _ElderlyGateState extends State<ElderlyGate> {
     }
   }
 
-  /// 새 연결 코드(8자리, 24시간)를 받는다. 이전 코드는 서버에서 바로 못 쓰게 된다.
-  Future<void> _issueCode() async {
+  /// 내 고정 연결 코드를 읽어 온다. 읽기만 하므로 보호자에게 이미 알린 코드가 바뀌지 않는다.
+  Future<void> _loadCode() async {
+    try {
+      final code = await NulbomApi.myLinkCode();
+      if (!mounted) return;
+      setState(() => _linkCode = code);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _codeError = _errorText(error));
+    }
+  }
+
+  /// 새 연결 코드를 만든다(확인을 받은 뒤). 이전 코드는 서버에서 바로 못 쓰게 된다.
+  Future<void> _renewCode() async {
     setState(() {
       _issuing = true;
       _codeError = null;
     });
     try {
-      final code = await NulbomApi.issueLinkCode();
+      final code = await renewLinkCodeWithConfirm(context);
       if (!mounted) return;
       setState(() {
         _issuing = false;
-        _linkCode = code;
+        if (code != null) _linkCode = code;
       });
     } catch (error) {
       if (!mounted) return;
@@ -244,13 +257,9 @@ class _ElderlyGateState extends State<ElderlyGate> {
     );
   }
 
-  static String _until(DateTime time) =>
-      '${time.month}월 ${time.day}일 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-
-  /// 연결 대기 화면의 코드 칸. 코드를 보여 주고, 새 코드를 받을 수 있다.
+  /// 연결 대기 화면의 코드 칸. 고정 코드를 보여 주고, 새 코드를 만들 수 있다.
   Widget _linkCodeBox() {
     final code = _linkCode;
-    final expired = code != null && code.expiresAt.isBefore(DateTime.now());
     return Column(
       children: [
         const SizedBox(height: 24),
@@ -266,20 +275,18 @@ class _ElderlyGateState extends State<ElderlyGate> {
             child: Column(
               children: [
                 SelectableText(
-                  code.code,
+                  code,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.notoSansKr(
                     fontSize: 32,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 4,
-                    color: expired ? eInkSoft : eAccent,
+                    color: eAccent,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  expired
-                      ? '이 코드는 만료됐어요. 새 코드를 받아 주세요.'
-                      : '${_until(code.expiresAt)}까지 쓸 수 있어요',
+                  '이 코드는 바뀌지 않아요. 메뉴의 "내 연결코드"에서 언제든 다시 볼 수 있어요.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
                 ),
@@ -299,13 +306,13 @@ class _ElderlyGateState extends State<ElderlyGate> {
           width: double.infinity,
           height: 52,
           child: OutlinedButton(
-            onPressed: _issuing ? null : _issueCode,
+            onPressed: _issuing ? null : _renewCode,
             style: OutlinedButton.styleFrom(
               foregroundColor: eAccent,
               side: const BorderSide(color: eAccent, width: 1.5),
             ),
             child: Text(
-              code == null ? '연결 코드 보기' : '새 코드 받기',
+              '새 코드 만들기',
               style: const TextStyle(fontSize: 18),
             ),
           ),
@@ -313,7 +320,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
         if (code != null) ...[
           const SizedBox(height: 6),
           Text(
-            '새 코드를 받으면 이전 코드는 쓸 수 없어요.',
+            '새 코드를 만들면 이전 코드는 쓸 수 없어요.',
             textAlign: TextAlign.center,
             style: GoogleFonts.notoSansKr(fontSize: 13, color: eInkSoft),
           ),
