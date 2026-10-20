@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/nulbom_models.dart' show WithdrawalStatus;
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
 import 'link_code_renew.dart';
@@ -16,7 +19,10 @@ const Color eLine = Color(0xFFD6E4FF);
 const Color eAccent = Color(0xFF1A6BFF);
 
 class ElderlyHomePage extends StatefulWidget {
-  const ElderlyHomePage({super.key});
+  const ElderlyHomePage({super.key, this.withdrawalPollInterval = const Duration(seconds: 20)});
+
+  /// 탈퇴 요청을 서버에 다시 묻는 간격. 보호자가 승인·거절한 것을 어르신 화면이 저절로 알아차린다.
+  final Duration withdrawalPollInterval;
 
   @override
   State<ElderlyHomePage> createState() => _ElderlyHomePageState();
@@ -24,6 +30,114 @@ class ElderlyHomePage extends StatefulWidget {
 
 class _ElderlyHomePageState extends State<ElderlyHomePage> {
   int _tabIndex = 0;
+
+  /// 내 탈퇴 요청의 상태(없으면 null이거나 none). 보호자 승인을 기다리는 동안 배너로 보인다.
+  WithdrawalStatus? _withdrawal;
+  Timer? _withdrawalTimer;
+  bool _leaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkWithdrawal();
+    _withdrawalTimer = Timer.periodic(widget.withdrawalPollInterval, (_) => _checkWithdrawal());
+  }
+
+  @override
+  void dispose() {
+    _withdrawalTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 탈퇴 요청이 어떻게 됐는지 서버에 묻는다. 열쇠가 더는 맞지 않으면(401) 탈퇴가 끝났거나 이 폰의 연결이 끝난 것이다.
+  Future<void> _checkWithdrawal() async {
+    try {
+      final status = await NulbomApi.myWithdrawal();
+      if (!mounted) return;
+      setState(() => _withdrawal = status);
+    } on ApiException catch (error) {
+      if (error.statusCode == 401) await _leaveBecauseKeyIsGone();
+    } catch (_) {
+      // 잠깐 끊겨도 다음에 다시 본다.
+    }
+  }
+
+  Future<void> _leaveBecauseKeyIsGone() async {
+    if (_leaving) return;
+    _leaving = true;
+    _withdrawalTimer?.cancel();
+    await AuthService.forgetElderPhone();
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
+      (route) => false,
+    );
+    messenger.showSnackBar(const SnackBar(content: Text('탈퇴가 처리됐거나 이 폰의 연결이 끝났어요.')));
+  }
+
+  /// 요청을 취소하거나(승인 대기), 거절된 요청을 치운다. 끝나면 상태를 다시 읽는다.
+  Future<void> _clearWithdrawal() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await NulbomApi.cancelWithdrawal();
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
+      return;
+    }
+    await _checkWithdrawal();
+  }
+
+  Widget _withdrawalBanner() {
+    final status = _withdrawal;
+    if (status == null || !(status.waiting || status.rejected)) return const SizedBox.shrink();
+    final waiting = status.waiting;
+    return Container(
+      key: const Key('withdrawal-banner'),
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: eCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: waiting ? eAccent : const Color(0xFFD92D20), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  waiting ? '탈퇴를 요청했어요' : '보호자가 탈퇴를 거절했어요',
+                  style: GoogleFonts.notoSansKr(fontSize: 17, fontWeight: FontWeight.w800, color: eInk),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  waiting
+                      ? '보호자가 승인하면 탈퇴돼요. (${status.total}명 중 ${status.approved}명 승인)'
+                      : '계속 이용하실 수 있어요. 다시 탈퇴하려면 메뉴에서 탈퇴하기를 눌러 주세요.',
+                  style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            key: const Key('withdrawal-banner-action'),
+            onPressed: _clearWithdrawal,
+            child: Text(
+              waiting ? '요청 취소' : '확인',
+              style: GoogleFonts.notoSansKr(fontSize: 16, fontWeight: FontWeight.w700, color: eAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _logout() async {
     await AuthService.logout();
@@ -173,17 +287,23 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
 
   /// 어르신 탈퇴. 되돌릴 수 없어서 두 번 묻는다.
   Future<void> _confirmDeleteAccount() async {
+    if (_withdrawal?.waiting == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이미 탈퇴를 요청했어요. 보호자의 승인을 기다리고 있어요.')),
+      );
+      return;
+    }
     if (!await _askTwice(
       '탈퇴하기',
-      '탈퇴하면 이 폰의 정보와 지금까지의 통화 기록이 모두 지워지고, 안부 전화도 멈춰요.',
+      '탈퇴하려면 보호자의 승인이 필요해요. 승인되면 이 폰의 정보와 지금까지의 통화 기록이 모두 지워지고, 안부 전화도 멈춰요.',
       '계속',
     )) {
       return;
     }
     if (!mounted) return;
-    if (!await _askTwice('정말 탈퇴할까요?', '지운 기록은 다시 볼 수 없어요.', '탈퇴하기')) return;
+    if (!await _askTwice('정말 탈퇴를 요청할까요?', '승인되면 지운 기록은 다시 볼 수 없어요.', '요청하기')) return;
     if (!mounted) return;
-    // 지우는 동안은 뒤로가기로 빠져나가지 못하게 막는다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
+    // 요청하는 동안은 뒤로가기로 빠져나가지 못하게 막는다 — 서버에서 지워졌는데 화면만 남는 일을 막는다.
     final navigator = Navigator.of(context, rootNavigator: true);
     final messenger = ScaffoldMessenger.of(context);
     showDialog<void>(
@@ -194,8 +314,9 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
         child: Center(child: CircularProgressIndicator()),
       ),
     );
+    WithdrawalStatus result;
     try {
-      await AuthService.deleteElderAccount();
+      result = await AuthService.requestElderWithdrawal();
     } on ApiException catch (e) {
       navigator.pop(); // 진행 표시 닫기
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -206,12 +327,42 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
           const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
       return;
     }
-    // 화면이 닫혔어도(mounted 아님) 가져다 둔 navigator로 처음 화면으로 돌아간다.
-    navigator.pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
-      (route) => false,
+    navigator.pop(); // 진행 표시 닫기
+    if (result.deleted) {
+      // 보호자가 없어 바로 탈퇴됐다. 화면이 닫혔어도(mounted 아님) 가져다 둔 navigator로 처음 화면으로 돌아간다.
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
+        (route) => false,
+      );
+      messenger.showSnackBar(const SnackBar(content: Text('탈퇴했어요.')));
+      return;
+    }
+    if (mounted) setState(() => _withdrawal = result);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: eCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          '보호자에게 알렸어요',
+          style: GoogleFonts.notoSansKr(fontSize: 26, fontWeight: FontWeight.w800, color: eInk),
+        ),
+        content: Text(
+          '보호자가 승인하면 탈퇴돼요.\n7일 안에 승인이 없으면 요청이 사라져요.',
+          style: GoogleFonts.notoSansKr(fontSize: 19, fontWeight: FontWeight.w700, color: eInk, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              '확인',
+              style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w800, color: eAccent),
+            ),
+          ),
+        ],
+      ),
     );
-    messenger.showSnackBar(const SnackBar(content: Text('탈퇴했어요.')));
   }
 
   Widget _buildMenuRow({
@@ -405,7 +556,7 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                             value: 'delete_account',
                             child: _buildMenuRow(
                               icon: Icons.person_remove_alt_1_rounded,
-                              label: '탈퇴하기',
+                              label: _withdrawal?.waiting == true ? '탈퇴 승인 대기 중' : '탈퇴하기',
                             ),
                           ),
                         ],
@@ -435,12 +586,19 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                   ),
                 ],
               ),
-        body: IndexedStack(
-          index: _tabIndex,
+        body: Column(
           children: [
-            MainScreen(onOpenEmergency: () => setState(() => _tabIndex = 2)),
-            const HistoryScreen(),
-            const EmergencyScreen(),
+            _withdrawalBanner(),
+            Expanded(
+              child: IndexedStack(
+                index: _tabIndex,
+                children: [
+                  MainScreen(onOpenEmergency: () => setState(() => _tabIndex = 2)),
+                  const HistoryScreen(),
+                  const EmergencyScreen(),
+                ],
+              ),
+            ),
           ],
         ),
         bottomNavigationBar: Container(

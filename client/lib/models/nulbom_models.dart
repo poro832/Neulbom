@@ -234,6 +234,66 @@ class PhoneChange {
       );
 }
 
+/// 어르신 탈퇴 요청의 상태. none(요청 없음) · waiting(보호자 승인 대기) · rejected(보호자가 거절) · deleted(탈퇴됨).
+class WithdrawalStatus {
+  final String status;
+  final DateTime? requestedAt;
+  final DateTime? expiresAt;
+  final int approved;
+  final int total;
+
+  const WithdrawalStatus({
+    required this.status,
+    this.requestedAt,
+    this.expiresAt,
+    this.approved = 0,
+    this.total = 0,
+  });
+
+  bool get deleted => status == 'deleted';
+  bool get waiting => status == 'waiting';
+  bool get rejected => status == 'rejected';
+
+  factory WithdrawalStatus.fromJson(Map<String, dynamic> json) => WithdrawalStatus(
+        status: json['status'] as String,
+        requestedAt: _asTime(json['requested_at']),
+        expiresAt: _asTime(json['expires_at']),
+        approved: (json['approved'] as num?)?.toInt() ?? 0,
+        total: (json['total'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 보호자 화면에 뜨는 어르신 탈퇴 요청 하나.
+class GuardianWithdrawal {
+  final int elderId;
+  final String name;
+  final DateTime? requestedAt;
+  final DateTime? expiresAt;
+  final int approved;
+  final int total;
+  final bool approvedByMe;
+
+  const GuardianWithdrawal({
+    required this.elderId,
+    required this.name,
+    this.requestedAt,
+    this.expiresAt,
+    required this.approved,
+    required this.total,
+    required this.approvedByMe,
+  });
+
+  factory GuardianWithdrawal.fromJson(Map<String, dynamic> json) => GuardianWithdrawal(
+        elderId: (json['elder_id'] as num).toInt(),
+        name: json['name'] as String,
+        requestedAt: _asTime(json['requested_at']),
+        expiresAt: _asTime(json['expires_at']),
+        approved: (json['approved'] as num).toInt(),
+        total: (json['total'] as num).toInt(),
+        approvedByMe: json['approved_by_me'] as bool,
+      );
+}
+
 class SignupResult {
   final String elderKey;
   final String status;
