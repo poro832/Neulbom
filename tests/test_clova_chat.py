@@ -242,3 +242,20 @@ def test_sentence_boundaries_without_a_space_are_joined_too(said, spoken):
     chat, _ = make(reply=reply_of(said))
 
     assert chat.reply(HISTORY) == spoken
+
+
+@pytest.mark.parametrize(
+    ("said", "spoken"),
+    [
+        # 숫자로 시작하는 다음 문장도 합친다 — 점 앞이 숫자가 아니면 소수점이 아니다
+        ("그러셨군요.3시에 약 드셨어요?", "그러셨군요, 3시에 약 드셨어요?"),
+        ("그러셨어요?3시예요?", "그러셨어요, 3시예요?"),
+        ("약은 2번.3번째는 드셨어요?", "약은 2번, 3번째는 드셨어요?"),
+        # 숫자로 끝나는 문장 뒤에 공백이 있으면 나눈다
+        ("열이 38. 괜찮으세요?", "열이 38, 괜찮으세요?"),
+    ],
+)
+def test_a_sentence_starting_with_a_digit_is_still_joined(said, spoken):
+    chat, _ = make(reply=reply_of(said))
+
+    assert chat.reply(HISTORY) == spoken
