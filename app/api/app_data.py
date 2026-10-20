@@ -112,6 +112,7 @@ LINK_CODE_RETRIES = 5
 PHONE_CLAIM_SECONDS = 24 * 3600
 NEED_WITHDRAW_APPROVAL = "보호자의 승인이 필요해요"
 NO_WITHDRAWAL = "탈퇴 요청이 없어요"
+WITHDRAWAL_LOCKED = "보호자가 이미 승인해서 곧 탈퇴돼요"
 # 틀린 번호, 열리지 않은 번호, 이미 쓴 번호, 만료 모두 같은 문장이다 — 어느 쪽인지 알려 주면 등록된 번호를 찾아내는 데 쓰인다.
 BAD_ELDER_LOGIN = "이 폰으로는 로그인할 수 없어요. 보호자에게 어르신 관리에서 번호를 확인해 달라고 부탁해 주세요"
 
@@ -998,13 +999,15 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         request = data.withdrawals.get(elder_id)
         if request is None:
             return None
-        if request.requested_at + WITHDRAWAL_TTL_SECONDS <= data.wall_clock():
+        if not request.locked and request.requested_at + WITHDRAWAL_TTL_SECONDS <= data.wall_clock():
             data.withdrawals.cancel(elder_id)
             return None
         guardians = data.elders.guardians_of(elder_id)
         if not request.rejected and guardians and set(guardians) <= request.approved_by:
-            # 보호자가 모두 승인했는데 지우다 실패해서 남은 요청이다 — 읽을 때마다 이어서 지운다.
-            # 지우지 못하면 오류가 올라가 503이 되고, 승인 기록은 그대로라 다음에 다시 시도한다.
+            # 보호자가 모두 승인했는데 지우다 실패해서 남은 요청이다 — 잠그고(취소·재요청이 끼어들지 못하게) 이어서 지운다.
+            # 지우지 못하면 오류가 올라가 503이 되고, 잠긴 요청은 그대로라 다음에 다시 시도한다.
+            if not data.withdrawals.lock(elder_id, request.request_id, data.wall_clock()):
+                return data.withdrawals.get(elder_id)  # 그 사이 바뀐 요청이다 — 새 요청은 새로 판단한다
             logger.warning("전원 승인된 탈퇴를 이어서 지운다 elder_id=%s", elder_id)
             delete_elder_now(elder_id)
             return None
@@ -1058,7 +1061,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     def cancel_withdrawal(authorization: str | None = Header(default=None)) -> Response:
         """어르신이 탈퇴 요청을 취소한다(거절된 요청을 치우는 데도 쓴다)."""
         elder_id = elder_id_of(authorization)
-        data.withdrawals.cancel(elder_id)
+        if not data.withdrawals.cancel(elder_id):
+            current = data.withdrawals.get(elder_id)
+            if current is not None and current.locked:
+                # 보호자가 모두 승인했다 — 이제 취소할 수 없고 탈퇴가 이어진다.
+                raise HTTPException(status_code=409, detail=WITHDRAWAL_LOCKED)
         return Response(status_code=204)
 
     @app.get("/v1/guardian/withdrawals")
@@ -1110,6 +1117,10 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             len(guardians),
         )
         if guardians and set(guardians) <= request.approved_by:
+            # 마지막 승인이다. 이 번호의 요청을 잠가야만 지운다 — 승인과 삭제 사이에 어르신이 취소하고 다시 요청했다면
+            # 잠기지 않고(번호가 다르다), 옛 승인으로 새 요청의 어르신이 지워지지 않는다.
+            if not data.withdrawals.lock(elder_id, request.request_id, data.wall_clock()):
+                raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
             delete_elder_now(elder_id)
             return {"status": "deleted"}
         return withdrawal_view(request, guardians)

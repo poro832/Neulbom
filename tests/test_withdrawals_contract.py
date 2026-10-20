@@ -144,3 +144,76 @@ def test_removing_for_an_elder_clears_only_that_elders_request(store):
     assert store.remove_for_elder(12) == 0
 
     assert store.get(12) is None and store.get(13) is not None
+
+
+# ------------------------------------------------ 마지막 승인이 요청을 잠근다
+
+
+def test_locking_a_live_request_works_and_is_idempotent(store):
+    request = store.open(12, 1000.0)
+
+    assert store.lock(12, request.request_id, 1500.0) is True
+    assert store.lock(12, request.request_id, 1600.0) is True  # 이미 잠겼다
+    locked = store.get(12)
+    assert locked.locked and locked.locked_at == 1500.0  # 처음 잠근 시각이 남는다
+
+
+def test_locking_needs_the_same_request_number(store):
+    old = store.open(12, 1000.0).request_id
+    store.cancel(12)
+    new = store.open(12, 2000.0)
+
+    assert store.lock(12, old, 3000.0) is False  # 옛 승인으로는 새 요청을 잠글 수 없다
+    assert not store.get(12).locked
+    assert store.lock(12, new.request_id, 3000.0) is True
+
+
+def test_a_missing_or_rejected_request_cannot_be_locked(store):
+    assert store.lock(12, 1, 1000.0) is False
+    rid = store.open(12, 1000.0).request_id
+    store.reject(12, 1500.0, rid)
+
+    assert store.lock(12, rid, 2000.0) is False
+
+
+def test_a_locked_request_cannot_be_cancelled_rejected_or_replaced(store):
+    request = store.open(12, 1000.0)
+    store.approve(12, 1, request.request_id)
+    store.lock(12, request.request_id, 1500.0)
+
+    assert store.cancel(12) is False
+    assert store.reject(12, 2000.0, request.request_id) is False
+    assert store.open(12, 3000.0) == store.get(12)  # 새 요청이 아니라 잠긴 그 요청을 돌려준다
+    still = store.get(12)
+    assert still.request_id == request.request_id and still.locked and not still.rejected
+    assert still.approved_by == frozenset({1})
+
+
+def test_removing_for_the_elder_clears_even_a_locked_request(store):
+    rid = store.open(12, 1000.0).request_id
+    store.lock(12, rid, 1500.0)
+
+    assert store.remove_for_elder(12) == 1
+
+    assert store.get(12) is None
+
+
+def test_two_threads_locking_the_same_request_both_succeed_once_locked(store):
+    import threading
+
+    rid = store.open(12, 1000.0).request_id
+    results: list[bool] = []
+    barrier = threading.Barrier(2)
+
+    def worker():
+        barrier.wait()
+        results.append(store.lock(12, rid, 1500.0))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results == [True, True]
+    assert store.get(12).locked

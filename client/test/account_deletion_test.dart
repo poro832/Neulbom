@@ -408,6 +408,7 @@ void main() {
       WidgetTester tester, {
       http.Response Function()? onRequest,
       http.Response Function()? onStatus,
+      http.Response Function()? onCancel,
       bool openConfirm = true,
     }) async {
       tester.view.physicalSize = const Size(1200, 4000);
@@ -423,7 +424,7 @@ void main() {
         if (request.url.path == '/v1/me/withdrawal') {
           if (request.method == 'POST') return (onRequest ?? () => json(waitingBody, 202))();
           if (request.method == 'GET') return (onStatus ?? () => json({'status': 'none'}))();
-          return noContent();
+          return (onCancel ?? noContent)();
         }
         if (request.url.path == '/v1/me/calls') return json({'calls': []});
         if (request.url.path == '/v1/me/contacts') return json({'guardians': [], 'contacts': []});
@@ -585,6 +586,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(calls, contains('DELETE /v1/me/withdrawal'));
+    });
+
+    testWidgets('보호자가 이미 모두 승인해 취소할 수 없으면 서버 문장을 보이고 배너를 그대로 둔다', (tester) async {
+      await openDeleteFlow(
+        tester,
+        onStatus: () => json(waitingBody),
+        onCancel: () => json({'detail': '보호자가 이미 승인해서 곧 탈퇴돼요'}, 409),
+        openConfirm: false,
+      );
+
+      await tester.tap(find.text('요청 취소'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('보호자가 이미 승인해서 곧 탈퇴돼요'), findsOneWidget);
+      expect(find.byKey(const Key('withdrawal-banner')), findsOneWidget);
     });
 
     testWidgets('보호자가 승인해 서버에서 탈퇴가 끝나면(열쇠가 401) 저절로 로그인 화면으로 간다', (tester) async {
