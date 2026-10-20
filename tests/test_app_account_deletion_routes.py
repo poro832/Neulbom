@@ -391,7 +391,12 @@ class ElderWorld:
         if first.status_code != 202:
             return first
         elder_id = 13 if headers is self.other_headers else 12
-        return self.kit.client.post(f"/v1/elders/{elder_id}/withdrawal/approve", headers=self.kit.guardian_headers)
+        request_id = self.kit.data.withdrawals.get(elder_id).request_id
+        return self.kit.client.post(
+            f"/v1/elders/{elder_id}/withdrawal/approve",
+            json={"request_id": request_id},
+            headers=self.kit.guardian_headers,
+        )
 
 
 def test_withdrawing_deletes_the_elder_and_the_key_stops_working():

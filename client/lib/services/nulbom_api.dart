@@ -415,15 +415,17 @@ class NulbomApi {
   }
 
   /// 보호자: 탈퇴 요청을 승인한다. 보호자가 모두 승인하면 deleted, 아니면 waiting이다.
-  static Future<WithdrawalStatus> approveWithdrawal(int elderId, {String? key}) async {
+  /// [requestId]는 보호자가 본 요청의 번호다 — 그 사이 취소되고 다시 요청됐다면 서버가 404로 거절한다.
+  static Future<WithdrawalStatus> approveWithdrawal(int elderId, int requestId, {String? key}) async {
     final json = await _send('POST', '/v1/elders/$elderId/withdrawal/approve',
-        key: _guardianKeyOrThrow(key));
+        key: _guardianKeyOrThrow(key), body: {'request_id': requestId});
     return WithdrawalStatus.fromJson(json);
   }
 
   /// 보호자: 탈퇴 요청을 거절한다. 어르신 앱에 거절됐다고 보인다.
-  static Future<void> rejectWithdrawal(int elderId, {String? key}) async {
-    await _send('POST', '/v1/elders/$elderId/withdrawal/reject', key: _guardianKeyOrThrow(key));
+  static Future<void> rejectWithdrawal(int elderId, int requestId, {String? key}) async {
+    await _send('POST', '/v1/elders/$elderId/withdrawal/reject',
+        key: _guardianKeyOrThrow(key), body: {'request_id': requestId});
   }
 
   // ------------------------------------------------------------ 보호자 코드로 가입

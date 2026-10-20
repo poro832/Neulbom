@@ -221,7 +221,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
     _decidingWithdrawals.add(item.elderId);
     try {
       if (approve) {
-        final result = await NulbomApi.approveWithdrawal(item.elderId);
+        final result = await NulbomApi.approveWithdrawal(item.elderId, item.requestId);
         messenger.showSnackBar(SnackBar(
           content: Text(result.deleted
               ? '탈퇴를 승인했어요. ${item.name} 어르신의 정보가 지워졌어요.'
@@ -229,7 +229,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
         ));
         if (result.deleted && mounted) _reload();
       } else {
-        await NulbomApi.rejectWithdrawal(item.elderId);
+        await NulbomApi.rejectWithdrawal(item.elderId, item.requestId);
         messenger.showSnackBar(const SnackBar(content: Text('탈퇴를 거절했어요.')));
       }
     } on ApiException catch (error) {
