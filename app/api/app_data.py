@@ -263,6 +263,11 @@ class ElderSignupRequest(BaseModel):
     agreed: bool
 
 
+class WithdrawalDecision(BaseModel):
+    # 보호자 화면이 본 요청의 번호. 그 사이 취소되고 다시 요청됐다면 닿지 않는다.
+    request_id: int = Field(ge=1, le=MAX_ELDER_ID)
+
+
 class ElderLoginRequest(BaseModel):
     phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
 
@@ -996,6 +1001,13 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if request.requested_at + WITHDRAWAL_TTL_SECONDS <= data.wall_clock():
             data.withdrawals.cancel(elder_id)
             return None
+        guardians = data.elders.guardians_of(elder_id)
+        if not request.rejected and guardians and set(guardians) <= request.approved_by:
+            # 보호자가 모두 승인했는데 지우다 실패해서 남은 요청이다 — 읽을 때마다 이어서 지운다.
+            # 지우지 못하면 오류가 올라가 503이 되고, 승인 기록은 그대로라 다음에 다시 시도한다.
+            logger.warning("전원 승인된 탈퇴를 이어서 지운다 elder_id=%s", elder_id)
+            delete_elder_now(elder_id)
+            return None
         return request
 
     def withdrawal_view(request: WithdrawalRequest, guardians: list[int]) -> dict:
@@ -1063,6 +1075,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             items.append(
                 {
                     "elder_id": ref.elder_id,
+                    "request_id": request.request_id,
                     "name": ref.name,
                     "requested_at": view["requested_at"],
                     "expires_at": view["expires_at"],
@@ -1076,15 +1089,16 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/elders/{elder_id}/withdrawal/approve")
     @guarded
     def approve_withdrawal(
+        body: WithdrawalDecision,
         elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
         authorization: str | None = Header(default=None),
     ) -> dict:
-        """탈퇴 요청을 승인한다. 보호자가 모두 승인하면 어르신이 지워진다."""
+        """탈퇴 요청을 승인한다(보호자가 본 요청의 번호와 함께). 보호자가 모두 승인하면 어르신이 지워진다."""
         guardian_id = active_guardian_id_of(authorization)
         owned_elder(guardian_id, elder_id)
         if live_withdrawal(elder_id) is None:
             raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
-        request = data.withdrawals.approve(elder_id, guardian_id)
+        request = data.withdrawals.approve(elder_id, guardian_id, body.request_id)
         if request is None:
             raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
         guardians = data.elders.guardians_of(elder_id)
@@ -1103,13 +1117,16 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @app.post("/v1/elders/{elder_id}/withdrawal/reject")
     @guarded
     def reject_withdrawal(
+        body: WithdrawalDecision,
         elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
         authorization: str | None = Header(default=None),
     ) -> Response:
         """탈퇴 요청을 거절한다. 어르신 앱에 거절됐다고 보이고, 어르신은 나중에 다시 요청할 수 있다."""
         guardian_id = active_guardian_id_of(authorization)
         owned_elder(guardian_id, elder_id)
-        if live_withdrawal(elder_id) is None or not data.withdrawals.reject(elder_id, data.wall_clock()):
+        if live_withdrawal(elder_id) is None or not data.withdrawals.reject(
+            elder_id, data.wall_clock(), body.request_id
+        ):
             raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
         logger.info("탈퇴 요청을 거절했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
         return Response(status_code=204)

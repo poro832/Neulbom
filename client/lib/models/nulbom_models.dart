@@ -266,6 +266,8 @@ class WithdrawalStatus {
 /// 보호자 화면에 뜨는 어르신 탈퇴 요청 하나.
 class GuardianWithdrawal {
   final int elderId;
+  // 보호자가 본 요청의 번호. 승인·거절에 함께 보낸다 — 그 사이 취소되고 다시 요청됐다면 서버가 받지 않는다.
+  final int requestId;
   final String name;
   final DateTime? requestedAt;
   final DateTime? expiresAt;
@@ -275,6 +277,7 @@ class GuardianWithdrawal {
 
   const GuardianWithdrawal({
     required this.elderId,
+    required this.requestId,
     required this.name,
     this.requestedAt,
     this.expiresAt,
@@ -285,6 +288,7 @@ class GuardianWithdrawal {
 
   factory GuardianWithdrawal.fromJson(Map<String, dynamic> json) => GuardianWithdrawal(
         elderId: (json['elder_id'] as num).toInt(),
+        requestId: (json['request_id'] as num).toInt(),
         name: json['name'] as String,
         requestedAt: _asTime(json['requested_at']),
         expiresAt: _asTime(json['expires_at']),

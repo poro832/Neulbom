@@ -17,6 +17,7 @@ http.Response json(Object body, [int status = 200]) => http.Response(
 
 Map<String, dynamic> request({int approved = 0, int total = 1, bool byMe = false}) => {
       'elder_id': 12,
+      'request_id': 7,
       'name': '어르신 12',
       'requested_at': '2026-10-20T10:00:00+09:00',
       'expires_at': '2026-10-27T10:00:00+09:00',
@@ -30,6 +31,7 @@ http.Client server(
   List<String> calls, {
   required List<Map<String, dynamic>> Function() requests,
   http.Response Function(String path)? onDecide,
+  List<String>? decisions,
 }) =>
     MockClient((req) async {
       final path = req.url.path;
@@ -56,6 +58,7 @@ http.Client server(
       if (path == '/v1/guardian/alerts') return json({'alerts': []});
       if (path == '/v1/guardian/withdrawals') return json({'withdrawals': requests()});
       if (path.endsWith('/withdrawal/approve') || path.endsWith('/withdrawal/reject')) {
+        decisions?.add('$path ${req.body}');
         return (onDecide ?? (_) => json({'status': 'deleted'}))(path);
       }
       return json({'detail': 'x'}, 404);
@@ -227,5 +230,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('withdrawal-12')), findsOneWidget);
+  });
+
+  testWidgets('승인과 거절은 보호자가 본 요청의 번호를 함께 보낸다', (tester) async {
+    final bodies = <String>[];
+    NulbomApi.client = server(<String>[], requests: () => [request()], decisions: bodies);
+
+    await open(tester);
+    await tester.tap(find.byKey(const Key('withdrawal-reject-12')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('withdrawal-confirm')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('withdrawal-approve-12')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('withdrawal-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(bodies, [
+      '/v1/elders/12/withdrawal/reject {"request_id":7}',
+      '/v1/elders/12/withdrawal/approve {"request_id":7}',
+    ]);
   });
 }

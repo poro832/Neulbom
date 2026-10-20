@@ -256,7 +256,10 @@ def test_an_elder_withdrawal_cascades_to_every_table_and_nothing_else():
 
     asked = client.post("/v1/me/withdrawal", json={"confirm": True}, headers=elder_keys[12])
     assert asked.status_code == 202
-    r = client.post("/v1/elders/12/withdrawal/approve", headers=guardian_keys[1])
+    request_id = data.withdrawals.get(12).request_id
+    r = client.post(
+        "/v1/elders/12/withdrawal/approve", json={"request_id": request_id}, headers=guardian_keys[1]
+    )
 
     assert r.status_code == 200 and r.json() == {"status": "deleted"}
     assert deleter.calls == [["12-a.wav"]]

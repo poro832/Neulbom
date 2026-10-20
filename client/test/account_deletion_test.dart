@@ -136,6 +136,7 @@ void main() {
             'withdrawals': [
               {
                 'elder_id': 12,
+                'request_id': 41,
                 'name': '홍길동',
                 'requested_at': '2026-10-20T10:00:00+09:00',
                 'expires_at': '2026-10-27T10:00:00+09:00',
@@ -151,10 +152,11 @@ void main() {
       });
 
       final list = await NulbomApi.guardianWithdrawals(key: 'nlb_test');
-      final approved = await NulbomApi.approveWithdrawal(12, key: 'nlb_test');
-      await NulbomApi.rejectWithdrawal(12, key: 'nlb_test');
+      final approved = await NulbomApi.approveWithdrawal(12, 41, key: 'nlb_test');
+      await NulbomApi.rejectWithdrawal(12, 41, key: 'nlb_test');
 
       expect(list.single.name, '홍길동');
+      expect(list.single.requestId, 41);
       expect(list.single.approved, 1);
       expect(list.single.approvedByMe, isFalse);
       expect(approved.deleted, isTrue);

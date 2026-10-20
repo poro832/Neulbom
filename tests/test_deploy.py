@@ -203,8 +203,8 @@ def test_the_app_data_paths_are_open_and_each_one_demands_a_key_or_a_code():
     assert client.get("/v1/me/withdrawal").status_code == 401
     assert client.delete("/v1/me/withdrawal").status_code == 401
     assert client.get("/v1/guardian/withdrawals").status_code == 401
-    assert client.post("/v1/elders/1/withdrawal/approve").status_code == 401
-    assert client.post("/v1/elders/1/withdrawal/reject").status_code == 401
+    assert client.post("/v1/elders/1/withdrawal/approve", json={"request_id": 1}).status_code == 401
+    assert client.post("/v1/elders/1/withdrawal/reject", json={"request_id": 1}).status_code == 401
     assert client.put("/v1/elders/1/phone", json={"phone": "010-1234-5678"}).status_code == 401
     assert client.post("/v1/guardian/link/preview", json={"code": "12345678"}).status_code == 401
     assert client.post("/v1/guardian/link", json={"code": "12345678"}).status_code == 401
