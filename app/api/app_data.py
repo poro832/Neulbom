@@ -1003,8 +1003,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             data.withdrawals.cancel(elder_id)
             return None
         guardians = data.elders.guardians_of(elder_id)
-        if not request.rejected and guardians and set(guardians) <= request.approved_by:
-            # 보호자가 모두 승인했는데 지우다 실패해서 남은 요청이다 — 잠그고(취소·재요청이 끼어들지 못하게) 이어서 지운다.
+        # 끝까지 가야 하는 요청이다: 이미 잠겼거나(전원이 승인했고 삭제만 남았다), 지금 맡은 보호자가 모두 승인했거나,
+        # 맡은 보호자가 하나도 없다(승인할 사람이 떠났다 — 보호자가 없는 어르신은 요청하면 바로 탈퇴하는 것과 같다).
+        # 잠긴 요청은 보호자가 바뀐 뒤에도 승인할 사람이 없어 영원히 못 끝나는 일이 없도록 보호자 구성과 상관없이 끝낸다.
+        if not request.rejected and (request.locked or not guardians or set(guardians) <= request.approved_by):
+            # 잠그고(취소·재요청이 끼어들지 못하게) 이어서 지운다.
             # 지우지 못하면 오류가 올라가 503이 되고, 잠긴 요청은 그대로라 다음에 다시 시도한다.
             if not data.withdrawals.lock(elder_id, request.request_id, data.wall_clock()):
                 return data.withdrawals.get(elder_id)  # 그 사이 바뀐 요청이다 — 새 요청은 새로 판단한다
