@@ -233,9 +233,7 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '계정을 삭제하면 로그인 정보가 사라지고 되돌릴 수 없어요.\n'
-                '연결된 어르신은 지워지지 않고 \'연결 전\' 상태로 돌아가며, 안부 전화가 멈춰요. '
-                '다른 보호자가 연결 코드로 이어받을 수 있어요.',
+                '계정을 삭제하면 되돌릴 수 없어요.\n어르신 계정은 그대로 남아요.',
                 style: TextStyle(fontSize: 13, color: eInkSoft, height: 1.5),
               ),
               const SizedBox(height: 12),

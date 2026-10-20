@@ -226,7 +226,7 @@ void main() {
       }));
 
       expect(find.textContaining('되돌릴 수 없어요'), findsOneWidget);
-      expect(find.textContaining('지워지지 않고'), findsOneWidget);
+      expect(find.textContaining('어르신 계정은 그대로 남아요'), findsOneWidget);
       await tester.enterText(find.byKey(const Key('delete-password')), 'correct-horse-1');
       await tester.tap(find.text('삭제'));
       await tester.pumpAndSettle();

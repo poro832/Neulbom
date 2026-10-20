@@ -143,7 +143,7 @@ class _ElderCallTimeCardState extends State<ElderCallTimeCard> {
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '이미 지난 시간으로 바꾸면 내일부터 걸려요. 방금 지난 시간은 고를 수 없어요.',
+                      '이미 지난 시간으로 바꾸면 내일부터 전화가 걸려요.',
                       style: TextStyle(fontSize: 12, color: eInkSoft, height: 1.5),
                     ),
                   ),
