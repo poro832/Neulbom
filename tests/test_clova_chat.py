@@ -259,3 +259,16 @@ def test_a_sentence_starting_with_a_digit_is_still_joined(said, spoken):
     chat, _ = make(reply=reply_of(said))
 
     assert chat.reply(HISTORY) == spoken
+
+
+def test_a_note_on_a_turn_reaches_the_model_but_not_the_stored_text():
+    """같은 질문을 또 하려 할 때 모델에게만 당부를 붙인다. 대화 기록의 말은 그대로다."""
+    from app.media.conversation import NO_REPEAT_NOTE
+
+    chat, _ = make()
+    history = [Turn("ai", "오늘 하루는 어떠세요?"), Turn("elder", "그냥 그래요", False, NO_REPEAT_NOTE)]
+
+    messages = chat._messages(history)
+
+    assert messages[-1] == {"role": "user", "content": f"그냥 그래요\n({NO_REPEAT_NOTE})"}
+    assert history[-1].text == "그냥 그래요"
