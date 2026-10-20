@@ -44,3 +44,12 @@ def test_prompt_asks_about_medication_once_without_advising():
     assert "약을 챙겨 드셨는지" in P
     assert "다시 묻지 않습니다" in P
     assert "진단이나 치료법은 말하지 않습니다" in P  # 기존 규칙이 그대로 있다
+
+
+def test_the_prompt_forbids_greeting_twice_and_stacking_questions():
+    """2026-10-20 실통화: 인사 질문 뒤에 어르신이 호응만 하자 AI가 다시 인사하고 다른 질문을 해
+    어르신이 어느 질문에 답해야 할지 몰랐다."""
+    assert "다시 인사하지 않습니다" in P
+    assert "앞서 드린 질문을 한 문장으로 다시 여쭙니다" in P
+    assert "다른 질문을 더하지 않습니다" in P
+    assert "질문은 한 번에 하나" in P
