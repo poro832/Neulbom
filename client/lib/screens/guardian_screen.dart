@@ -54,7 +54,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   static String _status(double? score) {
     if (score == null) return '기록 없음';
-    if (score >= 60) return '경보';
+    if (score >= 60) return '경고';
     if (score >= 30) return '주의';
     return '정상';
   }
@@ -385,7 +385,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '낮을수록 평소와 같아요. 30점부터 주의, 60점부터 경보로 알려 드려요.',
+                  '낮을수록 평소와 같아요. 30점부터 주의, 60점부터 경고로 알려 드려요.',
                   style: GoogleFonts.notoSansKr(fontSize: 12, color: eInkSoft),
                 ),
                 const SizedBox(height: 32),

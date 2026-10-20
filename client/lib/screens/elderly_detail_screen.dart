@@ -216,14 +216,14 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
   }
 
   /// 화면에 보이는 점수(반올림). 상태·색·가장 높았던 날을 정하는 비교는 모두 이 값으로 한다 —
-  /// 59.6은 "60점"으로 보이니 경보다(보이는 숫자와 상태가 어긋나지 않게).
+  /// 59.6은 "60점"으로 보이니 경고다(보이는 숫자와 상태가 어긋나지 않게).
   static int _shown(double score) => score.round();
 
-  /// 낮을수록 평소와 같다: 30점부터 주의, 60점부터 경보.
+  /// 낮을수록 평소와 같다: 30점부터 주의, 60점부터 경고.
   static String _labelFor(double? score) {
     if (score == null) return '기록 없음';
     final shown = _shown(score);
-    if (shown >= 60) return '경보';
+    if (shown >= 60) return '경고';
     if (shown >= 30) return '주의';
     return '정상';
   }
@@ -237,7 +237,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   static Color _colorFor(double? score) {
     switch (_labelFor(score)) {
-      case '경보':
+      case '경고':
         return const Color(0xFFE56F67);
       case '주의':
         return const Color(0xFFFFA726);
@@ -266,7 +266,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     return (day: DateTime.parse(best.key), score: best.value);
   }
 
-  /// 상태(정상·주의·경보)를 정하는 점수. 일간은 그날 점수, 주간·월간은 가장 높았던 날의 점수 —
+  /// 상태(정상·주의·경고)를 정하는 점수. 일간은 그날 점수, 주간·월간은 가장 높았던 날의 점수 —
   /// 평균이 나쁜 하루를 가리지 않게 한다.
   double? get _statusScore => _isDaily ? _statScore : _highestDay?.score;
 
@@ -349,8 +349,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                       titleHeight: titleHeight,
                       value: loading ? '-' : _statusLabel,
                       subtitle: _isDaily
-                          ? '30점부터 주의, 60점부터 경보'
-                          : '가장 높았던 날 기준 · 30점부터 주의, 60점부터 경보',
+                          ? '30점부터 주의, 60점부터 경고'
+                          : '가장 높았던 날 기준 · 30점부터 주의, 60점부터 경고',
                       color: _statusColor,
                     ),
                   ),
@@ -536,7 +536,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
               ),
               const TextSpan(text: ' 30~59점 · '),
               TextSpan(
-                text: '경보',
+                text: '경고',
                 style: TextStyle(color: _colorFor(60), fontWeight: FontWeight.w700),
               ),
               const TextSpan(text: ' 60점 이상'),
@@ -569,7 +569,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         lines = '• 평소와 비슷했어요\n• 특별히 달라진 점이 없어요';
       case '주의':
         lines = '• 평소와 다른 신호가 있었어요\n• 안부를 한 번 확인해 보세요';
-      case '경보':
+      case '경고':
         lines = '• 평소와 많이 달랐어요\n• 가능하면 직접 연락해 보세요';
       default:
         lines = '• 이 기간에는 점수를 낸 통화가 없어요';

@@ -316,7 +316,7 @@ void main() {
   group('상태는 화면에 보이는 반올림 점수로 정한다', () {
     for (final (score, shown, label, color) in <(double, String, String, Color)>[
       (59.4, '59점', '주의', orange),
-      (59.6, '60점', '경보', red),
+      (59.6, '60점', '경고', red),
       (29.4, '29점', '정상', green),
       (29.6, '30점', '주의', orange),
     ]) {
@@ -334,27 +334,27 @@ void main() {
       });
     }
 
-    testWidgets('주간: 59.6점인 날은 카드·막대·툴팁·가장 높았던 날 모두 60점 경보다', (tester) async {
+    testWidgets('주간: 59.6점인 날은 카드·막대·툴팁·가장 높았던 날 모두 60점 경고다', (tester) async {
       NulbomApi.client = serverWithScores({'2026-10-05': 29.6, '2026-10-08': 59.6});
 
       await open(tester, now: fixedNow);
       await tester.tap(find.text('주간'));
       await tester.pumpAndSettle();
 
-      expect(find.text('경보'), findsOneWidget);
-      expect(tester.widget<Text>(find.text('경보')).style?.color, red);
+      expect(find.text('경고'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('경고')).style?.color, red);
       expect(find.text('45점'), findsOneWidget); // 평균 44.6 → 45점, 주의
       expect(tester.widget<Text>(find.text('45점')).style?.color, orange);
       final data = chartData(tester);
       final monday = data.barGroups[1];
       final thursday = data.barGroups[4];
       expect(monday.barRods.single.color, orange); // 29.6 → 30점 → 주의
-      expect(thursday.barRods.single.color, red); // 59.6 → 60점 → 경보
+      expect(thursday.barRods.single.color, red); // 59.6 → 60점 → 경고
       final tooltip = data.barTouchData.touchTooltipData.getTooltipItem;
       expect(tooltip(monday, 1, monday.barRods.single, 0)?.text, '10/5 · 30점');
       expect(tooltip(thursday, 4, thursday.barRods.single, 0)?.text, '10/8 · 60점');
       expect(find.text('가장 높았던 날: 10월 8일 · 60점'), findsOneWidget);
-      expect(find.textContaining('(60점, 경보)'), findsOneWidget);
+      expect(find.textContaining('(60점, 경고)'), findsOneWidget);
     });
 
     testWidgets('보이는 점수가 같은 두 날이면 가장 높았던 날은 나중 날이다', (tester) async {
@@ -489,7 +489,7 @@ void main() {
       expect(find.byType(BarChart), findsNothing);
       // 일간의 부제는 그대로다
       expect(find.text('낮을수록 평소와 같아요'), findsOneWidget);
-      expect(find.text('30점부터 주의, 60점부터 경보'), findsOneWidget);
+      expect(find.text('30점부터 주의, 60점부터 경고'), findsOneWidget);
 
       await tester.tap(find.text('주간'));
       await tester.pumpAndSettle();
@@ -510,7 +510,7 @@ void main() {
       for (final w in ['일', '월', '화', '수', '목', '금', '토']) {
         expect(inChart(w), findsOneWidget);
       }
-      expect(find.text('정상 30점 미만 · 주의 30~59점 · 경보 60점 이상'), findsOneWidget);
+      expect(find.text('정상 30점 미만 · 주의 30~59점 · 경고 60점 이상'), findsOneWidget);
 
       await tester.tap(find.text('일간'));
       await tester.pumpAndSettle();
@@ -559,7 +559,7 @@ void main() {
       expect(find.text('기록 없음'), findsOneWidget);
     });
 
-    testWidgets('하루만 60점 이상이면 주간 상태는 경보이고, 평소와 다른 정도는 평균을 보인다', (tester) async {
+    testWidgets('하루만 60점 이상이면 주간 상태는 경고이고, 평소와 다른 정도는 평균을 보인다', (tester) async {
       NulbomApi.client = serverWithScores({
         '2026-10-04': 10,
         '2026-10-05': 10,
@@ -574,14 +574,14 @@ void main() {
 
       expect(find.text('22점'), findsOneWidget); // (10*4 + 70) / 5
       expect(find.text('평균 · 낮을수록 평소와 같아요'), findsOneWidget);
-      expect(find.text('경보'), findsOneWidget);
+      expect(find.text('경고'), findsOneWidget);
       expect(find.text('정상'), findsNothing);
-      expect(find.text('가장 높았던 날 기준 · 30점부터 주의, 60점부터 경보'), findsOneWidget);
-      expect(tester.widget<Text>(find.text('경보')).style?.color, red);
+      expect(find.text('가장 높았던 날 기준 · 30점부터 주의, 60점부터 경고'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('경고')).style?.color, red);
       expect(tester.widget<Text>(find.text('22점')).style?.color, green); // 평균은 평균의 구간 색
       expect(
         find.text('2026년 10월 4일 ~ 2026년 10월 10일에는 홍길동님과 5번 통화했고, '
-            '평소와 다른 정도는 평균 22점, 가장 높았던 날은 10월 8일(70점, 경보)이에요.'),
+            '평소와 다른 정도는 평균 22점, 가장 높았던 날은 10월 8일(70점, 경고)이에요.'),
         findsOneWidget,
       );
     });
@@ -613,8 +613,8 @@ void main() {
         '10/31 · 65점',
       );
       expect(find.text('가장 높았던 날: 10월 31일 · 65점'), findsOneWidget);
-      expect(find.text('경보'), findsOneWidget);
-      expect(find.text('정상 30점 미만 · 주의 30~59점 · 경보 60점 이상'), findsOneWidget);
+      expect(find.text('경고'), findsOneWidget);
+      expect(find.text('정상 30점 미만 · 주의 30~59점 · 경고 60점 이상'), findsOneWidget);
     });
 
     testWidgets('좁은 폰 화면에서도 주간·월간 카드와 차트가 넘치지 않는다', (tester) async {
@@ -635,7 +635,7 @@ void main() {
     for (final (score, label, lines) in <(double?, String, String)>[
       (10, '정상', '• 평소와 비슷했어요\n• 특별히 달라진 점이 없어요'),
       (40, '주의', '• 평소와 다른 신호가 있었어요\n• 안부를 한 번 확인해 보세요'),
-      (70, '경보', '• 평소와 많이 달랐어요\n• 가능하면 직접 연락해 보세요'),
+      (70, '경고', '• 평소와 많이 달랐어요\n• 가능하면 직접 연락해 보세요'),
       (null, '기록 없음', '• 이 기간에는 점수를 낸 통화가 없어요'),
     ]) {
       testWidgets('$label: 새 문구와 맨 아래 안내가 보이고 옛 문구는 없다', (tester) async {
