@@ -213,7 +213,9 @@ class _ConfirmDialogState extends State<_ConfirmDialog> {
           ),
           const SizedBox(height: 8),
           Text(
-            '연결하면 이 어르신께 안부 전화가 시작돼요.',
+            widget.elder.otherGuardians > 0
+                ? '이미 보호자 ${widget.elder.otherGuardians}명이 함께 보고 있어요. 연결하면 같이 보게 돼요.'
+                : '연결하면 이 어르신께 안부 전화가 시작돼요.',
             style: GoogleFonts.notoSansKr(fontSize: 13, color: eInkSoft),
           ),
           if (_error != null) ...[
