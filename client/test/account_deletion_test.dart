@@ -603,6 +603,13 @@ void main() {
       expect(find.byKey(const Key('withdrawal-banner')), findsOneWidget);
     });
 
+    testWidgets('서버가 탈퇴가 끝났다고(deleted) 알려 주면 저절로 로그인 화면으로 가고 열쇠를 지운다', (tester) async {
+      await openDeleteFlow(tester, onStatus: () => json({'status': 'deleted'}), openConfirm: false);
+
+      expect(find.byType(ElderlyLoginScreen), findsOneWidget);
+      expect(await NulbomApi.elderKey(), isNull);
+    });
+
     testWidgets('보호자가 승인해 서버에서 탈퇴가 끝나면(열쇠가 401) 저절로 로그인 화면으로 간다', (tester) async {
       await openDeleteFlow(tester, onStatus: () => json({'detail': '열쇠가 필요합니다'}, 401), openConfirm: false);
 

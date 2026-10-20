@@ -1038,6 +1038,9 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             delete_elder_now(elder_id)
             return JSONResponse(status_code=200, content={"status": "deleted"})
         request = live_withdrawal(elder_id)
+        if request is None and data.elders.get(elder_id) is None:
+            # 이전 요청이 잠겨 있어 읽는 사이 이어서 지웠다(보호자가 바뀐 뒤 다시 누른 경우 등). 지워진 어르신에게 새 요청을 만들지 않는다.
+            return JSONResponse(status_code=200, content={"status": "deleted"})
         if request is None or request.rejected:
             request = data.withdrawals.open(elder_id, data.wall_clock())
             logger.info("어르신이 탈퇴를 요청했다 elder_id=%s 보호자=%s명", elder_id, len(guardians))
@@ -1056,7 +1059,8 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         elder_id = elder_id_of(authorization)
         request = live_withdrawal(elder_id)
         if request is None:
-            return {"status": "none"}
+            # 읽는 김에 잠긴 요청의 삭제가 끝났다면 deleted다 — 앱은 이 폰의 정보를 지우고 처음 화면으로 간다.
+            return {"status": "deleted" if data.elders.get(elder_id) is None else "none"}
         return withdrawal_view(request, data.elders.guardians_of(elder_id))
 
     @app.delete("/v1/me/withdrawal")
@@ -1107,6 +1111,9 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         guardian_id = active_guardian_id_of(authorization)
         owned_elder(guardian_id, elder_id)
         if live_withdrawal(elder_id) is None:
+            if data.elders.get(elder_id) is None:
+                # 앞서 승인한 탈퇴가 이어서 지워지던 중이었고 방금 끝났다 — 재시도한 보호자에게 끝났다고 답한다.
+                return {"status": "deleted"}
             raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
         request = data.withdrawals.approve(elder_id, guardian_id, body.request_id)
         if request is None:
