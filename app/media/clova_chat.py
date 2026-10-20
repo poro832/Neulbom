@@ -204,7 +204,8 @@ class ClovaChat:
 
 
 # 문장 사이: 끝 부호 뒤의 공백.
-_SENTENCE_GAP = re.compile(r"(?<=[.!?。])\s+")
+# 공백이 없어도("끝.다음") 나눈다. 숫자 사이의 점("3.5")과 이어지는 부호("...")에서는 나누지 않는다.
+_SENTENCE_GAP = re.compile(r"(?<=[.!?。])(?!\d)\s*(?=[^\s.!?。])")
 
 
 def _join_sentences(content: str) -> str:
