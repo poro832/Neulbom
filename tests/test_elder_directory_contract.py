@@ -502,3 +502,81 @@ def test_an_unlinked_elder_has_no_guardian_to_change_the_phone(directory):
 
     assert directory.set_phone(elder_id, 1, "010-7777-1313") is False
     assert directory.phone_of(elder_id) == "010-9999-1111"
+
+
+# ------------------------------------------------ 새 폰 로그인 열기·쓰기
+
+
+def test_a_window_opened_by_the_guardian_lets_the_number_in_exactly_once(directory):
+    assert directory.open_new_phone_login(13, 1, 2000.0) is True
+
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) == 13
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) is None  # 한 번뿐이다
+
+
+def test_a_number_without_an_open_window_is_not_let_in(directory):
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) is None
+    assert directory.claim_new_phone("010-4040-4040", 1000.0) is None  # 모르는 번호
+    assert directory.claim_new_phone("", 1000.0) is None
+
+
+def test_an_expired_window_lets_nobody_in_and_is_closed(directory):
+    directory.open_new_phone_login(13, 1, 2000.0)
+
+    assert directory.claim_new_phone("070-0000-0013", 2000.5) is None
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) is None  # 이미 닫혔다
+
+
+def test_the_number_is_compared_by_its_digits(directory):
+    directory.open_new_phone_login(13, 1, 2000.0)
+
+    assert directory.claim_new_phone("07000000013", 1000.0) == 13
+
+
+def test_only_the_guardian_of_the_elder_can_open_a_window(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert directory.open_new_phone_login(13, other, 2000.0) is False
+    assert directory.open_new_phone_login(4242, 1, 2000.0) is False
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) is None
+
+
+def test_an_unlinked_elder_has_no_guardian_to_open_a_window(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert directory.open_new_phone_login(elder_id, 1, 2000.0) is False
+
+
+def test_reopening_after_use_lets_the_number_in_again(directory):
+    directory.open_new_phone_login(13, 1, 2000.0)
+    directory.claim_new_phone("070-0000-0013", 1000.0)
+    directory.open_new_phone_login(13, 1, 3000.0)
+
+    assert directory.claim_new_phone("070-0000-0013", 2500.0) == 13
+
+
+def test_a_window_is_independent_per_elder(directory):
+    directory.open_new_phone_login(13, 1, 2000.0)
+
+    assert directory.claim_new_phone("070-0000-0012", 1000.0) is None  # 어르신 12는 열린 적 없다
+    assert directory.claim_new_phone("070-0000-0013", 1000.0) == 13
+
+
+def test_two_phones_using_the_same_open_window_get_one_winner(directory):
+    import threading
+
+    directory.open_new_phone_login(13, 1, 2000.0)
+    results: list[int | None] = []
+    barrier = threading.Barrier(2)
+
+    def worker():
+        barrier.wait()
+        results.append(directory.claim_new_phone("070-0000-0013", 1000.0))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(results, key=lambda r: r is None) == [13, None]

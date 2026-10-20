@@ -27,7 +27,7 @@ def test_the_guardian_reads_and_changes_the_elders_phone():
     assert kit.client.get(PHONE.format(12), headers=kit.guardian_headers).json() == {"phone": "070-1111-2222"}
     response = put(kit, "010-7777-1212")
 
-    assert response.status_code == 200 and response.json() == {"phone": "010-7777-1212"}
+    assert response.status_code == 200 and response.json()["phone"] == "010-7777-1212"
     assert kit.client.get(PHONE.format(12), headers=kit.guardian_headers).json() == {"phone": "010-7777-1212"}
     assert kit.data.elders.find_by_phone("070-1111-2222") is None
     assert kit.data.elders.phone_of(13) == "070-3333-4444"

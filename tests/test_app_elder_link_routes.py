@@ -1,12 +1,10 @@
-"""어르신 먼저 가입 + 연결 코드 — 가입, 코드 발급, 보호자 미리보기·연결."""
+"""어르신 먼저 가입 + 고정 연결 코드 — 가입, 코드 보기·새로 만들기, 보호자 미리보기·연결."""
 
 from __future__ import annotations
 
 import logging
 
-from app.api.app_data import iso_kst
 from app.api.invites import hash_invite_code
-from app.api.link_codes import LINK_CODE_TTL_SECONDS
 from app.api.rate_limit import FailureLimiter
 from tests.app_data_helpers import make_app_kit
 
@@ -26,7 +24,13 @@ def elder_headers_of(response) -> dict:
     return {"Authorization": f"Bearer {response.json()['elder_key']}"}
 
 
-def new_link_code(kit, headers) -> str:
+def show_link_code(kit, headers) -> str:
+    response = kit.client.get(LINK_CODE, headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["code"]
+
+
+def renew_link_code(kit, headers) -> str:
     response = kit.client.post(LINK_CODE, headers=headers)
     assert response.status_code == 200, response.text
     return response.json()["code"]
@@ -34,8 +38,8 @@ def new_link_code(kit, headers) -> str:
 
 def unlinked_elder(kit):
     """가입한 어르신의 (열쇠 머리글, 연결 코드)."""
-    headers = elder_headers_of(sign_up(kit))
-    return headers, new_link_code(kit, headers)
+    response = sign_up(kit)
+    return elder_headers_of(response), response.json()["link_code"]
 
 
 def wrong_code(code: str) -> str:
@@ -105,45 +109,70 @@ def test_an_unlinked_elder_is_kept_out_of_the_endpoints_that_need_a_guardian():
     assert response.json() == {"detail": "보호자 연결을 기다리고 있어요"}
 
 
-# ------------------------------------------------ 연결 코드 발급
+# ------------------------------------------------ 고정 연결 코드: 가입 때 정해지고 언제든 다시 본다
 
 
-def test_a_link_code_is_eight_digits_and_lasts_a_day():
+def test_signup_gives_a_fixed_eight_digit_code():
     kit = make_app_kit()
-    headers = elder_headers_of(sign_up(kit))
 
-    response = kit.client.post(LINK_CODE, headers=headers)
+    response = sign_up(kit)
 
-    body = response.json()
-    assert response.status_code == 200
-    assert len(body["code"]) == 8 and body["code"].isdigit()
-    assert body["expires_at"] == iso_kst(kit.clock.now + LINK_CODE_TTL_SECONDS)
+    code = response.json()["link_code"]
+    assert len(code) == 8 and code.isdigit()
+    assert show_link_code(kit, elder_headers_of(response)) == code
 
 
-def test_a_new_link_code_revokes_the_old_one():
+def test_the_code_never_changes_or_expires_and_can_be_seen_again_any_time():
     kit = make_app_kit()
-    headers = elder_headers_of(sign_up(kit))
-    first = new_link_code(kit, headers)
-    second = new_link_code(kit, headers)
+    headers, code = unlinked_elder(kit)
 
+    first = show_link_code(kit, headers)
+    kit.clock.now += 30 * 24 * 3600  # 한 달 뒤에도 그대로다
+    later = show_link_code(kit, headers)
+
+    assert first == later == code
+    assert kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers).status_code == 200
+
+
+def test_the_code_can_still_be_seen_after_a_guardian_is_linked():
+    kit = make_app_kit()
+    headers, code = unlinked_elder(kit)
+    kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
+
+    assert show_link_code(kit, headers) == code
+
+
+def test_an_elder_without_a_stored_code_gets_one_the_first_time_they_look():
+    """고정 코드가 생기기 전에 가입한 어르신. 열쇠는 있지만 코드가 없다."""
+    kit = make_app_kit()
+    headers = kit.elder_headers(12)  # 어르신 12는 가입 때 코드를 받지 않았다
+    assert kit.data.links.code_of(12) is None
+
+    code = show_link_code(kit, headers)
+
+    assert len(code) == 8 and code.isdigit()
+    assert show_link_code(kit, headers) == code
+
+
+def test_a_new_code_revokes_the_old_one_and_keeps_the_linked_guardian():
+    kit = make_app_kit()
+    headers, first = unlinked_elder(kit)
+    kit.client.post(LINK, json={"code": first}, headers=kit.guardian_headers)
+
+    second = renew_link_code(kit, headers)
+
+    assert second != first
+    assert show_link_code(kit, headers) == second
     assert kit.client.post(PREVIEW, json={"code": first}, headers=kit.guardian_headers).status_code == 401
-    assert kit.client.post(PREVIEW, json={"code": second}, headers=kit.guardian_headers).status_code == 200
+    assert kit.client.get("/v1/me/status", headers=headers).json()["status"] == "active"
 
 
-def test_issuing_needs_an_elder_key():
+def test_seeing_and_renewing_need_an_elder_key():
     kit = make_app_kit()
 
-    assert kit.client.post(LINK_CODE).status_code == 401
-    assert kit.client.post(LINK_CODE, headers=kit.guardian_headers).status_code == 401
-
-
-def test_an_elder_who_already_has_a_guardian_cannot_get_a_link_code():
-    kit = make_app_kit()
-
-    response = kit.client.post(LINK_CODE, headers=kit.elder_headers(12))
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": "이미 보호자가 연결돼 있어요"}
+    for call in (kit.client.get, kit.client.post):
+        assert call(LINK_CODE).status_code == 401
+        assert call(LINK_CODE, headers=kit.guardian_headers).status_code == 401
 
 
 # ------------------------------------------------ 보호자 미리보기와 연결
@@ -176,7 +205,7 @@ def test_linking_connects_the_elder_and_records_consent_in_one_step():
     assert "홍길동" in [ref.name for ref in kit.data.elders.elders_of(1)]
 
 
-def test_a_link_code_works_once():
+def test_the_code_stays_valid_after_linking_but_an_already_linked_elder_cannot_be_linked_again():
     kit = make_app_kit()
     _, code = unlinked_elder(kit)
     kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
@@ -184,17 +213,18 @@ def test_a_link_code_works_once():
     again = kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
 
     assert again.status_code == 401 and again.json() == BAD_LINK
+    assert kit.data.links.find(hash_invite_code(code)) is not None  # 코드는 사라지지 않는다
 
 
-def test_wrong_expired_and_used_codes_get_the_same_answer():
+def test_wrong_and_already_linked_codes_get_the_same_answer():
     kit = make_app_kit()
     headers, code = unlinked_elder(kit)
     wrong = kit.client.post(PREVIEW, json={"code": wrong_code(code)}, headers=kit.guardian_headers)
-    kit.clock.now += LINK_CODE_TTL_SECONDS + 1
-    expired = kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers)
+    kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
+    linked = kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers)
 
     assert (wrong.status_code, wrong.json()) == (401, BAD_LINK)
-    assert (expired.status_code, expired.json()) == (401, BAD_LINK)
+    assert (linked.status_code, linked.json()) == (401, BAD_LINK)
 
 
 def test_failed_attempts_are_limited_even_for_the_right_code():
@@ -256,11 +286,13 @@ def test_the_whole_flow_never_logs_codes_numbers_or_names(caplog):
 
     with caplog.at_level(logging.DEBUG):
         headers, code = unlinked_elder(kit)
-        kit.client.post(PREVIEW, json={"code": wrong_code(code)}, headers=kit.guardian_headers)
-        kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers)
-        kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
+        show_link_code(kit, headers)
+        renewed = renew_link_code(kit, headers)
+        kit.client.post(PREVIEW, json={"code": wrong_code(renewed)}, headers=kit.guardian_headers)
+        kit.client.post(PREVIEW, json={"code": renewed}, headers=kit.guardian_headers)
+        kit.client.post(LINK, json={"code": renewed}, headers=kit.guardian_headers)
 
-    for secret in (code, "010-9999-1111", "01099991111", "홍길동"):
+    for secret in (code, renewed, "010-9999-1111", "01099991111", "홍길동"):
         assert secret not in caplog.text
 
 
@@ -290,6 +322,15 @@ def test_a_failed_share_agreement_rolls_the_signup_back_so_a_retry_works(monkeyp
     kit = make_app_kit()
     with monkeypatch.context() as broken:
         _break(broken, kit.data.content, "agree_share")
+        assert sign_up(kit).status_code == 503
+
+    assert sign_up(kit).status_code == 200
+
+
+def test_a_failed_code_save_rolls_the_signup_back_so_a_retry_works(monkeypatch):
+    kit = make_app_kit()
+    with monkeypatch.context() as broken:
+        _break(broken, kit.data.links, "issue")
         assert sign_up(kit).status_code == 503
 
     assert sign_up(kit).status_code == 200

@@ -42,6 +42,8 @@ CREATE TABLE elders (
     agreed_at    TIMESTAMPTZ,
     -- 통화 내용(요약·원문)이 보호자에게 공유된다는 안내에 동의한 시각. NULL이면 공유하지 않는다.
     share_agreed_at TIMESTAMPTZ,
+    -- 보호자가 전화번호를 고치면 새 폰이 이 시각까지 번호만으로 한 번 로그인할 수 있다. 쓰거나 만료되면 NULL이다.
+    phone_claim_until TIMESTAMPTZ,
 
     -- 기준선 열은 여기 두지 않는다. 판정마다 최근 14통에서 다시 계산하기
     -- 때문이다(위험 점수 설계 3.1) — 저장해 두면 그 판정을 나중에 재현할 수
@@ -311,11 +313,13 @@ CREATE TABLE elder_pairings (
 );
 CREATE INDEX elder_pairings_elder_idx ON elder_pairings (elder_id, pairing_id DESC);
 
--- 어르신 연결 코드. 코드는 지문만 저장한다. 어르신당 하나이고 재발급하면 덮어쓴다.
+-- 어르신 연결 코드: 어르신마다 하나뿐인 고정 코드. 찾기 위한 지문과 다시 보여 주기 위한 원문을 함께 둔다.
+-- 만료되지 않는다(expires_at은 옛 24시간 코드 시절의 칸이다). 새 코드를 만들면 덮어쓴다.
 CREATE TABLE elder_link_codes (
     elder_id   BIGINT PRIMARY KEY REFERENCES elders(elder_id) ON DELETE CASCADE,
     code_hash  TEXT NOT NULL UNIQUE,
-    expires_at TIMESTAMPTZ NOT NULL,
+    code       TEXT,
+    expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -249,6 +249,35 @@ class PostgresElderDirectory:
             raise PhoneTaken(wanted) from exc
         return updated == 1
 
+    def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
+        with self._pool.connection() as conn:
+            updated = conn.execute(
+                "UPDATE elders SET phone_claim_until = to_timestamp(%s) "
+                "WHERE elder_id = %s AND guardian_id = %s",
+                (until, elder_id, guardian_id),
+            ).rowcount
+        return updated == 1
+
+    def claim_new_phone(self, phone: str, now: float) -> int | None:
+        wanted = digits_of(phone)
+        if not wanted:
+            return None
+        # 한 문장이라 같은 번호로 동시에 와도 한 쪽만 행을 얻는다(FOR UPDATE가 다른 쪽을 기다리게 하고, 기다린 쪽은
+        # 이미 닫힌 창을 본다). 만료됐으면 닫아 두기만 하고 None이다. RETURNING의 열은 바뀐 값이라 옛 시각은 하위 질의에서 읽는다.
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "UPDATE elders SET phone_claim_until = NULL FROM ("
+                "  SELECT elder_id, phone_claim_until AS until FROM elders "
+                "  WHERE regexp_replace(phone_number, '[^0-9]', '', 'g') = %s "
+                "    AND phone_claim_until IS NOT NULL FOR UPDATE"
+                ") AS opened WHERE elders.elder_id = opened.elder_id "
+                "RETURNING elders.elder_id, opened.until > to_timestamp(%s)",
+                (wanted, now),
+            ).fetchone()
+        if row is None or not row[1]:
+            return None
+        return row[0]
+
     def detach_all_from(self, guardian_id: int) -> list[int]:
         # 보호자 행을 지우기 **전에** 부른다. elders.guardian_id가 ON DELETE CASCADE라 그대로 지우면 어르신까지
         # 지워진다. consent_at을 비우면 스케줄러 명부(consent_at IS NOT NULL)에서 빠져 안부 전화가 멈춘다.
