@@ -15,7 +15,7 @@ http.Response json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json; charset=utf-8'},
     );
 
-const String notice = '이미 지난 시간으로 바꾸면 내일부터 걸려요. 방금 지난 시간은 고를 수 없어요.';
+const String notice = '이미 지난 시간으로 바꾸면 내일부터 전화가 걸려요.';
 const String justPassed =
     '방금 지난 시간이라 곧바로 전화가 걸릴 수 있어요. 지금보다 나중 시간이나 더 일찍 지난 시간(내일부터 걸려요)을 골라 주세요';
 

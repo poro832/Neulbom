@@ -656,125 +656,37 @@ void main() {
     }
   });
 
-  group('어르신 폰 연결 코드', () {
-    const help = '24시간 안에 어르신 폰의 로그인 화면에 번호와 함께 입력해 주세요. 새로 만들면 이전 코드는 쓸 수 없어요.';
-
-    /// 통계·통화·언급은 비어 있고, 연결 코드 주소는 [pairing]이 답한다. 부른 요청("메서드 경로")을 남긴다.
-    http.Client serverWithPairing(
-      Future<http.Response> Function(http.Request request) pairing, {
-      List<String>? requests,
-    }) =>
-        MockClient((request) async {
+  group('안부 전화 시간 카드', () {
+    /// 통계·통화·언급은 비어 있다. 부른 요청("메서드 경로")을 남긴다.
+    http.Client server({List<String>? requests}) => MockClient((request) async {
           requests?.add('${request.method} ${request.url.path}');
           final path = request.url.path;
-          if (path == '/v1/elders/20/pairing-code') return pairing(request);
           if (path == callTimePath) return callTimeReply();
           if (path == '/v1/elders/20/calls') return json({'share_agreed': true, 'calls': []});
           if (path == '/v1/elders/20/mentions') return json(mentionsBeforeConsent);
           return json({'week_start': '2026-10-04', 'days': [], 'total_calls': 0, 'avg_score': null});
         });
 
-    Future<void> tapMake(WidgetTester tester) async {
-      await tester.ensureVisible(find.text('연결 코드 만들기'));
-      await tester.tap(find.text('연결 코드 만들기'));
-      await tester.pumpAndSettle();
-    }
-
-    testWidgets('일간 화면의 어르신 폰 연결 카드 바로 위에 안부 전화 시간 카드가 있다', (tester) async {
+    testWidgets('일간 화면의 상태 분석 아래에 안부 전화 시간 카드가 있고, 어르신 폰 연결 카드는 없다', (tester) async {
       final requests = <String>[];
-      NulbomApi.client = serverWithPairing((_) async => json({}), requests: requests);
+      NulbomApi.client = server(requests: requests);
 
       await open(tester, now: fixedNow);
 
       expect(requests, contains('GET /v1/elders/20/call-time'));
       expect(find.text('안부 전화 시간'), findsOneWidget);
       expect(find.text('오후 6:30'), findsOneWidget);
-      final callTimeY = tester.getTopLeft(find.text('안부 전화 시간')).dy;
-      expect(callTimeY, greaterThan(tester.getTopLeft(find.text('상태 분석')).dy));
-      expect(callTimeY, lessThan(tester.getTopLeft(find.text('어르신 폰 연결')).dy));
+      expect(tester.getTopLeft(find.text('안부 전화 시간')).dy,
+          greaterThan(tester.getTopLeft(find.text('상태 분석')).dy));
+      expect(find.text('어르신 폰 연결'), findsNothing);
+      expect(find.text('연결 코드 만들기'), findsNothing);
 
-      // 주간·월간 화면에는 없다(어르신 폰 연결 카드와 같은 규칙)
+      // 주간·월간 화면에는 없다
       for (final period in ['주간', '월간']) {
         await tester.tap(find.text(period));
         await tester.pumpAndSettle();
         expect(find.text('안부 전화 시간'), findsNothing);
       }
-    });
-
-    testWidgets('상세 화면에 어르신 폰 연결 카드가 있고, 열 때는 코드를 만들지 않는다', (tester) async {
-      final requests = <String>[];
-      NulbomApi.client = serverWithPairing((_) async => json({}), requests: requests);
-
-      await open(tester, now: fixedNow);
-
-      expect(find.text('어르신 폰 연결'), findsOneWidget);
-      expect(find.text('어르신 폰을 바꿨거나 처음 연결할 때 쓰는 코드예요.'), findsOneWidget);
-      expect(find.text('연결 코드 만들기'), findsOneWidget);
-      expect(requests, isNot(contains('POST /v1/elders/20/pairing-code')));
-      // 최근 통화 요약·어르신이 말씀하신 것 구역보다 아래
-      expect(
-        tester.getTopLeft(find.text('어르신 폰 연결')).dy,
-        greaterThan(tester.getTopLeft(find.text('최근 통화 요약')).dy),
-      );
-    });
-
-    testWidgets('누르면 코드를 만들어 앞자리 0까지 그대로 대화상자에 보이고, 닫으면 사라진다', (tester) async {
-      final requests = <String>[];
-      final keys = <String?>[];
-      NulbomApi.client = serverWithPairing((request) async {
-        keys.add(request.headers['Authorization']);
-        return json({'code': '000123', 'expires_at': '2026-10-11T12:00:00+09:00'});
-      }, requests: requests);
-
-      await open(tester, now: fixedNow);
-      await tapMake(tester);
-
-      expect(requests.where((r) => r == 'POST /v1/elders/20/pairing-code').length, 1);
-      expect(keys, ['Bearer nlb_test']);
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('000123'), findsOneWidget);
-      expect(find.text(help), findsOneWidget);
-
-      await tester.tap(find.text('닫기'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(find.text('000123'), findsNothing); // 저장하지 않는다
-    });
-
-    testWidgets('만들지 못하면 서버 문장을 대화상자 안에 보인다', (tester) async {
-      NulbomApi.client =
-          serverWithPairing((_) async => json({'detail': '등록되지 않은 어르신이에요'}, 404));
-
-      await open(tester, now: fixedNow);
-      await tapMake(tester);
-
-      expect(
-        find.descendant(of: find.byType(AlertDialog), matching: find.text('등록되지 않은 어르신이에요')),
-        findsOneWidget,
-      );
-      expect(find.text(help), findsNothing);
-      expect(find.byType(SnackBar), findsNothing);
-    });
-
-    testWidgets('만드는 동안 다시 눌러도 한 번만 만든다(이전 코드가 바로 못 쓰게 되니까)', (tester) async {
-      final reply = Completer<http.Response>();
-      var made = 0;
-      NulbomApi.client = serverWithPairing((_) {
-        made++;
-        return reply.future;
-      });
-
-      await open(tester, now: fixedNow);
-      await tester.ensureVisible(find.text('연결 코드 만들기'));
-      await tester.tap(find.text('연결 코드 만들기'));
-      await tester.pump();
-      await tester.tap(find.text('연결 코드 만들기'));
-      await tester.pump();
-
-      reply.complete(json({'code': '482019', 'expires_at': '2026-10-11T12:00:00+09:00'}));
-      await tester.pumpAndSettle();
-      expect(made, 1);
-      expect(find.text('482019'), findsOneWidget);
     });
   });
 

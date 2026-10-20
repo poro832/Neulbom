@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'calling_screen.dart';
+import 'call_request_dialog.dart';
 import 'ai_chat_screen.dart';
 import 'emergency_screen.dart';
 import '../utils/korean.dart';
@@ -202,15 +202,7 @@ class _MainScreenState extends State<MainScreen> {
 
                 // 다이얼 버튼 - 크기 증가
                 GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            CallingScreen(callerName: _friendName),
-                      ),
-                    );
-                  },
+                  onTap: () => showCallRequestDialog(context),
                   child: Container(
                     width: screenWidth * 0.65,
                     height: screenWidth * 0.65,
