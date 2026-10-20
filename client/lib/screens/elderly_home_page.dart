@@ -54,6 +54,11 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
     try {
       final status = await NulbomApi.myWithdrawal();
       if (!mounted) return;
+      if (status.deleted) {
+        // 보호자가 모두 승인한 탈퇴가 방금 끝났다 — 이 폰의 정보를 지우고 처음 화면으로 간다.
+        await _leaveBecauseKeyIsGone();
+        return;
+      }
       setState(() => _withdrawal = status);
     } on ApiException catch (error) {
       if (error.statusCode == 401) await _leaveBecauseKeyIsGone();
