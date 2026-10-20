@@ -10,11 +10,13 @@ class PostgresWithdrawalStore:
         self._pool = pool
 
     def open(self, elder_id: int, now: float) -> WithdrawalRequest:
-        # 한 연결 안에서 이전 기록을 지우고 새로 만든다 — 중간에 실패하면 둘 다 되돌아간다. 번호는 새로 매겨진다.
-        # 잠긴(전원이 승인한) 요청은 지우지 않는다: DELETE가 0행이면 INSERT가 PK 충돌하므로, 그때는 그 요청을 돌려준다.
+        # 거절된 이전 요청만 지우고 새로 만든다(한 연결 안이라 중간에 실패하면 되돌아간다). 번호는 새로 매겨진다.
+        # 열린 요청(승인 대기·잠김)은 지우지 않는다: DELETE가 0행이면 INSERT가 PK 충돌하므로, 그때는 그 요청을 돌려준다.
         with self._pool.connection() as conn:
             conn.execute(
-                "DELETE FROM elder_withdrawals WHERE elder_id = %s AND locked_at IS NULL", (elder_id,)
+                "DELETE FROM elder_withdrawals "
+                "WHERE elder_id = %s AND locked_at IS NULL AND rejected_at IS NOT NULL",
+                (elder_id,),
             )
             row = conn.execute(
                 "INSERT INTO elder_withdrawals (elder_id, requested_at) VALUES (%s, to_timestamp(%s)) "

@@ -46,8 +46,9 @@ class WithdrawalRequest:
 
 class WithdrawalStore(Protocol):
     def open(self, elder_id: int, now: float) -> WithdrawalRequest:
-        """새 탈퇴 요청을 시작한다. 이전 요청(거절된 것 포함)과 승인 기록은 지운다.
-        이미 잠긴(전원이 승인한) 요청이 있으면 바꾸지 않고 그 요청을 돌려준다."""
+        """새 탈퇴 요청을 시작한다. 거절된 이전 요청과 그 승인 기록은 지운다.
+        이미 열린 요청(승인을 기다리는 것, 잠긴 것)이 있으면 바꾸지 않고 그 요청을 돌려준다 — 어르신이 같은 순간에 두 번
+        눌러도 요청이 두 번 시작되어 보호자가 본 카드의 번호가 어긋나는 일이 없다."""
         ...
 
     def get(self, elder_id: int) -> WithdrawalRequest | None:
@@ -86,7 +87,7 @@ class InMemoryWithdrawalStore:
     def open(self, elder_id: int, now: float) -> WithdrawalRequest:
         with self._lock:
             existing = self._rows.get(elder_id)
-            if existing is not None and existing.locked:
+            if existing is not None and not existing.rejected:
                 return existing
             request = WithdrawalRequest(elder_id=elder_id, request_id=next(self._ids), requested_at=now)
             self._rows[elder_id] = request
