@@ -71,6 +71,8 @@ JITTER_TOLERANCE_MS = 10
 # 어르신 말이 AI 말과 이만큼 이상 겹치면 "끼어들었다"고 본다. 이보다 짧은 겹침은 AI가 끝나는 순간에
 # 자연스럽게 대답을 시작한 것이다.
 INTERRUPTION_OVERLAP_MS = 300
+# 재생 중인 AI 말 하나의 최대 길이. end 표식이 유실된 begin을 재생 중으로 오래 붙들지 않게 한다.
+MAX_AI_TURN_MS = 30_000
 
 
 class CallSession:
@@ -114,6 +116,8 @@ class CallSession:
         self._resolved_marks: set[str] = set()
         self._ai_turns: list[VadSegment] = []
         self._unmatched_marks = 0
+        # end 표식이 돌아온 가장 큰 턴 번호. 이보다 앞 턴의 begin이 남아 있으면 end가 유실된 것이다.
+        self._latest_ended_turn = 0
 
         # 녹음 파일 이름을 여기서 한 번만 정한다. finish가 언제 불리든 같은
         # 파일을 가리켜야 하기 때문이다.
@@ -304,20 +308,24 @@ class CallSession:
         return outgoing
 
     def _overlaps_ai_speech(self, start_ms: int, end_ms: int) -> bool:
-        """어르신 발화 [start_ms, end_ms)가 AI가 말하고 있던 구간과 충분히 겹치는가.
-
-        AI 구간은 begin/end 표식이 모두 돌아온 것과, begin만 돌아온(아직 재생 중인) 것이다. 표식은 소켓에서
-        받은 순서대로 처리되므로, 이 발화가 끝난 시점에 end가 아직 안 왔다면 그때까지 재생 중이었다.
-        """
+        # 어르신이 AI가 말하는 도중에 말을 시작했는가. 끼어들기는 시작 시각으로 판단한다.
+        #
+        # - 어르신이 말을 시작한 뒤에 AI가 재생을 시작했다면(AI가 어르신 말 위에 얹힌 것이다) 끼어든 것이 아니다.
+        # - AI 구간이 끝나기 INTERRUPTION_OVERLAP_MS 안쪽에서 시작한 말은 자연스러운 대답이다.
+        # - 아직 end가 안 온 구간은 재생 중으로 본다. 다만 가장 최근 begin만, 그리고 MAX_AI_TURN_MS 안에서만
+        #   그렇게 본다. end 표식이 유실되면 그 begin이 영원히 재생 중으로 남아 뒤의 모든 대답이 끼어들기가 된다.
         for segment in self._ai_turns:
-            if segment.start_ms < end_ms and segment.end_ms - start_ms >= INTERRUPTION_OVERLAP_MS:
+            if segment.start_ms <= start_ms and segment.end_ms - start_ms >= INTERRUPTION_OVERLAP_MS:
                 return True
-        for name, begin_ms in self._mark_times.items():
-            if name.endswith("-begin") and begin_ms < end_ms:
-                # 재생 중이다. 어르신 말 가운데 begin 이후 부분이 겹침이다.
-                if end_ms - max(start_ms, begin_ms) >= INTERRUPTION_OVERLAP_MS:
-                    return True
-        return False
+        begins = [
+            (_turn_number(name), begin_ms)
+            for name, begin_ms in self._mark_times.items()
+            if name.endswith("-begin") and _turn_number(name) > self._latest_ended_turn
+        ]
+        if not begins:
+            return False
+        _, begin_ms = max(begins)
+        return begin_ms <= start_ms and start_ms - begin_ms <= MAX_AI_TURN_MS
 
     def on_mark(self, name: str) -> None:
         """표식이 돌아왔다. 시각은 직전 inbound media의 것을 쓴다.
@@ -346,6 +354,7 @@ class CallSession:
 
         begin = name[: -len("-end")] + "-begin"
         self._resolved_marks.add(name)
+        self._latest_ended_turn = max(self._latest_ended_turn, _turn_number(name))
         start_ms = self._mark_times.pop(begin, None)
         end_ms = self._mark_times.pop(name)
         if start_ms is None:
@@ -375,6 +384,12 @@ class CallSession:
     def unmatched_marks(self) -> int:
         """짝이 안 맞은 표식 수. 크면 degraded로 표시한다(설계 8장)."""
         return self._unmatched_marks + len(self._mark_times)
+
+
+def _turn_number(mark_name: str) -> int:
+    # turn3-begin 이면 3. 못 읽으면 0이라 가장 오래된 것으로 친다.
+    match = re.match(r"turn(\d+)-", mark_name)
+    return int(match.group(1)) if match else 0
 
 
 def _accepts_interrupted(responder: Responder) -> bool:

@@ -183,3 +183,56 @@ def test_the_prompt_explains_what_the_interruption_note_means():
 
     assert INTERRUPTED_NOTE in P
     assert "같은 질문을 다시 하지 말고" in P
+
+
+# ---------------------------------------------------------------- 오탐 방지
+
+
+def test_speech_that_began_before_the_ai_started_playing_is_not_an_interruption():
+    """어르신이 먼저 말을 시작했고 그 위에 AI 재생이 얹힌 것이다. 어르신이 AI를 끊은 것이 아니다."""
+    responder = RecordingResponder()
+    session = CallSession("c1", SAMPLE_RATE, responder)
+    feeder = Feeder(session)
+    feeder.feed(pcm16(("speech", 500), ("silence", 1000)))  # 첫 발화(1500ms에 끝)
+    feeder.feed(pcm16(("speech", 300)))  # 어르신이 이어서 말하기 시작
+    session.on_mark("turn1-begin")  # 그 뒤에야 AI 재생이 시작됐다
+    feeder.feed(pcm16(("speech", 700), ("silence", 1000)))
+
+    assert responder.interrupted == [False, False]
+
+
+def test_a_lost_end_mark_does_not_make_every_later_answer_an_interruption():
+    """end 표식이 유실된 begin이 영원히 재생 중으로 남으면 뒤의 모든 대답이 끼어들기가 된다."""
+    responder = RecordingResponder()
+    session = CallSession("c1", SAMPLE_RATE, responder)
+    feeder = Feeder(session)
+    feeder.feed(pcm16(("speech", 500), ("silence", 1000)))
+    session.on_mark("turn1-begin")  # end는 끝내 안 온다
+    feeder.feed(pcm16(("silence", 40_000)))  # AI 말 하나가 이렇게 길 수는 없다
+    feeder.feed(pcm16(("speech", 800), ("silence", 1000)))
+
+    assert responder.interrupted == [False, False]
+
+
+def test_an_older_unfinished_turn_is_ignored_once_a_later_turn_has_finished():
+    responder = RecordingResponder()
+    session = CallSession("c1", SAMPLE_RATE, responder)
+    feeder = Feeder(session)
+    feeder.feed(pcm16(("speech", 500), ("silence", 1000)))
+    session.on_mark("turn1-begin")  # 1번 턴의 end는 유실됐다
+    feeder.feed(pcm16(("silence", 500)))
+    session.on_mark("turn2-begin")
+    feeder.feed(pcm16(("silence", 1000)))
+    session.on_mark("turn2-end")  # 2번 턴은 끝까지 재생됐다
+    feeder.feed(pcm16(("silence", 500)))
+    feeder.feed(pcm16(("speech", 800), ("silence", 1000)))
+
+    assert responder.interrupted[-1] is False
+
+
+def test_an_answer_that_starts_while_the_latest_turn_is_playing_is_still_caught():
+    responder = RecordingResponder()
+
+    run_two_turns(responder, mark_end_before_second=False, second_after_ms=1000)
+
+    assert responder.interrupted == [False, True]
