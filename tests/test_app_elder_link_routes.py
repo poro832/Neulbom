@@ -185,7 +185,7 @@ def test_preview_shows_the_name_and_a_masked_number_and_changes_nothing():
     response = kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers)
 
     assert response.status_code == 200
-    assert response.json() == {"name": "홍길동", "phone_masked": "010-****-1111"}
+    assert response.json() == {"name": "홍길동", "phone_masked": "010-****-1111", "other_guardians": 0}
     assert kit.client.get("/v1/me/status", headers=headers).json()["status"] == "unlinked"
     assert kit.data.links.find(hash_invite_code(code)) is not None
 
@@ -205,18 +205,18 @@ def test_linking_connects_the_elder_and_records_consent_in_one_step():
     assert "홍길동" in [ref.name for ref in kit.data.elders.elders_of(1)]
 
 
-def test_the_code_stays_valid_after_linking_but_an_already_linked_elder_cannot_be_linked_again():
+def test_the_code_stays_valid_after_linking_and_the_same_guardian_cannot_link_twice():
     kit = make_app_kit()
     _, code = unlinked_elder(kit)
     kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
 
     again = kit.client.post(LINK, json={"code": code}, headers=kit.guardian_headers)
 
-    assert again.status_code == 401 and again.json() == BAD_LINK
+    assert again.status_code == 409 and again.json() == {"detail": "이미 연결된 어르신이에요"}
     assert kit.data.links.find(hash_invite_code(code)) is not None  # 코드는 사라지지 않는다
 
 
-def test_wrong_and_already_linked_codes_get_the_same_answer():
+def test_a_wrong_code_gets_the_same_answer_as_before_and_a_linked_elders_code_is_a_clear_409():
     kit = make_app_kit()
     headers, code = unlinked_elder(kit)
     wrong = kit.client.post(PREVIEW, json={"code": wrong_code(code)}, headers=kit.guardian_headers)
@@ -224,7 +224,7 @@ def test_wrong_and_already_linked_codes_get_the_same_answer():
     linked = kit.client.post(PREVIEW, json={"code": code}, headers=kit.guardian_headers)
 
     assert (wrong.status_code, wrong.json()) == (401, BAD_LINK)
-    assert (linked.status_code, linked.json()) == (401, BAD_LINK)
+    assert (linked.status_code, linked.json()) == (409, {"detail": "이미 연결된 어르신이에요"})
 
 
 def test_failed_attempts_are_limited_even_for_the_right_code():

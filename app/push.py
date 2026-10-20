@@ -178,6 +178,10 @@ class PushNotifier:
         """어르신이 탈퇴를 요청했다 — 보호자의 승인이 필요하다."""
         self._notify(guardian_id, elder_id, "탈퇴를 요청했어요. 승인이 필요해요")
 
+    def notify_linked(self, guardian_id: int, elder_id: int) -> None:
+        """다른 보호자가 이 어르신에 새로 연결됐다 — 이미 보던 보호자들에게 알린다."""
+        self._notify(guardian_id, elder_id, "보호자가 새로 연결됐어요")
+
     def _notify(self, guardian_id: int, elder_id: int, what: str) -> None:
         if self._sender is None:
             return

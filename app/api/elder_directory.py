@@ -24,6 +24,9 @@ STATUS_PENDING = "pending"
 STATUS_UNCONSENTED = "unconsented"
 STATUS_UNLINKED = "unlinked"
 
+# 한 어르신을 함께 보는 보호자의 최대 수.
+MAX_GUARDIANS_PER_ELDER = 5
+
 
 class PhoneTaken(Exception):
     """이미 등록된 전화번호다(숫자만 비교한다)."""
@@ -39,6 +42,18 @@ class ElderAccess:
     consenting: bool
     name: str = ""
     agreed: bool = False
+    # 대표 보호자(guardian_id) 말고 함께 보는 보호자들, 번호 오름차순.
+    co_guardians: tuple[int, ...] = ()
+
+    @property
+    def guardian_ids(self) -> tuple[int, ...]:
+        """이 어르신을 보는 보호자 전원(대표가 맨 앞). 연결 전이면 빈 값."""
+        if self.guardian_id is None:
+            return ()
+        return (self.guardian_id, *self.co_guardians)
+
+    def has_guardian(self, guardian_id: int) -> bool:
+        return guardian_id in self.guardian_ids
 
     @property
     def status(self) -> str:
@@ -56,6 +71,8 @@ class ElderRef:
     status: str = STATUS_ACTIVE
     # 승인 대기일 때만 채운다. 보호자가 "내 부모님 번호가 맞나"를 보고 승인하는 데 쓴다.
     phone: str | None = None
+    # 이 어르신을 함께 보는 보호자 수(나 포함). 이름은 알리지 않는다.
+    guardian_count: int = 1
 
 
 @dataclass(frozen=True)
@@ -108,10 +125,14 @@ class ElderDirectory(Protocol):
         """가입 직후 실패를 되돌리는 용도. 보호자도 전화 동의(consent_at)도 없는 어르신 행만 지우고 True."""
         ...
 
-    def link(self, elder_id: int, guardian_id: int) -> bool:
-        """보호자가 없고 가입 동의(agreed_at)가 있는 어르신일 때만 guardian_id와 consent_at을 채우고 True.
+    def link(
+        self, elder_id: int, guardian_id: int, max_guardians: int = MAX_GUARDIANS_PER_ELDER
+    ) -> bool:
+        """가입 동의(agreed_at)가 있는 어르신에게 보호자를 잇고 True.
 
-        consent_at을 채우는 두 곳 중 하나다(다른 하나는 approve). 보호자가 연결을 확인하는 것이 승인이다.
+        보호자가 없으면 그 보호자가 대표가 되고 consent_at이 채워진다(consent_at을 채우는 두 곳 중 하나, 다른 하나는
+        approve — 보호자가 연결을 확인하는 것이 승인이다). 이미 연결된(동의한) 어르신이면 **추가 보호자**로 들어간다
+        (동의는 그대로). 이미 그 어르신의 보호자이거나, 보호자가 max_guardians명이거나, 승인 대기 어르신이면 False.
         """
         ...
 
@@ -148,7 +169,7 @@ class ElderDirectory(Protocol):
         ...
 
     def guardians_of(self, elder_id: int) -> list[int]:
-        """그 어르신을 맡은 보호자들(번호 오름차순). 연결 전이거나 없는 어르신이면 빈 목록."""
+        """그 어르신을 함께 보는 보호자들(번호 오름차순). 연결 전이거나 없는 어르신이면 빈 목록."""
         ...
 
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
@@ -162,10 +183,11 @@ class ElderDirectory(Protocol):
     # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
 
     def detach_all_from(self, guardian_id: int) -> list[int]:
-        """보호자 탈퇴: 그 보호자의 어르신을 **지우지 않고** 연결 전으로 돌린다(보호자·전화 동의를 비운다).
+        """보호자 탈퇴: 그 보호자의 어르신을 **지우지 않고** 그 보호자만 뗀다.
 
-        돌린 어르신 번호를 오름차순으로 돌려준다 — 호출부가 그 어르신들의 안 쓴 연결 코드(그 보호자가 내준 것)를 지운다.
-        안부 전화가 멈춘다. 가입 동의(agreed_at)·공유 동의·통화 시각·통화 기록은 그대로라, 가입 동의가 있는
+        다른 보호자가 남은 어르신은 그대로 이어진다(대표였다면 남은 사람 중 번호가 가장 작은 사람이 대표가 된다).
+        마지막 보호자였던 어르신은 연결 전으로 돌아간다(보호자·전화 동의를 비운다). 뗀 어르신 번호를 모두 오름차순으로
+        돌려준다 — 호출부가 그 어르신들의 안 쓴 연결 코드(그 보호자가 내준 것)를 지운다. 연결 전이 된 어르신은 안부 전화가 멈춘다. 가입 동의(agreed_at)·공유 동의·통화 시각·통화 기록은 그대로라, 가입 동의가 있는
         어르신은 새 연결 코드로 다른 보호자가 이어받을 수 있다.
         """
         ...
@@ -251,9 +273,10 @@ class InMemoryElderDirectory:
                 name=access.name,
                 status=access.status,
                 phone=self._phone_text.get(elder_id) if access.status == STATUS_PENDING else None,
+                guardian_count=len(access.guardian_ids),
             )
             for elder_id, access in sorted(self._entries.items())
-            if access.guardian_id == guardian_id
+            if access.has_guardian(guardian_id)
         ]
 
     def guardian_profile(self, guardian_id: int) -> GuardianProfile | None:
@@ -308,12 +331,24 @@ class InMemoryElderDirectory:
             self._forget(elder_id)
             return True
 
-    def link(self, elder_id: int, guardian_id: int) -> bool:
+    def link(
+        self, elder_id: int, guardian_id: int, max_guardians: int = MAX_GUARDIANS_PER_ELDER
+    ) -> bool:
         with self._lock:
             access = self._entries.get(elder_id)
-            if access is None or access.guardian_id is not None or not access.agreed:
+            if access is None or not access.agreed:
                 return False
-            self._entries[elder_id] = replace(access, guardian_id=guardian_id, consenting=True)
+            if access.guardian_id is None:
+                self._entries[elder_id] = replace(access, guardian_id=guardian_id, consenting=True)
+            else:
+                if (
+                    not access.consenting
+                    or access.has_guardian(guardian_id)
+                    or len(access.guardian_ids) >= max_guardians
+                ):
+                    return False
+                co = tuple(sorted((*access.co_guardians, guardian_id)))
+                self._entries[elder_id] = replace(access, co_guardians=co)
             self._guardians.add(guardian_id)
             return True
 
@@ -340,7 +375,7 @@ class InMemoryElderDirectory:
     def set_call_time(self, elder_id: int, guardian_id: int, value: time) -> bool:
         with self._lock:
             access = self._entries.get(elder_id)
-            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+            if access is None or not access.has_guardian(guardian_id):
                 return False
             self._call_times[elder_id] = value
             return True
@@ -348,7 +383,7 @@ class InMemoryElderDirectory:
     def set_phone(self, elder_id: int, guardian_id: int, phone: str) -> bool:
         with self._lock:
             access = self._entries.get(elder_id)
-            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+            if access is None or not access.has_guardian(guardian_id):
                 return False
             wanted = digits_of(phone)
             if any(other != elder_id and digits == wanted for other, digits in self._phones.items()):
@@ -359,12 +394,12 @@ class InMemoryElderDirectory:
 
     def guardians_of(self, elder_id: int) -> list[int]:
         access = self._entries.get(elder_id)
-        return [] if access is None or access.guardian_id is None else [access.guardian_id]
+        return [] if access is None else sorted(access.guardian_ids)
 
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
         with self._lock:
             access = self._entries.get(elder_id)
-            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+            if access is None or not access.has_guardian(guardian_id):
                 return False
             self._claims[elder_id] = until
             return True
@@ -383,9 +418,18 @@ class InMemoryElderDirectory:
 
     def detach_all_from(self, guardian_id: int) -> list[int]:
         with self._lock:
-            mine = sorted(eid for eid, access in self._entries.items() if access.guardian_id == guardian_id)
+            mine = sorted(eid for eid, access in self._entries.items() if access.has_guardian(guardian_id))
             for eid in mine:
-                self._entries[eid] = replace(self._entries[eid], guardian_id=None, consenting=False)
+                access = self._entries[eid]
+                rest = sorted(g for g in access.guardian_ids if g != guardian_id)
+                if not rest:
+                    self._entries[eid] = replace(
+                        access, guardian_id=None, consenting=False, co_guardians=()
+                    )
+                else:
+                    self._entries[eid] = replace(
+                        access, guardian_id=rest[0], co_guardians=tuple(rest[1:])
+                    )
             return mine
 
     def delete_elder(self, elder_id: int) -> bool:
@@ -420,5 +464,5 @@ class InMemoryElderDirectory:
             old = self._entries.get(elder_id)
             if old is None or guardian_id not in self._guardians:
                 return False
-            self._entries[elder_id] = replace(old, guardian_id=guardian_id)
+            self._entries[elder_id] = replace(old, guardian_id=guardian_id, co_guardians=())
             return True
