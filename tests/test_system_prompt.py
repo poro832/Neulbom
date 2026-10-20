@@ -19,15 +19,17 @@ def test_the_prompt_keeps_the_core_rules():
 
 
 def test_the_prompt_asks_for_speakable_text():
-    for rule in ("스무 자", "소리 내어 읽는 대로", "기호를 쓰지 않습니다", "글자로 쓰지 않습니다"):
+    for rule in ("소리 내어 읽는 대로", "기호를 쓰지 않습니다", "글자로 쓰지 않습니다"):
         assert rule in P
 
 
 def test_the_prompt_asks_for_a_very_short_reply():
     """합성 시간은 답 길이에 비례한다(2026-10-09 실통화: 2.1초 → 5.6초). 어르신은
-    답을 기다리는 침묵을 듣는다. 한두 문장, 마흔 자 안팎으로 묶는다."""
-    assert "한두 문장" in P
-    assert "마흔 자" in P
+    답을 기다리는 침묵을 듣는다. 문장 사이의 틈에 어르신이 말씀을 시작하면 말이 겹치므로
+    한 문장, 서른 자 안쪽으로 묶는다(시끄러운 엑스포 현장 피드백, 2026-10-20)."""
+    assert "한 문장으로만" in P
+    assert "서른 자" in P
+    assert "한두 문장" not in P
     assert "두세 문장" not in P
 
 
@@ -35,7 +37,7 @@ def test_the_token_cap_is_a_safety_net_for_short_replies():
     from app.media.clova_chat import DEFAULT_MAX_TOKENS
 
     # 프롬프트가 길이를 정하고, 상한은 모델이 길게 나가는 날을 막는 안전망이다.
-    assert DEFAULT_MAX_TOKENS <= 80
+    assert DEFAULT_MAX_TOKENS <= 60
 
 
 def test_prompt_asks_about_medication_once_without_advising():

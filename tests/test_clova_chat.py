@@ -190,3 +190,35 @@ def test_a_transport_failure_is_raised_for_the_caller_to_handle():
 
     with pytest.raises(RuntimeError):
         chat.reply(HISTORY)
+
+
+# ------------------------------------------------------------ 여러 문장을 한 문장으로 (시끄러운 현장 피드백)
+
+
+@pytest.mark.parametrize(
+    ("said", "spoken"),
+    [
+        # 두 문장이면 쉼표로 이은 한 문장이 된다 — 문장 사이 무음이 사라진다
+        ("그러셨군요. 점심은 드셨어요?", "그러셨군요, 점심은 드셨어요?"),
+        ("저런. 많이 아프셨겠어요. 병원에는 가보셨어요?", "저런, 많이 아프셨겠어요, 병원에는 가보셨어요?"),
+        ("좋네요! 오늘은 어디 다녀오셨어요?", "좋네요, 오늘은 어디 다녀오셨어요?"),
+        # 앞 문장이 질문이어도 부호는 쉼표로 바뀌고 마지막 부호만 남는다
+        ("그러셨어요? 걱정되네요.", "그러셨어요, 걱정되네요."),
+        # 이미 한 문장이면 손대지 않는다
+        ("그러셨군요, 점심은 드셨어요?", "그러셨군요, 점심은 드셨어요?"),
+        ("반갑습니다", "반갑습니다"),
+        # 줄바꿈으로 나뉜 문장도 합친다
+        ("그러셨군요.\n점심은 드셨어요?", "그러셨군요, 점심은 드셨어요?"),
+    ],
+)
+def test_a_multi_sentence_reply_is_spoken_as_one_sentence(said, spoken):
+    chat, _ = make(reply=reply_of(said))
+
+    assert chat.reply(HISTORY) == spoken
+
+
+def test_a_cut_off_reply_is_joined_after_it_is_trimmed():
+    """토큰 상한에서 잘린 응답은 마지막 완결 문장까지만 남기고, 그다음에 합친다."""
+    chat, _ = make(reply=reply_of("그러셨군요. 점심은 드셨어요? 그리고 오늘은 날씨가", finish="length"))
+
+    assert chat.reply(HISTORY) == "그러셨군요, 점심은 드셨어요?"
