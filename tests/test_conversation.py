@@ -8,7 +8,7 @@ import logging
 
 import numpy as np
 
-from app.media.conversation import RETRY_PROMPTS, ConversationResponder
+from app.media.conversation import GREETING, RETRY_PROMPTS, ConversationResponder, Turn
 
 AUDIO = np.zeros(160, dtype=np.float32)
 
@@ -86,56 +86,119 @@ def test_the_model_sees_what_was_said_before():
 # ------------------------------------------------- 못 알아들었을 때
 
 
-def test_an_empty_transcript_does_not_reach_the_model():
+def test_an_empty_transcript_does_not_reach_the_model_and_is_not_asked_about_right_away():
     """전사가 비면 어르신이 무슨 말을 했는지 모른다.
 
-    그 상태로 모델을 부르면 모델이 맥락 없이 아무 말이나 지어낸다 — 어르신은
-    자기가 한 말과 상관없는 대답을 듣는다.
+    그 상태로 모델을 부르면 모델이 맥락 없이 아무 말이나 지어낸다. 그렇다고 곧바로 "잘 못 들었어요"를 하면
+    시끄러운 곳에서는 AI가 어르신 말 위에 얹힌다(2026-10-20 현장 피드백) — 되묻기는 최대한 하지 않는다.
     """
     stt = FakeStt("")
     responder, _, chat, voice = make(stt=stt)
 
-    responder.respond(AUDIO, 8000)
+    assert responder.respond(AUDIO, 8000) == b""
 
     assert chat.seen == []
-    assert voice.spoken == [RETRY_PROMPTS[0]]
+    assert voice.spoken == []
 
 
-def test_each_failed_turn_gets_a_different_line():
-    """같은 문장을 되풀이하면 어르신은 기계가 고장 난 줄 안다(2026-10-06 실통화에서
-    '연속 5회 못 알아들었다'까지 갔다). 매번 다른 말로, 두 번째부터는 실제로 도움이
-    되는 안내(전화기를 입 가까이)를 한다."""
+def test_it_asks_again_only_after_several_failures_in_a_row_and_in_one_sentence():
     responder, _, _, voice = make(stt=FakeStt("", "", ""))
+
+    said = [responder.respond(AUDIO, 8000) for _ in range(3)]
+
+    assert said[0] == b"" and said[1] == b""
+    assert voice.spoken == [RETRY_PROMPTS[0]]
+    for prompt in RETRY_PROMPTS:
+        assert prompt.count(".") == 0  # 한 문장 — 문장 사이 무음이 없다
+    assert "가까이" in RETRY_PROMPTS[1]
+
+
+def test_after_asking_it_counts_again_from_zero_and_stops_after_the_last_line():
+    """되물은 뒤에도 못 알아들으면 다시 세 번을 기다렸다가 다음 안내를 한다. 안내를 다 했으면 더는 말하지 않는다."""
+    responder, _, _, voice = make(stt=FakeStt(*[""] * 12))
+
+    for _ in range(12):
+        responder.respond(AUDIO, 8000)
+
+    assert voice.spoken == list(RETRY_PROMPTS)
+
+
+def test_a_successful_turn_resets_the_failure_count():
+    responder, _, _, voice = make(stt=FakeStt("", "", "안녕하세요", "", "", ""))
+
+    for _ in range(6):
+        responder.respond(AUDIO, 8000)
+
+    # 실패 2번 -> 성공(연속이 끊긴다) -> 실패 3번 -> 이제야 첫 안내
+    assert [text for text in voice.spoken if text in RETRY_PROMPTS] == [RETRY_PROMPTS[0]]
+
+
+# --------------------------------------------------------- 전화를 받으며 하는 "여보세요?"
+
+
+def test_hello_when_picking_up_gets_no_reply_from_the_model():
+    """첫 인사 대본이 이미 나가고 있다. "여보세요?"에 모델이 따로 답하면 인사가 두 번 나가고 질문이 겹친다."""
+    responder, _, chat, voice = make(stt=FakeStt("여보세요?"))
+    responder.history.append(Turn("ai", GREETING))
+
+    audio = responder.respond(AUDIO, 8000)
+
+    assert audio == b""
+    assert chat.seen == []
+    assert voice.spoken == []
+    assert responder.history == [Turn("ai", GREETING)]  # 인사는 한 번만 기록된다
+
+
+def test_a_second_hello_replays_only_the_scripted_greeting_once():
+    """인사를 못 들어서 한 번 더 "여보세요?"를 하신 것이다. 같은 대본만 다시 들려준다."""
+    responder, _, chat, voice = make(stt=FakeStt("여보세요", "여보세요?", "여보세요??"))
+    responder.history.append(Turn("ai", GREETING))
+
+    first = responder.respond(AUDIO, 8000)
+    second = responder.respond(AUDIO, 8000)
+
+    assert first == b""
+    assert second == GREETING.encode()
+    assert voice.spoken == [GREETING]
+    assert chat.seen == []
+    assert responder.history == [Turn("ai", GREETING)]
+
+
+def test_a_third_hello_goes_to_the_normal_conversation():
+    responder, _, chat, voice = make(stt=FakeStt("여보세요", "여보세요", "여보세요"), chat=FakeChat("네, 들려요"))
+    responder.history.append(Turn("ai", GREETING))
 
     for _ in range(3):
         responder.respond(AUDIO, 8000)
 
-    assert voice.spoken == list(RETRY_PROMPTS)
-    assert len(set(RETRY_PROMPTS)) == len(RETRY_PROMPTS) == 3
-    assert "가까이" in RETRY_PROMPTS[1]
+    assert len(chat.seen) == 1  # 세 번째에야 모델이 답한다
 
 
-def test_after_the_last_line_it_waits_quietly():
-    """마지막 안내는 '기다리겠다'는 말이다. 그 뒤로도 못 알아들으면 더는 말하지 않고,
-    어르신이 다시 말을 걸면 그때 정상 흐름으로 돌아온다."""
-    responder, _, _, voice = make(stt=FakeStt("", "", "", "", ""))
+def test_other_words_are_answered_normally_even_if_they_contain_hello():
+    responder, _, chat, _ = make(stt=FakeStt("여보세요 네 잘 지내요"), chat=FakeChat("다행이에요"))
+    responder.history.append(Turn("ai", GREETING))
 
-    said = [responder.respond(AUDIO, 8000) for _ in range(5)]
+    responder.respond(AUDIO, 8000)
 
-    assert len(voice.spoken) == 3
-    assert said[3] == b"" and said[4] == b""
-    assert "기다" in RETRY_PROMPTS[-1]
+    assert len(chat.seen) == 1
 
 
-def test_a_successful_turn_resets_the_failure_count():
-    responder, _, _, voice = make(stt=FakeStt("", "", "안녕하세요", ""))
+def test_hello_after_the_conversation_began_is_not_special():
+    """대화가 이미 시작된 뒤의 "여보세요"(전화가 끊긴 줄 알고 부르는 것 등)는 모델이 받는다."""
+    responder, _, chat, _ = make(stt=FakeStt("여보세요"), chat=FakeChat("네, 듣고 있어요"))
+    responder.history.extend([Turn("ai", GREETING), Turn("elder", "잘 지내요"), Turn("ai", "다행이에요")])
 
-    for _ in range(4):
-        responder.respond(AUDIO, 8000)
+    responder.respond(AUDIO, 8000)
 
-    # 실패(1단계) -> 실패(2단계) -> 성공 -> 다시 처음 단계부터 시작한다.
-    assert voice.spoken[:2] == [RETRY_PROMPTS[0], RETRY_PROMPTS[1]]
-    assert voice.spoken[-1] == RETRY_PROMPTS[0]
+    assert len(chat.seen) == 1
+
+
+def test_hello_is_not_special_if_the_greeting_never_played():
+    responder, _, chat, _ = make(stt=FakeStt("여보세요"), chat=FakeChat("안녕하세요"))
+
+    responder.respond(AUDIO, 8000)
+
+    assert len(chat.seen) == 1
 
 
 # --------------------------------------------------------- 실패 처리
@@ -259,7 +322,7 @@ def test_too_short_sounds_do_not_use_up_the_retries():
 
     from app.media.conversation import ConversationResponder, TooShortSound
 
-    outcomes = [TooShortSound("x"), TooShortSound("x"), TooShortSound("x"), ""]
+    outcomes = [TooShortSound("x"), TooShortSound("x"), TooShortSound("x"), "", "", ""]
 
     class Stt:
         def transcribe(self, audio, sample_rate):
@@ -281,7 +344,9 @@ def test_too_short_sounds_do_not_use_up_the_retries():
 
     for _ in range(3):
         assert responder.respond(audio, 8000) == b""
-    # 진짜로 못 알아들은 첫 턴에는 되묻는다.
+    # 진짜로 못 알아들은 턴이 연속으로 쌓이면 되묻는다(앞의 짧은 소리는 세지 않는다).
+    assert responder.respond(audio, 8000) == b""
+    assert responder.respond(audio, 8000) == b""
     assert responder.respond(audio, 8000) == b"\x01\x00"
 
 
