@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>늘봄 — 하루 한 번 안부 전화</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --blue: #1A6BFF;
+    --blue-deep: #0B4BC4;
+    --sun: #FFC21A;
+    --sky: #EFF6FF;
+    --paper: #FFFFFF;
+    --ink: #0E2548;
+    --soft: #3C5C8C;
+    --line: #C9DEFF;
+    --chip: #D9E8FF;
+    --ok-bg: #D9F7E5;
+    --ok: #0B7A3E;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--sky);
+    color: var(--ink);
+    font-family: "IBM Plex Sans KR", "Noto Sans KR", system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- 상단 ---------- */
+  header.top { position: sticky; top: 0; z-index: 5; background: rgba(239,246,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { font-weight: 700; font-size: 20px; letter-spacing: -0.02em; text-decoration: none; display: flex; align-items: center; gap: 10px; }
+  .brand i { width: 14px; height: 14px; border-radius: 50%; background: var(--sun); box-shadow: 0 0 0 4px rgba(255,194,26,.28); }
+  nav a { margin-left: 28px; text-decoration: none; font-size: 15px; color: var(--soft); }
+  nav a:hover, nav a:focus-visible { color: var(--blue); }
+  nav a.cta { color: #fff; background: var(--blue); padding: 9px 18px; border-radius: 999px; font-weight: 600; }
+  nav a.cta:hover { background: var(--blue-deep); color: #fff; }
+
+  /* ---------- 첫 화면 ---------- */
+  .hero { padding: 72px 0 96px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
+  h1 { font-size: clamp(36px, 5.2vw, 60px); line-height: 1.18; letter-spacing: -0.035em; font-weight: 700; margin: 0 0 24px; }
+  .lead { font-size: 19px; color: var(--soft); max-width: 31em; margin: 0 0 36px; }
+  .actions { display: flex; gap: 14px; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 999px; font-weight: 600; font-size: 17px; text-decoration: none; border: 2px solid var(--blue); }
+  .btn.primary { background: var(--blue); color: #fff; }
+  .btn.primary:hover { background: var(--blue-deep); border-color: var(--blue-deep); }
+  .btn.ghost { color: var(--blue); background: transparent; }
+  .btn.ghost:hover { background: var(--chip); }
+  .btn:focus-visible, nav a:focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; }
+  .meta { margin-top: 28px; font-size: 14px; color: var(--soft); }
+
+  /* 통화 → 결과 (이 페이지의 기억할 한 장면) */
+  .scene { position: relative; }
+  .call { background: var(--ink); color: #fff; border-radius: 28px; padding: 28px 26px 30px; box-shadow: 0 30px 60px -28px rgba(14,37,72,.55); }
+  .call .bar { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #A9C4F5; margin-bottom: 22px; }
+  .wave { display: flex; align-items: center; gap: 3px; height: 22px; }
+  .wave span { width: 3px; border-radius: 2px; background: var(--sun); animation: wave 1.4s ease-in-out infinite; }
+  .wave span:nth-child(1){height:6px;animation-delay:0s} .wave span:nth-child(2){height:14px;animation-delay:.1s}
+  .wave span:nth-child(3){height:20px;animation-delay:.2s} .wave span:nth-child(4){height:10px;animation-delay:.3s}
+  .wave span:nth-child(5){height:18px;animation-delay:.4s} .wave span:nth-child(6){height:8px;animation-delay:.5s}
+  .wave span:nth-child(7){height:14px;animation-delay:.6s}
+  @keyframes wave { 0%,100% { transform: scaleY(.5); } 50% { transform: scaleY(1); } }
+  .line { margin: 0 0 14px; font-size: 19px; line-height: 1.55; max-width: 18em; }
+  .line small { display: block; font-size: 13px; color: #A9C4F5; margin-bottom: 2px; }
+  .line.elder { margin-left: auto; text-align: right; color: var(--sun); }
+  .result { margin: -26px 18px 0 auto; width: 88%; position: relative; background: var(--paper); border-radius: 22px; padding: 22px 24px; box-shadow: 0 22px 44px -22px rgba(14,37,72,.45); border: 1px solid var(--line); }
+  .result .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .result .k { font-size: 14px; color: var(--soft); }
+  .score { font-size: 54px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+  .score sup { font-size: 18px; font-weight: 500; margin-left: 2px; color: var(--soft); }
+  .badge { display: inline-block; background: var(--ok-bg); color: var(--ok); font-weight: 600; font-size: 14px; padding: 4px 12px; border-radius: 999px; }
+  .result ul { list-style: none; padding: 0; margin: 14px 0 0; font-size: 15px; border-top: 1px dashed var(--line); }
+  .result li { padding: 8px 0 0; color: var(--ink); }
+  .example { position: absolute; right: 8px; top: -26px; font-size: 13px; color: var(--soft); }
+
+  /* ---------- 공통 구역 ---------- */
+  section { padding: 96px 0; }
+  section.white { background: var(--paper); }
+  h2 { font-size: clamp(28px, 3.6vw, 40px); line-height: 1.25; letter-spacing: -0.03em; font-weight: 700; margin: 0 0 18px; max-width: 18em; }
+  .sub { color: var(--soft); max-width: 36em; margin: 0 0 48px; }
+
+  /* 동작 순서 (실제 순서라서 번호를 쓴다) */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; counter-reset: s; border-top: 2px solid var(--ink); }
+  .step { padding: 28px 28px 8px 0; position: relative; counter-increment: s; }
+  .step + .step { padding-left: 28px; border-left: 1px solid var(--line); }
+  .step::before { content: counter(s); display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 600; margin-bottom: 16px; }
+  .step h3 { margin: 0 0 8px; font-size: 21px; letter-spacing: -0.02em; }
+  .step p { margin: 0; color: var(--soft); font-size: 16px; }
+
+  /* 안심 설계: 카드가 아니라 문장 목록 */
+  .promise { display: grid; grid-template-columns: 1fr 1fr; gap: 0 56px; }
+  .promise div { padding: 22px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
+  .promise svg { margin-top: 6px; }
+  .promise b { display: block; font-size: 18px; margin-bottom: 2px; letter-spacing: -0.015em; }
+  .promise span { color: var(--soft); font-size: 16px; }
+
+  /* 구조 */
+  .arch { background: var(--sky); border: 1px solid var(--line); border-radius: 20px; padding: 28px; overflow-x: auto; }
+  .arch svg { min-width: 760px; width: 100%; height: auto; display: block; }
+  .stack { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+  .stack span { background: var(--chip); border-radius: 999px; padding: 6px 14px; font-size: 14px; color: var(--ink); }
+
+  /* 검증 */
+  .proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+  .proof .n { font-size: 56px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+  .proof .n small { font-size: 20px; font-weight: 500; color: var(--soft); margin-left: 4px; }
+  .proof p { margin: 10px 0 0; color: var(--soft); font-size: 16px; max-width: 16em; }
+  .proof .real { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 28px; color: var(--ink); max-width: 44em; }
+
+  /* 체험 */
+  .try { display: grid; grid-template-columns: 1fr 260px; gap: 56px; align-items: center; background: var(--ink); color: #fff; border-radius: 32px; padding: 56px; }
+  .try h2 { color: #fff; }
+  .try p { color: #BFD3F7; max-width: 30em; }
+  .qr { background: #fff; border-radius: 20px; padding: 18px; text-align: center; color: var(--ink); font-size: 14px; }
+    .try dl { margin: 22px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 15px; }
+  .try dt { color: #8FB0EC; } .try dd { margin: 0; }
+
+  footer { padding: 40px 0 56px; color: var(--soft); font-size: 15px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+  @media (max-width: 860px) {
+    .hero .wrap, .try { grid-template-columns: 1fr; }
+    .steps, .proof, .promise { grid-template-columns: 1fr; }
+    .step, .step + .step { padding: 24px 0 8px; border-left: 0; border-top: 1px solid var(--line); }
+    .try { padding: 32px 24px; }
+    nav a:not(.cta) { display: none; }
+    .result { width: 94%; margin-right: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .wave span { animation: none; } html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><i></i>늘봄</a>
+    <nav>
+      <a href="#flow">동작 방식</a>
+      <a href="#promise">안심 설계</a>
+      <a href="#tech">기술</a>
+      <a href="#proof">검증</a>
+      <a class="cta" href="#try">앱 받기</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div>
+        <h1>하루 한 번, 안부 전화.<br>달라진 날만 알려 드려요.</h1>
+        <p class="lead">늘봄은 AI가 혼자 사는 어르신께 매일 전화를 걸어 이야기를 나누고, 보호자에게는 평소와 달라진 점만 전해 주는 서비스입니다.</p>
+        <div class="actions">
+          <a class="btn primary" href="https://github.com/poro832/Nulbom/releases/latest/download/nuelbom.apk" download>앱 받기 (안드로이드)</a>
+          <a class="btn ghost" href="#flow">어떻게 동작하나요</a>
+        </div>
+        <p class="meta">실제 전화망으로 걸리는 한국어 음성 대화 · 갤럭시 Z 폴드7에서 통화 확인</p>
+      </div>
+
+      <div class="scene" aria-label="통화 예시와 보호자 화면 예시">
+        <div class="example">예시 대화입니다</div>
+        <div class="call">
+          <div class="bar"><div class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>통화 중 · 00:42</div>
+          <p class="line"><small>늘봄</small>어르신, 오늘 아침 약은 드셨어요?</p>
+          <p class="line elder"><small>어르신</small>응, 아까 먹었지.</p>
+          <p class="line"><small>늘봄</small>다행이에요. 밤에는 잘 주무셨어요?</p>
+          <p class="line elder"><small>어르신</small>조금 뒤척였어.</p>
+          <div style="height:34px"></div>
+        </div>
+        <div class="result">
+          <div class="row"><span class="k">평소와 다른 정도</span><span class="badge">평소와 같아요</span></div>
+          <div class="score">21<sup>점</sup></div>
+          <ul>
+            <li>약 복용 · 먹었다고 답하셨어요</li>
+            <li>컨디션 · 밤에 뒤척이셨대요</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="white" id="flow">
+    <div class="wrap">
+      <h2>전화 한 통이 보호자 화면까지 가는 길</h2>
+      <p class="sub">앱을 켜지 않아도 됩니다. 어르신은 평소처럼 전화를 받기만 하면 됩니다.</p>
+      <div class="steps">
+        <div class="step"><h3>전화가 걸려 옵니다</h3><p>정해 둔 시각에 늘봄이 어르신 번호로 직접 전화합니다. 앱 설치도, 마이크 조작도 필요 없습니다.</p></div>
+        <div class="step"><h3>짧게 이야기 나눕니다</h3><p>안부, 식사, 약 복용을 자연스럽게 묻습니다. 목소리와 응답 길이, 말한 내용을 함께 봅니다.</p></div>
+        <div class="step"><h3>달라진 점만 전해 드립니다</h3><p>어르신 본인의 평소 기준과 비교해 점수를 내고, 건강·기분 이야기가 나오면 요약해 보호자 앱에 올립니다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="promise">
+    <div class="wrap">
+      <h2>지켜보는 서비스가 아니라, 허락받고 하는 서비스</h2>
+      <p class="sub">안부를 묻는 일이 감시가 되지 않도록, 동의와 삭제를 처음부터 설계에 넣었습니다.</p>
+      <div class="promise">
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>어르신이 먼저 가입하고 동의합니다</b><span>보호자가 마음대로 번호를 등록해 전화를 걸 수 없습니다.</span></p></div>
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>연결 코드를 입력해야 전화가 시작됩니다</b><span>어르신이 건넨 8자리 코드를 보호자가 넣는 순간이 곧 승인입니다.</span></p></div>
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>대화 원문은 동의한 경우에만 열립니다</b><span>공유에 동의하지 않으면 보호자는 요약과 점수만 봅니다.</span></p></div>
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>탈퇴하면 기록과 녹음이 지워집니다</b><span>어르신 탈퇴 한 번으로 통화 기록과 저장된 녹음이 함께 삭제됩니다.</span></p></div>
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>점수는 진단이 아니라 ‘평소와의 차이’입니다</b><span>다른 사람과 비교하지 않고, 어르신 본인의 지난 통화와만 비교합니다.</span></p></div>
+        <div><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A6BFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><p style="margin:0"><b>보호자 계정은 이메일 인증을 거칩니다</b><span>인증과 운영자 확인을 마친 보호자만 어르신을 연결할 수 있습니다.</span></p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="white" id="tech">
+    <div class="wrap">
+      <h2>실제 전화망 위에서 돌아가는 구조</h2>
+      <p class="sub">앱 안의 가짜 통화가 아니라, 어르신의 일반 휴대폰으로 걸려 오는 진짜 전화입니다.</p>
+      <div class="arch">
+        <svg viewBox="0 0 860 300" role="img" aria-label="시스템 구성도: 어르신 전화, 전화망(ClawOps), 늘봄 서버, CLOVA, 데이터베이스, 보호자 앱">
+          <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#3C5C8C"/></marker></defs>
+          <g font-family="IBM Plex Sans KR, sans-serif" font-size="15" fill="#0E2548">
+            <rect x="10" y="110" width="150" height="76" rx="14" fill="#FFC21A"/><text x="85" y="144" text-anchor="middle" font-weight="600">어르신 휴대폰</text><text x="85" y="166" text-anchor="middle" font-size="13">일반 전화 수신</text>
+            <rect x="215" y="110" width="150" height="76" rx="14" fill="#D9E8FF"/><text x="290" y="144" text-anchor="middle" font-weight="600">전화망 연동</text><text x="290" y="166" text-anchor="middle" font-size="13">ClawOps</text>
+            <rect x="420" y="90" width="170" height="116" rx="14" fill="#1A6BFF"/><text x="505" y="132" text-anchor="middle" fill="#fff" font-weight="600">늘봄 서버</text><text x="505" y="154" text-anchor="middle" fill="#fff" font-size="13">FastAPI · AWS EC2</text><text x="505" y="176" text-anchor="middle" fill="#fff" font-size="13">통화 진행 · 위험도 판정</text>
+            <rect x="650" y="14" width="200" height="70" rx="14" fill="#D9E8FF"/><text x="750" y="44" text-anchor="middle" font-weight="600">NAVER CLOVA</text><text x="750" y="65" text-anchor="middle" font-size="13">음성 인식 · 대화 · 요약</text>
+            <rect x="650" y="108" width="200" height="70" rx="14" fill="#D9E8FF"/><text x="750" y="138" text-anchor="middle" font-weight="600">PostgreSQL · S3</text><text x="750" y="159" text-anchor="middle" font-size="13">기록 · 녹음 보관</text>
+            <rect x="650" y="202" width="200" height="70" rx="14" fill="#D9E8FF"/><text x="750" y="232" text-anchor="middle" font-weight="600">Firebase</text><text x="750" y="253" text-anchor="middle" font-size="13">이메일 인증 · 푸시</text>
+            <rect x="420" y="232" width="170" height="56" rx="14" fill="#0E2548"/><text x="505" y="266" text-anchor="middle" fill="#fff" font-weight="600">보호자 앱 (Flutter)</text>
+          </g>
+          <g stroke="#3C5C8C" stroke-width="2" fill="none" marker-end="url(#a)">
+            <path d="M165 148H212"/><path d="M370 148H417"/><path d="M595 120L647 52"/><path d="M595 148H647"/><path d="M595 176L647 232"/><path d="M505 229V212"/>
+          </g>
+        </svg>
+      </div>
+      <div class="stack"><span>FastAPI</span><span>PostgreSQL</span><span>AWS EC2 · S3 · RDS</span><span>NAVER CLOVA</span><span>ClawOps</span><span>Flutter</span><span>Firebase</span></div>
+    </div>
+  </section>
+
+  <section id="proof">
+    <div class="wrap">
+      <h2>만들고 끝내지 않고, 확인했습니다</h2>
+      <p class="sub">기능마다 테스트를 먼저 쓰고, 개인정보와 삭제처럼 위험한 부분은 따로 검토했습니다.</p>
+      <div class="proof">
+        <div><div class="n">1,712<small>개</small></div><p>서버 자동 테스트. 실제 데이터베이스(PostgreSQL)까지 포함합니다.</p></div>
+        <div><div class="n">350<small>개</small></div><p>앱 자동 테스트. 가입, 로그인, 삭제 흐름을 다룹니다.</p></div>
+        <div><div class="n">70<small>초</small></div><p>실제 전화 통화 한 번. 요약, 복용 확인, 건강 언급이 보호자 앱까지 저장됐습니다.</p></div>
+        <p class="real">인증, 비밀번호 재설정, 계정 삭제처럼 사고가 나면 돌이킬 수 없는 기능은 구현자와 별도의 검토자가 번갈아 살펴보고, 지적된 문제를 고친 뒤에 합쳤습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="white" id="try">
+    <div class="wrap">
+      <div class="try">
+        <div>
+          <h2>폰에 설치해서 직접 열어 보세요</h2>
+          <p>안드로이드 폰에 앱을 설치하면 보호자 화면을 둘러볼 수 있습니다. 실제 전화는 비용이 들기 때문에, 현장에서 시연으로 보여 드립니다.</p>
+          <p><a class="btn primary" href="https://github.com/poro832/Nulbom/releases/latest/download/nuelbom.apk" download>APK 내려받기</a></p>
+          <dl><dt>설치 방법</dt><dd>내려받은 파일을 열고, 경고가 나오면 ‘그래도 다운로드’와 ‘출처를 알 수 없는 앱 허용’을 누릅니다</dd><dt>지원 기기</dt><dd>안드로이드 폰 (아이폰은 지원하지 않습니다)</dd></dl>
+        </div>
+        <div class="qr"><img src="qr-apk.svg" width="224" height="224" alt="앱 설치 파일을 바로 내려받는 QR 코드" style="display:block;width:100%;height:auto;border-radius:10px;margin-bottom:10px">폰으로 찍어 바로 받기</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap"><span>늘봄(NUELBOM) · 대학 프로젝트</span><span><a href="https://github.com/poro832/Nulbom">GitHub 저장소</a></span></div>
+</footer>
+</body>
+</html>
