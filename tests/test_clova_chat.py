@@ -222,3 +222,23 @@ def test_a_cut_off_reply_is_joined_after_it_is_trimmed():
     chat, _ = make(reply=reply_of("그러셨군요. 점심은 드셨어요? 그리고 오늘은 날씨가", finish="length"))
 
     assert chat.reply(HISTORY) == "그러셨군요, 점심은 드셨어요?"
+
+
+@pytest.mark.parametrize(
+    ("said", "spoken"),
+    [
+        # 공백 없이 붙은 문장 경계도 합친다 — 안전장치를 우회하지 못한다
+        ("그러셨군요.점심은 드셨어요?", "그러셨군요, 점심은 드셨어요?"),
+        ("그러셨어요?점심은 드셨어요?", "그러셨어요, 점심은 드셨어요?"),
+        ("저런.많이 아프셨겠어요.병원은 가보셨어요?", "저런, 많이 아프셨겠어요, 병원은 가보셨어요?"),
+        # 숫자 사이의 점에서는 나누지 않는다
+        ("체온이 36.5도였군요, 괜찮으세요?", "체온이 36.5도였군요, 괜찮으세요?"),
+        # 이어지는 부호는 한 덩어리로 보고, 그 뒤에서 나눈다
+        ("음... 그러셨군요, 괜찮으세요?", "음, 그러셨군요, 괜찮으세요?"),
+        ("그러셨군요?! 점심은 드셨어요?", "그러셨군요, 점심은 드셨어요?"),
+    ],
+)
+def test_sentence_boundaries_without_a_space_are_joined_too(said, spoken):
+    chat, _ = make(reply=reply_of(said))
+
+    assert chat.reply(HISTORY) == spoken
