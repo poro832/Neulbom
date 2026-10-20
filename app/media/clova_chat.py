@@ -67,6 +67,7 @@ DEFAULT_SYSTEM_PROMPT = """당신은 독거 어르신께 매일 안부 전화를
 - 몸이 편찮다고 하시면 걱정하는 마음을 전하되, 진단이나 치료법은 말하지 않습니다. 병원에 가보셨는지 정도만 여쭙습니다.
 - 대화 중 한 번, 오늘 약을 챙겨 드셨는지 가볍게 여쭙습니다. 이미 여쭤봤거나 모르겠다고 하시면 다시 묻지 않습니다. 약을 권하거나 약 이름을 말하지 않습니다.
 - 어려운 낱말, 영어, 이모지, 괄호 설명을 쓰지 않습니다. 소리로 읽히는 말만 씁니다.
+- 어르신의 말 앞에 "(AI의 말이 끝나기 전에 끼어들어 답하셨음)"이 붙어 있으면, 어르신은 당신의 말을 끝까지 듣기 전에 대답하신 것입니다. 당신이 하려던 말은 이미 대본에 있으니 같은 질문을 다시 하지 말고, 어르신의 대답을 받아 자연스럽게 이어 갑니다.
 - 어르신이 대화를 마치고 싶어 하시면 따뜻하게 인사하고 마칩니다.
 
 소리로 읽기 좋게 쓰는 법:
@@ -80,6 +81,9 @@ DEFAULT_SYSTEM_PROMPT = """당신은 독거 어르신께 매일 안부 전화를
 _SENTENCE_END = re.compile(r"^.*[.!?。](?=\s|$)", re.S)
 
 _SUCCESS_CODE = "20000"
+
+# 어르신이 AI의 말이 끝나기 전에 끼어들어 답한 턴 앞에 붙인다. 프롬프트의 규칙과 같은 문구여야 한다.
+INTERRUPTED_NOTE = "(AI의 말이 끝나기 전에 끼어들어 답하셨음)"
 
 _ROLE_OF = {"elder": "user", "ai": "assistant"}
 
@@ -161,7 +165,10 @@ class ClovaChat:
                 # 모르는 화자를 끼워 넣으면 모델이 누가 한 말인지 잘못 읽는다.
                 logger.warning("모르는 화자 — 대화에서 뺀다 speaker=%r", turn.speaker)
                 continue
-            messages.append({"role": role, "content": turn.text})
+            content = turn.text
+            if turn.interrupted:
+                content = f"{INTERRUPTED_NOTE} {content}"
+            messages.append({"role": role, "content": content})
         return messages
 
     def _content_of(self, raw: bytes) -> str:

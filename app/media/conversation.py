@@ -62,6 +62,8 @@ GREETING = "안녕하세요, 어르신. 늘봄에서 안부 전화 드렸어요.
 class Turn:
     speaker: str  # elder | ai
     text: str
+    # 어르신이 AI의 말이 끝나기 전에 끼어들어 답한 턴이다. 모델에게만 알린다(저장되는 기록은 따로 만든다).
+    interrupted: bool = False
 
 
 class SpeechToText(Protocol):
@@ -119,7 +121,7 @@ class ConversationResponder:
             self.history.append(Turn("ai", self._greeting))
         return audio_out
 
-    def respond(self, audio: np.ndarray, sample_rate: int) -> bytes:
+    def respond(self, audio: np.ndarray, sample_rate: int, interrupted: bool = False) -> bytes:
         started = self._clock()
         try:
             said = self.stt.transcribe(audio, sample_rate).strip()
@@ -145,7 +147,7 @@ class ConversationResponder:
 
         self._consecutive_failures = 0
         # 어르신 발화를 먼저 넣어야 모델이 방금 한 말을 보고 답한다.
-        self.history.append(Turn("elder", said))
+        self.history.append(Turn("elder", said, interrupted))
         transcribed = self._clock()
 
         try:

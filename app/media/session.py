@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 import secrets
@@ -67,6 +68,10 @@ Outgoing = TextMessage | AudioMessage | MarkMessage
 # 진짜 유실(+20ms)은 이보다 멀리 있어 그대로 걸린다.
 JITTER_TOLERANCE_MS = 10
 
+# 어르신 말이 AI 말과 이만큼 이상 겹치면 "끼어들었다"고 본다. 이보다 짧은 겹침은 AI가 끝나는 순간에
+# 자연스럽게 대답을 시작한 것이다.
+INTERRUPTION_OVERLAP_MS = 300
+
 
 class CallSession:
     def __init__(
@@ -79,6 +84,8 @@ class CallSession:
         self._call_id = call_id
         self._sample_rate = sample_rate
         self._responder = responder
+        # 끼어들었는지를 받을 수 있는 응답기에만 알린다(고정 응답 등은 인자를 모른다).
+        self._tells_interruption = _accepts_interrupted(responder)
         self._vad = StreamingVad(sample_rate, frame_ms=frame_ms)
         self._frame_bytes = self._vad.frame_length * _BYTES_PER_SAMPLE
 
@@ -281,7 +288,13 @@ class CallSession:
         turn = _to_float32(bytes(self._recorded[start_offset:end_offset]))
 
         try:
-            reply = self._responder.respond(turn, self._sample_rate)
+            if self._tells_interruption:
+                interrupted = self._overlaps_ai_speech(start_ms, end_ms)
+                if interrupted:
+                    logger.info("어르신이 AI의 말을 끊고 답했다 call_id=%s", self._call_id)
+                reply = self._responder.respond(turn, self._sample_rate, interrupted=interrupted)
+            else:
+                reply = self._responder.respond(turn, self._sample_rate)
         except Exception:
             # 응답 하나 실패했다고 통화를 끊으면 어르신은 영문을 모른다.
             logger.exception("응답 생성 실패 — 통화는 유지한다 call_id=%s", self._call_id)
@@ -289,6 +302,22 @@ class CallSession:
 
         outgoing.extend(self._marked(reply))
         return outgoing
+
+    def _overlaps_ai_speech(self, start_ms: int, end_ms: int) -> bool:
+        """어르신 발화 [start_ms, end_ms)가 AI가 말하고 있던 구간과 충분히 겹치는가.
+
+        AI 구간은 begin/end 표식이 모두 돌아온 것과, begin만 돌아온(아직 재생 중인) 것이다. 표식은 소켓에서
+        받은 순서대로 처리되므로, 이 발화가 끝난 시점에 end가 아직 안 왔다면 그때까지 재생 중이었다.
+        """
+        for segment in self._ai_turns:
+            if segment.start_ms < end_ms and segment.end_ms - start_ms >= INTERRUPTION_OVERLAP_MS:
+                return True
+        for name, begin_ms in self._mark_times.items():
+            if name.endswith("-begin") and begin_ms < end_ms:
+                # 재생 중이다. 어르신 말 가운데 begin 이후 부분이 겹침이다.
+                if end_ms - max(start_ms, begin_ms) >= INTERRUPTION_OVERLAP_MS:
+                    return True
+        return False
 
     def on_mark(self, name: str) -> None:
         """표식이 돌아왔다. 시각은 직전 inbound media의 것을 쓴다.
@@ -346,6 +375,13 @@ class CallSession:
     def unmatched_marks(self) -> int:
         """짝이 안 맞은 표식 수. 크면 degraded로 표시한다(설계 8장)."""
         return self._unmatched_marks + len(self._mark_times)
+
+
+def _accepts_interrupted(responder: Responder) -> bool:
+    try:
+        return "interrupted" in inspect.signature(responder.respond).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _recording_name(call_id: str) -> str:
