@@ -221,27 +221,31 @@ class PairResult {
       );
 }
 
-class PairingCode {
-  final String code; // 앞자리 0이 있을 수 있어 문자열이다
-  final DateTime expiresAt;
+/// 보호자가 어르신 전화번호를 고친 결과. 새 폰은 [newPhoneLoginUntil]까지 번호만으로 한 번 로그인할 수 있다.
+class PhoneChange {
+  final String phone;
+  final DateTime? newPhoneLoginUntil;
 
-  const PairingCode({required this.code, required this.expiresAt});
+  const PhoneChange({required this.phone, this.newPhoneLoginUntil});
 
-  factory PairingCode.fromJson(Map<String, dynamic> json) => PairingCode(
-        code: json['code'] as String,
-        expiresAt: _asTime(json['expires_at'])!,
+  factory PhoneChange.fromJson(Map<String, dynamic> json) => PhoneChange(
+        phone: json['phone'] as String,
+        newPhoneLoginUntil: _asTime(json['new_phone_login_until']),
       );
 }
 
 class SignupResult {
   final String elderKey;
   final String status;
+  // 어르신 먼저 가입이면 서버가 정해 준 고정 연결 코드. 보호자 코드로 가입하면 없다.
+  final String? linkCode;
 
-  const SignupResult({required this.elderKey, required this.status});
+  const SignupResult({required this.elderKey, required this.status, this.linkCode});
 
   factory SignupResult.fromJson(Map<String, dynamic> json) => SignupResult(
         elderKey: json['elder_key'] as String,
         status: json['status'] as String,
+        linkCode: json['link_code'] as String?,
       );
 }
 

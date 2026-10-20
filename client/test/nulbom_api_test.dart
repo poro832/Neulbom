@@ -61,24 +61,24 @@ void main() {
     NulbomApi.client = MockClient((request) async => json({'detail': '연결 코드를 확인해 주세요'}, 401));
 
     await expectLater(
-      NulbomApi.pair(code: '123456', phone: '070-1111-2222'),
+      NulbomApi.claimNewPhone(phone: '070-1111-2222'),
       throwsA(isA<ApiException>().having((e) => e.message, 'message', '연결 코드를 확인해 주세요')),
     );
     expect(await NulbomApi.elderKey(), isNull);
   });
 
-  test('연결에 성공하면 어르신 열쇠를 폰에 저장한다', () async {
+  test('새 폰 로그인에 성공하면 어르신 열쇠를 폰에 저장한다', () async {
     late http.Request seen;
     NulbomApi.client = MockClient((request) async {
       seen = request;
       return json({'elder_key': 'nle_abc', 'elder_name': '어르신 12'});
     });
 
-    final result = await NulbomApi.pair(code: '000123', phone: '070-1111-2222');
+    final result = await NulbomApi.claimNewPhone(phone: '070-1111-2222');
 
     expect(result.elderName, '어르신 12');
     expect(await NulbomApi.elderKey(), 'nle_abc');
-    expect(jsonDecode(seen.body), {'code': '000123', 'phone': '070-1111-2222'});
+    expect(jsonDecode(seen.body), {'phone': '070-1111-2222'});
   });
 
   test('저장된 어르신 열쇠로 내 통화 기록을 읽는다', () async {
@@ -114,13 +114,46 @@ void main() {
     expect(methods, ['POST /v1/me/contacts', 'DELETE /v1/me/contacts/7']);
   });
 
-  test('연결 코드 발급은 코드를 문자열로 받는다', () async {
-    NulbomApi.client = MockClient(
-        (request) async => json({'code': '000123', 'expires_at': '2026-10-09T09:00:00+09:00'}));
+  test('새 폰 로그인: 번호만 보내 열쇠를 받아 폰에 저장한다', () async {
+    SharedPreferences.setMockInitialValues({});
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'elder_key': 'nle_newphone', 'elder_name': '어르신'});
+    });
 
-    final code = await NulbomApi.issuePairingCode(12, key: 'nlb_test');
+    final result = await NulbomApi.claimNewPhone(phone: '010-7777-1212');
 
-    expect(code.code, '000123');
+    expect(seen.method, 'POST');
+    expect(seen.url.path, '/v1/elders/login');
+    expect(jsonDecode(seen.body), {'phone': '010-7777-1212'}); // 코드는 보내지 않는다
+    expect(seen.headers['Authorization'], isNull);
+    expect(result.elderName, '어르신');
+    expect(await NulbomApi.elderKey(), 'nle_newphone');
+  });
+
+  test('새 폰 로그인이 거절되면 열쇠를 저장하지 않는다', () async {
+    SharedPreferences.setMockInitialValues({});
+    NulbomApi.client = MockClient((request) async => json({'detail': '로그인할 수 없어요'}, 401));
+
+    await expectLater(NulbomApi.claimNewPhone(phone: '010-7777-1212'), throwsA(isA<ApiException>()));
+    expect(await NulbomApi.elderKey(), isNull);
+  });
+
+  test('전화번호 수정: 보호자 열쇠로 PUT하고 새 폰 로그인 시한을 받는다', () async {
+    late http.Request seen;
+    NulbomApi.client = MockClient((request) async {
+      seen = request;
+      return json({'phone': '010-9999-8888', 'new_phone_login_until': '2026-10-21T09:00:00+09:00'});
+    });
+
+    final change = await NulbomApi.changeElderPhone(12, '010-9999-8888', key: 'nlb_test');
+
+    expect(seen.method, 'PUT');
+    expect(seen.url.path, '/v1/elders/12/phone');
+    expect(seen.headers['Authorization'], 'Bearer nlb_test');
+    expect(change.phone, '010-9999-8888');
+    expect(change.newPhoneLoginUntil, isNotNull);
   });
 
   test('가입: 본문을 보내고 어르신 열쇠를 폰에 저장한다', () async {
@@ -209,7 +242,7 @@ void main() {
     expect(jsonDecode(seen.body), {'name': '홍길동', 'phone': '010-9999-1111', 'agreed': true});
   });
 
-  test('연결 코드: 어르신이 발급하고 보호자가 미리보기 후 연결한다', () async {
+  test('연결 코드: 어르신이 고정 코드를 읽고 새로 만들 수 있고, 보호자가 미리보기 후 연결한다', () async {
     SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved'});
     final calls = <String>[];
     final auth = <String?>[];
@@ -218,7 +251,7 @@ void main() {
       auth.add(request.headers['Authorization']);
       switch (request.url.path) {
         case '/v1/me/link-code':
-          return json({'code': '00001234', 'expires_at': '2026-10-15T09:00:00+09:00'});
+          return json({'code': request.method == 'POST' ? '00005678' : '00001234'});
         case '/v1/guardian/link/preview':
           return json({'name': '홍길동', 'phone_masked': '010-****-1111'});
         default:
@@ -226,16 +259,23 @@ void main() {
       }
     });
 
-    final issued = await NulbomApi.issueLinkCode();
+    final shown = await NulbomApi.myLinkCode();
+    final renewed = await NulbomApi.renewLinkCode();
     final preview = await NulbomApi.previewLink('00001234', key: 'nlb_test');
     final linked = await NulbomApi.linkElder('00001234', key: 'nlb_test');
 
-    expect(issued.code, '00001234');
+    expect(shown, '00001234'); // 앞자리 0이 살아 있다
+    expect(renewed, '00005678');
     expect(preview.name, '홍길동');
     expect(preview.phoneMasked, '010-****-1111');
     expect(linked.elderId, 7);
-    expect(calls, ['POST /v1/me/link-code', 'POST /v1/guardian/link/preview', 'POST /v1/guardian/link']);
-    expect(auth, ['Bearer nle_saved', 'Bearer nlb_test', 'Bearer nlb_test']);
+    expect(calls, [
+      'GET /v1/me/link-code',
+      'POST /v1/me/link-code',
+      'POST /v1/guardian/link/preview',
+      'POST /v1/guardian/link',
+    ]);
+    expect(auth, ['Bearer nle_saved', 'Bearer nle_saved', 'Bearer nlb_test', 'Bearer nlb_test']);
   });
 
   group('연결 코드 401은 보호자 열쇠를 지우지 않는다', () {

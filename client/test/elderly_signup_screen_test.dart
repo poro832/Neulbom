@@ -35,19 +35,28 @@ Future<void> agreeAndSubmit(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// 어르신 먼저 가입 서버: 가입하면 열쇠를, 그 열쇠로 연결 코드를 준다. 부른 순서를 남긴다.
-http.Client server(List<String> calls, {List<Map<String, dynamic>>? bodies, int codeStatus = 200}) =>
+/// 어르신 먼저 가입 서버: 가입하면 열쇠와 고정 연결 코드를 준다(코드를 안 주는 서버도 흉내 낸다). 부른 순서를 남긴다.
+http.Client server(
+  List<String> calls, {
+  List<Map<String, dynamic>>? bodies,
+  int codeStatus = 200,
+  bool codeInSignup = true,
+}) =>
     MockClient((request) async {
       final path = request.url.path;
       calls.add('${request.method} $path');
       if (path == '/v1/elders/signup') {
         bodies?.add(jsonDecode(request.body) as Map<String, dynamic>);
-        return json({'elder_key': 'nle_new', 'status': 'unlinked'});
+        return json({
+          'elder_key': 'nle_new',
+          'status': 'unlinked',
+          if (codeInSignup) 'link_code': '04829316',
+        });
       }
       if (path == '/v1/me/link-code') {
         expect(request.headers['Authorization'], 'Bearer nle_new'); // 방금 저장한 어르신 열쇠
         if (codeStatus != 200) return json({'detail': '잠시 뒤에 다시 해 주세요'}, codeStatus);
-        return json({'code': '04829316', 'expires_at': '2026-10-16T14:30:00+09:00'});
+        return json({'code': '04829316'});
       }
       if (path == '/v1/me/status') {
         return json({'status': 'unlinked', 'name': '홍길동', 'share_agreed': true});
@@ -101,13 +110,14 @@ void main() {
     await fill(tester);
     await agreeAndSubmit(tester);
 
-    expect(calls, ['POST /v1/elders/signup', 'POST /v1/me/link-code']); // 구 /v1/signup이 아니다
+    expect(calls, ['POST /v1/elders/signup']); // 구 /v1/signup이 아니다. 코드는 가입 응답에 들어 있다
     expect(bodies, [
       {'name': '홍길동', 'phone': '010-9999-1111', 'agreed': true}
     ]);
     expect(find.text('회원가입이 완료되었습니다'), findsOneWidget);
     expect(find.text('04829316'), findsOneWidget); // 앞자리 0이 살아 있는 서버 코드
-    expect(find.textContaining('24시간'), findsOneWidget);
+    expect(find.textContaining('바뀌지 않아요'), findsOneWidget);
+    expect(find.textContaining('24시간'), findsNothing);
     expect(await NulbomApi.elderKey(), 'nle_new');
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('user_type'), 'elderly'); // 앱을 다시 열면 어르신 문으로 간다
@@ -126,8 +136,8 @@ void main() {
 
     expect(find.text('보호자 연결을 기다리고 있어요'), findsOneWidget);
     expect(find.text('04829316'), findsOneWidget);
-    expect(find.text('새 코드 받기'), findsOneWidget);
-    expect(calls.where((c) => c == 'POST /v1/me/link-code').length, 1);
+    expect(find.text('새 코드 만들기'), findsOneWidget);
+    expect(calls.where((c) => c.endsWith('/v1/me/link-code')), isEmpty); // 코드를 다시 묻지도, 새로 만들지도 않는다
     expect(calls.last, 'GET /v1/me/status');
   });
 
@@ -148,15 +158,27 @@ void main() {
     expect(await NulbomApi.elderKey(), isNull);
   });
 
-  testWidgets('가입은 됐는데 코드를 못 받으면 다음 화면에서 받으라고 안내한다', (tester) async {
-    NulbomApi.client = server(<String>[], codeStatus: 503);
+  testWidgets('가입 응답에 코드가 없으면 서버에서 읽어 오고, 새로 만들지는 않는다', (tester) async {
+    final calls = <String>[];
+    NulbomApi.client = server(calls, codeInSignup: false);
+
+    await open(tester);
+    await fill(tester);
+    await agreeAndSubmit(tester);
+
+    expect(find.text('04829316'), findsOneWidget);
+    expect(calls, ['POST /v1/elders/signup', 'GET /v1/me/link-code']);
+  });
+
+  testWidgets('가입은 됐는데 코드를 못 받으면 다음 화면에서 다시 볼 수 있다고 안내한다', (tester) async {
+    NulbomApi.client = server(<String>[], codeStatus: 503, codeInSignup: false);
 
     await open(tester);
     await fill(tester);
     await agreeAndSubmit(tester);
 
     expect(find.text('회원가입이 완료되었습니다'), findsOneWidget);
-    expect(find.textContaining('다음 화면에서 다시 받아 주세요'), findsOneWidget);
+    expect(find.textContaining('다음 화면에서 다시 볼 수 있어요'), findsOneWidget);
     expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
     expect(await NulbomApi.elderKey(), 'nle_new');
   });

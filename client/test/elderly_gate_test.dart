@@ -134,43 +134,87 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('보호자 연결 대기 화면을 보고, 코드를 저절로 새로 받지 않는다', (tester) async {
+    testWidgets('보호자 연결 대기 화면에서 내 고정 코드를 서버에서 읽어 보여 주고, 새로 만들지는 않는다', (tester) async {
       final calls = <String>[];
       NulbomApi.client = MockClient((request) async {
         calls.add('${request.method} ${request.url.path}');
+        if (request.url.path == '/v1/me/link-code') return json({'code': '00012345'});
         return json({'status': 'unlinked', 'name': '홍길동', 'share_agreed': true});
       });
 
       await open(tester);
 
       expect(find.text('보호자 연결을 기다리고 있어요'), findsOneWidget);
-      expect(find.text('연결 코드 보기'), findsOneWidget);
+      expect(find.text('00012345'), findsOneWidget);
+      expect(find.textContaining('바뀌지 않아요'), findsOneWidget);
       expect(find.text('새로고침'), findsNothing);
       expect(find.text('어르신 홈'), findsNothing);
+      expect(calls, contains('GET /v1/me/link-code'));
+      expect(calls, isNot(contains('POST /v1/me/link-code'))); // 읽기만 한다 — 알려 준 코드가 바뀌면 안 된다
+    });
+
+    testWidgets('가입 화면이 넘겨 준 코드는 서버에 다시 묻지 않고 그대로 보여 준다', (tester) async {
+      final calls = <String>[];
+      NulbomApi.client = MockClient((request) async {
+        calls.add('${request.method} ${request.url.path}');
+        return json({'status': 'unlinked', 'name': '홍길동', 'share_agreed': true});
+      });
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        MaterialApp(home: ElderlyGate(linkCode: '77778888', homeBuilder: (_) => const Text('어르신 홈'))),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('77778888'), findsOneWidget);
       expect(calls, ['GET /v1/me/status']);
     });
 
-    testWidgets('연결 코드 보기를 누르면 서버에서 8자리 코드를 받아 보여 준다', (tester) async {
+    testWidgets('새 코드 만들기는 확인을 받은 뒤에만 서버를 부르고, 새 코드를 보여 준다', (tester) async {
       final calls = <String>[];
       NulbomApi.client = MockClient((request) async {
         calls.add('${request.method} ${request.url.path}');
         if (request.url.path == '/v1/me/link-code') {
-          return json({'code': '00012345', 'expires_at': '2026-10-16T14:30:00+09:00'});
+          return json({'code': request.method == 'POST' ? '99990000' : '00012345'});
         }
         return json({'status': 'unlinked', 'name': '홍길동', 'share_agreed': true});
       });
 
       await open(tester);
-      await tester.tap(find.text('연결 코드 보기'));
+      await tester.tap(find.text('새 코드 만들기'));
+      await tester.pumpAndSettle();
+      expect(find.text('새 코드를 만들까요?'), findsOneWidget);
+      expect(calls, isNot(contains('POST /v1/me/link-code'))); // 아직 아무것도 바꾸지 않았다
+
+      await tester.tap(find.text('새로 만들기'));
       await tester.pumpAndSettle();
 
       expect(calls, contains('POST /v1/me/link-code'));
-      expect(find.text('00012345'), findsOneWidget);
-      expect(find.text('새 코드 받기'), findsOneWidget);
-      expect(find.textContaining('이전 코드는 쓸 수 없어요'), findsOneWidget);
+      expect(find.text('99990000'), findsOneWidget);
+      expect(find.text('00012345'), findsNothing);
     });
 
-    testWidgets('코드를 받지 못하면 서버 문장을 보여 준다', (tester) async {
+    testWidgets('새 코드 만들기를 취소하면 코드가 그대로다', (tester) async {
+      final calls = <String>[];
+      NulbomApi.client = MockClient((request) async {
+        calls.add('${request.method} ${request.url.path}');
+        if (request.url.path == '/v1/me/link-code') return json({'code': '00012345'});
+        return json({'status': 'unlinked', 'name': '홍길동', 'share_agreed': true});
+      });
+
+      await open(tester);
+      await tester.tap(find.text('새 코드 만들기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('00012345'), findsOneWidget);
+      expect(calls, isNot(contains('POST /v1/me/link-code')));
+    });
+
+    testWidgets('코드를 읽지 못하면 서버 문장을 보여 준다', (tester) async {
       NulbomApi.client = MockClient((request) async {
         if (request.url.path == '/v1/me/link-code') {
           return json({'detail': '잠시 뒤에 다시 해 주세요'}, 503);
@@ -179,8 +223,6 @@ void main() {
       });
 
       await open(tester);
-      await tester.tap(find.text('연결 코드 보기'));
-      await tester.pumpAndSettle();
 
       expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
     });

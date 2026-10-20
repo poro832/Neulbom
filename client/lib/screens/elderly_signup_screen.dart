@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../models/nulbom_models.dart';
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
 import 'elderly_gate.dart';
@@ -27,7 +26,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
   bool _isLoading = false;
   bool _isSignupComplete = false;
   String? _errorMessage;
-  PairingCode? _connectionCode;
+  String? _connectionCode;
   String? _codeError;
   bool _agreed = false;
 
@@ -78,9 +77,10 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
       _errorMessage = null;
     });
 
+    String? code;
     try {
-      // 서버가 이 폰 전용 열쇠를 주고 NulbomApi가 폰에 저장한다.
-      await NulbomApi.elderSignup(name: name, phone: phone, agreed: true);
+      // 서버가 이 폰 전용 열쇠와 고정 연결 코드를 주고, NulbomApi가 열쇠를 폰에 저장한다.
+      code = (await NulbomApi.elderSignup(name: name, phone: phone, agreed: true)).linkCode;
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -91,13 +91,14 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
     }
     await AuthService.rememberElder(name: name, phone: phone);
 
-    // 가입은 끝났다. 코드를 못 받아도 다음 화면에서 다시 받을 수 있다.
-    PairingCode? code;
+    // 가입은 끝났다. 코드를 못 받았어도 다음 화면과 메뉴의 "내 연결코드"에서 다시 볼 수 있다.
     String? codeError;
-    try {
-      code = await NulbomApi.issueLinkCode();
-    } catch (error) {
-      codeError = error is ApiException ? error.message : _offline;
+    if (code == null) {
+      try {
+        code = await NulbomApi.myLinkCode();
+      } catch (error) {
+        codeError = error is ApiException ? error.message : _offline;
+      }
     }
     if (!mounted) return;
     setState(() {
@@ -294,9 +295,6 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
     );
   }
 
-  static String _until(DateTime time) =>
-      '${time.month}월 ${time.day}일 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-
   Widget _buildSignupCompleteScreen() {
     final code = _connectionCode;
     return Scaffold(
@@ -326,7 +324,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
                 Text(
                   code != null
                       ? '보호자에게 아래 연결코드를 알려주세요.'
-                      : '연결코드를 받지 못했어요. 다음 화면에서 다시 받아 주세요.',
+                      : '연결코드를 받지 못했어요. 다음 화면에서 다시 볼 수 있어요.',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.notoSansKr(fontSize: 16, color: eInkSoft),
                 ),
@@ -349,7 +347,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
                       border: Border.all(color: eLine, width: 1.5),
                     ),
                     child: SelectableText(
-                      code.code,
+                      code,
                       textAlign: TextAlign.center,
                       style: GoogleFonts.notoSansKr(
                         fontSize: 32,
@@ -361,7 +359,7 @@ class _ElderlySignupScreenState extends State<ElderlySignupScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '이 코드는 24시간 동안 쓸 수 있어요 (${_until(code.expiresAt)}까지).\n'
+                    '이 코드는 바뀌지 않아요. 메뉴의 "내 연결코드"에서 언제든 다시 볼 수 있어요.\n'
                     '보호자가 이 코드를 입력해 연결하면 안부 전화가 시작돼요.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.notoSansKr(

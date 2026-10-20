@@ -16,11 +16,11 @@ http.Response json(Object body, [int status = 200]) => http.Response(
     );
 
 /// 어르신 홈의 탭들이 읽는 주소에 빈 자료를 주고, 연결 코드 주소만 테스트가 정한다.
-http.Client server(List<String> calls, http.Response Function() linkCode) =>
+http.Client server(List<String> calls, http.Response Function(String method) linkCode) =>
     MockClient((request) async {
       final path = request.url.path;
       calls.add('${request.method} $path');
-      if (path == '/v1/me/link-code') return linkCode();
+      if (path == '/v1/me/link-code') return linkCode(request.method);
       if (path == '/v1/me/calls') return json({'calls': []});
       if (path == '/v1/me/contacts') return json({'guardians': [], 'contacts': []});
       return json({'detail': 'x'}, 404);
@@ -48,31 +48,73 @@ void main() {
     });
   });
 
-  testWidgets('내 연결코드: 서버에서 새 코드를 받아 보여 준다', (tester) async {
+  testWidgets('내 연결코드: 서버에서 내 고정 코드를 읽어 보여 주고, 새로 만들지는 않는다', (tester) async {
+    final calls = <String>[];
+    NulbomApi.client = server(calls, (_) => json({'code': '04829316'}));
+
+    await openMenuCode(tester);
+
+    expect(calls, contains('GET /v1/me/link-code'));
+    expect(calls, isNot(contains('POST /v1/me/link-code'))); // 보기만 한다
+    expect(find.text('04829316'), findsOneWidget);
+    expect(find.textContaining('바뀌지 않아요'), findsOneWidget);
+    expect(find.textContaining('24시간'), findsNothing);
+  });
+
+  testWidgets('내 연결코드: 이미 보호자와 연결된 어르신도 코드를 다시 볼 수 있다', (tester) async {
+    NulbomApi.client = server(<String>[], (_) => json({'code': '04829316'}));
+
+    await openMenuCode(tester);
+
+    expect(find.text('04829316'), findsOneWidget);
+    expect(find.text('이미 보호자와 연결돼 있어요'), findsNothing);
+  });
+
+  testWidgets('내 연결코드: 새 코드 만들기는 확인을 받은 뒤에 서버를 부르고 새 코드를 보여 준다', (tester) async {
     final calls = <String>[];
     NulbomApi.client = server(
       calls,
-      () => json({'code': '04829316', 'expires_at': '2026-10-16T14:30:00+09:00'}),
+      (method) => json({'code': method == 'POST' ? '55556666' : '04829316'}),
     );
 
     await openMenuCode(tester);
+    await tester.tap(find.byKey(const Key('renew-link-code')));
+    await tester.pumpAndSettle();
+    expect(find.text('새 코드를 만들까요?'), findsOneWidget);
+    expect(calls, isNot(contains('POST /v1/me/link-code')));
+
+    await tester.tap(find.text('새로 만들기'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
 
     expect(calls, contains('POST /v1/me/link-code'));
-    expect(find.text('04829316'), findsOneWidget);
-    expect(find.textContaining('24시간'), findsOneWidget);
+    expect(find.text('55556666'), findsOneWidget);
+    expect(find.text('04829316'), findsNothing);
   });
 
-  testWidgets('내 연결코드: 이미 연결된 어르신(409)에게는 이미 연결돼 있다고 알린다', (tester) async {
-    NulbomApi.client = server(
-      <String>[],
-      () => json({'detail': '이미 보호자가 연결돼 있어요'}, 409),
-    );
+  testWidgets('내 연결코드: 새 코드 만들기를 취소하면 코드가 그대로다', (tester) async {
+    final calls = <String>[];
+    NulbomApi.client = server(calls, (_) => json({'code': '04829316'}));
+
+    await openMenuCode(tester);
+    await tester.tap(find.byKey(const Key('renew-link-code')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('04829316'), findsOneWidget);
+    expect(calls, isNot(contains('POST /v1/me/link-code')));
+  });
+
+  testWidgets('내 연결코드: 서버가 거절하면 그 문장을 보여 주고 닫기로 닫는다', (tester) async {
+    NulbomApi.client = server(<String>[], (_) => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
 
     await openMenuCode(tester);
 
-    expect(find.text('이미 보호자와 연결돼 있어요'), findsOneWidget);
+    expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
     await tester.tap(find.text('닫기'));
     await tester.pumpAndSettle();
-    expect(find.text('이미 보호자와 연결돼 있어요'), findsNothing);
+    expect(find.text('잠시 뒤에 다시 해 주세요'), findsNothing);
   });
 }

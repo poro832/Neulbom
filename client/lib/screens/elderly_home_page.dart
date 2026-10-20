@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../models/nulbom_models.dart' show PairingCode;
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
+import 'link_code_renew.dart';
 import 'elderly_login_screen.dart';
 import 'emergency_screen.dart';
 import 'history_screen.dart';
@@ -242,91 +242,110 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
     );
   }
 
-  /// 서버에서 새 연결 코드를 받아 보여 준다. 홈에 들어온 어르신은 보통 이미 연결돼 있어
-  /// 서버가 409로 거절한다 — 그때는 이미 연결돼 있다고 알린다.
+  /// 내 고정 연결 코드를 보여 준다. 바뀌지 않고, 연결된 뒤에도 언제든 다시 볼 수 있다.
+  /// 코드가 새어 나갔을 때만 "새 코드 만들기"로 바꾼다(확인을 받는다).
   Future<void> _showConnectionCode() async {
-    // 대화상자가 그려지기 전에 거절이 와도 처리되지 않은 오류가 되지 않게 한다(FutureBuilder는 그대로 받는다).
-    final issued = NulbomApi.issueLinkCode()..ignore();
+    // 대화상자가 그려지기 전에 거절이 와도 처리되지 않은 오류가 되지 않게 한다.
+    var loading = NulbomApi.myLinkCode()..ignore();
 
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: eCard,
-        title: Text(
-          '내 연결코드',
-          style: GoogleFonts.notoSansKr(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: eInk,
-          ),
-        ),
-        content: FutureBuilder<PairingCode>(
-          future: issued,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const SizedBox(
-                height: 80,
-                child: Center(child: CircularProgressIndicator()),
-              );
-            }
-            if (snapshot.hasError) {
-              final error = snapshot.error;
-              final message = error is ApiException && error.statusCode == 409
-                  ? '이미 보호자와 연결돼 있어요'
-                  : error is ApiException
-                      ? error.message
-                      : '연결코드를 받지 못했어요. 잠시 뒤에 다시 해 주세요.';
-              return Text(
-                message,
-                style: GoogleFonts.notoSansKr(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: eInk,
-                  height: 1.5,
-                ),
-              );
-            }
-            final code = snapshot.data!;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '보호자에게 아래 코드를 알려주세요.',
-                  style: GoogleFonts.notoSansKr(fontSize: 16, color: eInkSoft),
-                ),
-                const SizedBox(height: 20),
-                SelectableText(
-                  code.code,
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 3,
-                    color: eAccent,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '24시간 동안 쓸 수 있어요. 새로 받으면 이전 코드는 쓸 수 없어요.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
-                ),
-              ],
-            );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              '닫기',
-              style: GoogleFonts.notoSansKr(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: eAccent,
-              ),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          backgroundColor: eCard,
+          title: Text(
+            '내 연결코드',
+            style: GoogleFonts.notoSansKr(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: eInk,
             ),
           ),
-        ],
+          content: FutureBuilder<String>(
+            future: loading,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 80,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError) {
+                final error = snapshot.error;
+                return Text(
+                  error is ApiException
+                      ? error.message
+                      : '연결코드를 받지 못했어요. 잠시 뒤에 다시 해 주세요.',
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: eInk,
+                    height: 1.5,
+                  ),
+                );
+              }
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '보호자에게 아래 코드를 알려주세요.',
+                    style: GoogleFonts.notoSansKr(fontSize: 16, color: eInkSoft),
+                  ),
+                  const SizedBox(height: 20),
+                  SelectableText(
+                    snapshot.data!,
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 3,
+                      color: eAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '이 코드는 바뀌지 않아요. 언제든 여기서 다시 볼 수 있어요.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.notoSansKr(fontSize: 14, color: eInkSoft),
+                  ),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              key: const Key('renew-link-code'),
+              onPressed: () async {
+                try {
+                  final code = await renewLinkCodeWithConfirm(dialogContext);
+                  if (code == null || !dialogContext.mounted) return;
+                  setLocal(() {
+                    loading = Future.value(code);
+                  });
+                } catch (error) {
+                  if (!dialogContext.mounted) return;
+                  setLocal(() {
+                    loading = Future.error(error)..ignore();
+                  });
+                }
+              },
+              child: Text(
+                '새 코드 만들기',
+                style: GoogleFonts.notoSansKr(fontSize: 15, color: eInkSoft),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(
+                '닫기',
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: eAccent,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
