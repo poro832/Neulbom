@@ -217,3 +217,36 @@ def test_two_threads_locking_the_same_request_both_succeed_once_locked(store):
 
     assert results == [True, True]
     assert store.get(12).locked
+
+
+# ------------------------------------------------ 열린 요청은 다시 시작하지 않는다
+
+
+def test_opening_while_a_request_is_waiting_returns_that_same_request(store):
+    first = store.open(12, 1000.0)
+    store.approve(12, 1, first.request_id)
+
+    second = store.open(12, 2000.0)
+
+    assert second.request_id == first.request_id and second.requested_at == 1000.0
+    assert second.approved_by == frozenset({1})  # 승인은 지워지지 않는다
+    assert store.get(12).request_id == first.request_id
+
+
+def test_two_threads_opening_at_once_make_exactly_one_request(store):
+    import threading
+
+    results = []
+    barrier = threading.Barrier(2)
+
+    def worker():
+        barrier.wait()
+        results.append(store.open(12, 1000.0).request_id)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert results[0] == results[1] == store.get(12).request_id
