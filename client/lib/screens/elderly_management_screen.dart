@@ -83,6 +83,7 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
   static String? _linkText(ElderSummary elder) {
     if (elder.status == 'pending') return '승인 대기';
     if (elder.status != 'active') return '동의 전';
+    if (elder.guardianCount > 1) return '함께 보는 보호자 ${elder.guardianCount}명';
     return null;
   }
 

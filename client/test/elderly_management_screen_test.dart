@@ -15,7 +15,7 @@ http.Response json(Object body, [int status = 200]) => http.Response(
     );
 
 Map<String, dynamic> elder(int id, String name,
-        {String status = 'active', int calls = 0, double? score, String? phone}) =>
+        {String status = 'active', int calls = 0, double? score, String? phone, int guardians = 1}) =>
     {
       'elder_id': id,
       'name': name,
@@ -26,6 +26,7 @@ Map<String, dynamic> elder(int id, String name,
       'week_alerts': 0,
       'status': status,
       'phone': phone,
+      'guardian_count': guardians,
     };
 
 Future<void> open(WidgetTester tester) async {
@@ -76,6 +77,60 @@ void main() {
     await open(tester);
 
     expect(find.text('관리 중인 어르신이 없습니다.'), findsOneWidget);
+  });
+
+  testWidgets('여러 보호자가 함께 보는 어르신은 보호자 수만 보여 준다', (tester) async {
+    NulbomApi.client = MockClient((request) async {
+      return json({
+        'elders': [
+          elder(20, '홍길동', guardians: 3),
+          elder(21, '김영희'),
+        ],
+      });
+    });
+
+    await open(tester);
+
+    expect(find.text('함께 보는 보호자 3명'), findsOneWidget);
+    expect(find.textContaining('함께 보는 보호자'), findsOneWidget); // 혼자 보는 어르신에는 적지 않는다
+  });
+
+  testWidgets('어르신 추가: 이미 보호자가 있는 어르신이면 확인 창이 함께 보게 된다고 알린다', (tester) async {
+    NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/link/preview') {
+        return json({'name': '박순자', 'phone_masked': '010-****-3333', 'other_guardians': 2});
+      }
+      return json({'elders': []});
+    });
+
+    await open(tester);
+    await tester.tap(find.text('어르신 추가'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('link-code-field')), '55512345');
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('박순자 어르신(010-****-3333)이 맞나요?'), findsOneWidget);
+    expect(find.text('이미 보호자 2명이 함께 보고 있어요. 연결하면 같이 보게 돼요.'), findsOneWidget);
+    expect(find.text('연결하면 이 어르신께 안부 전화가 시작돼요.'), findsNothing);
+  });
+
+  testWidgets('어르신 추가: 이미 연결했거나 보호자가 가득 찬 어르신이면(409) 서버 문장을 보여 준다', (tester) async {
+    NulbomApi.client = MockClient((request) async {
+      if (request.url.path == '/v1/guardian/link/preview') {
+        return json({'detail': '이 어르신은 보호자가 가득 찼어요'}, 409);
+      }
+      return json({'elders': []});
+    });
+
+    await open(tester);
+    await tester.tap(find.text('어르신 추가'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('link-code-field')), '55512345');
+    await tester.tap(find.text('추가'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('이 어르신은 보호자가 가득 찼어요'), findsOneWidget);
   });
 
   testWidgets('어르신 추가: 연결 코드만 받고, 확인하고 연결하면 서버 목록을 다시 읽는다', (tester) async {

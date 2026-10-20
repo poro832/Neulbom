@@ -13,6 +13,7 @@ class ElderSummary {
   final int weekAlerts;
   final String status; // active | pending | unconsented
   final String? phone; // 승인 대기일 때만 온다
+  final int guardianCount; // 이 어르신을 함께 보는 보호자 수(나 포함)
 
   const ElderSummary({
     required this.elderId,
@@ -24,6 +25,7 @@ class ElderSummary {
     required this.weekAlerts,
     this.status = 'active',
     this.phone,
+    this.guardianCount = 1,
   });
 
   factory ElderSummary.fromJson(Map<String, dynamic> json) => ElderSummary(
@@ -36,6 +38,7 @@ class ElderSummary {
         weekAlerts: json['week_alerts'] as int,
         status: (json['status'] as String?) ?? 'active',
         phone: json['phone'] as String?,
+        guardianCount: (json['guardian_count'] as int?) ?? 1,
       );
 }
 
@@ -317,12 +320,18 @@ class SignupResult {
 class ElderPreview {
   final String name;
   final String phoneMasked; // 010-****-1111
+  final int otherGuardians; // 이미 이 어르신을 보는 보호자 수(이름은 오지 않는다)
 
-  const ElderPreview({required this.name, required this.phoneMasked});
+  const ElderPreview({
+    required this.name,
+    required this.phoneMasked,
+    this.otherGuardians = 0,
+  });
 
   factory ElderPreview.fromJson(Map<String, dynamic> json) => ElderPreview(
         name: json['name'] as String,
         phoneMasked: json['phone_masked'] as String,
+        otherGuardians: (json['other_guardians'] as int?) ?? 0,
       );
 }
 
