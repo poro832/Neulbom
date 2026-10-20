@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import re
 import secrets
 import os
@@ -20,9 +21,14 @@ from pathlib import Path
 import numpy as np
 
 from app.analysis.segments import VadSegment
-from app.analysis.vad_segmenter import DEFAULT_FRAME_MS
+from app.analysis.vad_segmenter import (
+    DEFAULT_FRAME_MS,
+    DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_NOISE_FACTOR,
+    DEFAULT_NOISE_FLOOR,
+)
 from app.media.responder import Responder
-from app.media.streaming_vad import StreamingVad
+from app.media.streaming_vad import DEFAULT_END_OF_TURN_MS, StreamingVad
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +94,7 @@ class CallSession:
         self._responder = responder
         # 끼어들었는지를 받을 수 있는 응답기에만 알린다(고정 응답 등은 인자를 모른다).
         self._tells_interruption = _accepts_interrupted(responder)
-        self._vad = StreamingVad(sample_rate, frame_ms=frame_ms)
+        self._vad = StreamingVad(sample_rate, frame_ms=frame_ms, **vad_settings_from_env())
         self._frame_bytes = self._vad.frame_length * _BYTES_PER_SAMPLE
 
         # 640바이트에 못 미치는 꼬리. 버리면 오디오에 구멍이 생긴다.
@@ -214,7 +220,9 @@ class CallSession:
             self._pending = self._pending[self._frame_bytes :]
             ended = self._vad.push(_to_float32(chunk))
             if ended is not None:
-                outgoing.extend(self._on_speech_end(ended.start_ms, ended.end_ms))
+                outgoing.extend(
+                    self._on_speech_end(ended.start_ms, ended.end_ms, ended.mean_rms, ended.threshold)
+                )
         return outgoing
 
     @property
@@ -279,8 +287,14 @@ class CallSession:
         os.replace(partial, path)
         return path
 
-    def _on_speech_end(self, start_ms: int, end_ms: int) -> list[Outgoing]:
+    def _on_speech_end(
+        self, start_ms: int, end_ms: int, mean_rms: float = 0.0, threshold: float = 0.0
+    ) -> list[Outgoing]:
         outgoing: list[Outgoing] = [TextMessage({"type": "speech_end"})]
+        # 현장에서 임계값이 맞는지 보는 숫자다: 평균 세기가 임계값에 가까우면 소음을 말로 센 것일 수 있다.
+        logger.info(
+            "턴 감지 길이=%dms 평균세기=%.4f 임계값=%.4f", end_ms - start_ms, mean_rms, threshold
+        )
 
         # start_ms/end_ms는 StreamingVad가 frame_ms의 배수로만 내놓으므로,
         # sample_rate로 다시 환산하지 않고 frame_length(= vad가 실제로 자른
@@ -390,6 +404,44 @@ def _turn_number(mark_name: str) -> int:
     # turn3-begin 이면 3. 못 읽으면 0이라 가장 오래된 것으로 친다.
     match = re.match(r"turn(\d+)-", mark_name)
     return int(match.group(1)) if match else 0
+
+
+# 시끄러운 현장에서 말 감지를 서버 재배포 없이 조일 수 있게 환경 변수로 연다. 실시간 말 끝 판정에만 쓰이고,
+# 점수를 내는 배치 분석은 이 값에 닿지 않는다. 값이 이상하면 기본값을 쓰고 경고를 남긴다.
+#   STREAM_VAD_NOISE_FACTOR   잡음 바닥의 몇 배를 넘어야 말로 보나 (기본 2.5, 높일수록 둔해진다)
+#   STREAM_VAD_NOISE_FLOOR    이 세기 이하는 말로 안 친다 (기본 0.008)
+#   STREAM_VAD_MIN_SPEECH_MS  이보다 짧은 소리는 버린다 (기본 100)
+#   STREAM_VAD_END_OF_TURN_MS 이만큼 조용하면 말이 끝났다고 본다 (기본 800)
+#   STREAM_VAD_NOISE_TRACKING 1이면 계속 시끄러운 곳에 맞는 잡음 추적 방식을 쓴다 (기본 꺼짐)
+_VAD_ENV = (
+    ("noise_factor", "STREAM_VAD_NOISE_FACTOR", float, DEFAULT_NOISE_FACTOR, 1.2, 10.0),
+    ("noise_floor", "STREAM_VAD_NOISE_FLOOR", float, DEFAULT_NOISE_FLOOR, 0.002, 0.1),
+    ("min_speech_ms", "STREAM_VAD_MIN_SPEECH_MS", int, DEFAULT_MIN_SPEECH_MS, 20, 2000),
+    ("end_of_turn_ms", "STREAM_VAD_END_OF_TURN_MS", int, DEFAULT_END_OF_TURN_MS, 300, 3000),
+)
+
+
+def vad_settings_from_env() -> dict:
+    settings: dict = {}
+    tracking = os.getenv("STREAM_VAD_NOISE_TRACKING", "").strip().lower()
+    if tracking in ("1", "true", "yes", "on"):
+        settings["noise_tracking"] = True
+    elif tracking not in ("", "0", "false", "no", "off"):
+        logger.warning("STREAM_VAD_NOISE_TRACKING 값을 알 수 없다 — 끈 채로 둔다")
+    for key, name, kind, default, low, high in _VAD_ENV:
+        raw = os.getenv(name)
+        if raw is None or not raw.strip():
+            continue
+        try:
+            value = kind(raw.strip())
+        except ValueError:
+            logger.warning("%s 값이 숫자가 아니다 — 기본값 %s를 쓴다", name, default)
+            continue
+        if not low <= value <= high:
+            logger.warning("%s=%s가 범위(%s~%s) 밖이다 — 기본값 %s를 쓴다", name, value, low, high, default)
+            continue
+        settings[key] = value
+    return settings
 
 
 def _accepts_interrupted(responder: Responder) -> bool:

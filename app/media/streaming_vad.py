@@ -12,13 +12,15 @@ window_ms만 들고 매 프레임 다시 계산한다.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from app.analysis.vad_segmenter import (
     DEFAULT_FRAME_MS,
     DEFAULT_MIN_SPEECH_MS,
+    DEFAULT_NOISE_FACTOR,
+    DEFAULT_NOISE_FLOOR,
     adaptive_threshold,
 )
 
@@ -30,6 +32,17 @@ DEFAULT_WINDOW_MS = 3000
 # 어르신은 천천히, 중간에 쉬면서 말씀하신다.
 DEFAULT_END_OF_TURN_MS = 800
 
+# 잡음 추적 방식(noise_tracking=True)의 값.
+#
+# 기본 방식은 최근 3초의 하위 10% 세기를 잡음으로 보되 피크의 30%로 상한을 씌운다. 계속 시끄러운 곳에서는
+# 창 안이 거의 다 잡음이라 이 상한이 잡음 추정을 실제의 0.3배로 깎고, 임계값이 잡음 세기의 0.75배쯤으로
+# 내려가 잡음 프레임이 말로 센다 — 통화 시작부터 말이 끝나지 않는 턴이 생긴다(2026-10-20 엑스포 피드백).
+# 추적 방식은 말하지 않는 동안의 세기를 서서히 따라가고, 누군가 말하는 동안은 추정을 붙잡아 둔다.
+NOISE_INIT_FRAMES = 10  # 통화 시작 0.2초는 잡음만 있다고 보고 첫 추정을 만든다
+NOISE_TRACK_ALPHA = 0.05  # 말하지 않는 프레임마다 추정을 5%씩 따라 움직인다(약 0.4초)
+# 한 턴이 이보다 길면 소음이 말로 굳은 것으로 보고 강제로 닫는다.
+DEFAULT_MAX_TURN_MS = 15_000
+
 
 @dataclass(frozen=True)
 class SpeechEnded:
@@ -37,6 +50,9 @@ class SpeechEnded:
 
     start_ms: int
     end_ms: int
+    # 현장에서 설정을 맞출 때 보는 값이다(비교에는 쓰지 않는다): 말한 프레임의 평균 세기와 그때의 임계값.
+    mean_rms: float = field(default=0.0, compare=False)
+    threshold: float = field(default=0.0, compare=False)
 
 
 class StreamingVad:
@@ -47,7 +63,20 @@ class StreamingVad:
         window_ms: int = DEFAULT_WINDOW_MS,
         end_of_turn_ms: int = DEFAULT_END_OF_TURN_MS,
         min_speech_ms: int = DEFAULT_MIN_SPEECH_MS,
+        noise_floor: float = DEFAULT_NOISE_FLOOR,
+        noise_factor: float = DEFAULT_NOISE_FACTOR,
+        noise_tracking: bool = False,
+        max_turn_ms: int = DEFAULT_MAX_TURN_MS,
     ) -> None:
+        self._noise_tracking = noise_tracking
+        self._max_turn_frames = max(1, max_turn_ms // frame_ms)
+        self._init_rms: list[float] = []
+        self._noise_est: float | None = None
+        self._noise_floor = noise_floor
+        self._noise_factor = noise_factor
+        self._voiced_rms_sum = 0.0
+        self._voiced_frames = 0
+        self._last_threshold = 0.0
         self._frame_ms = frame_ms
         self._frame_length = int(sample_rate * frame_ms / 1000)
         self._end_of_turn_frames = max(1, end_of_turn_ms // frame_ms)
@@ -76,9 +105,15 @@ class StreamingVad:
             )
         rms = float(np.sqrt(np.mean(np.asarray(frame, dtype=np.float32) ** 2)))
         self._rms_window.append(rms)
-        threshold = adaptive_threshold(
-            np.asarray(self._rms_window, dtype=np.float32)
-        )
+        if self._noise_tracking:
+            threshold = self._tracked_threshold(rms)
+        else:
+            threshold = adaptive_threshold(
+                np.asarray(self._rms_window, dtype=np.float32),
+                noise_floor=self._noise_floor,
+                noise_factor=self._noise_factor,
+            )
+        self._last_threshold = threshold
 
         ended: SpeechEnded | None = None
         if rms >= threshold:
@@ -86,13 +121,41 @@ class StreamingVad:
                 self._speech_start = self._frame_index
             self._last_voiced = self._frame_index
             self._silence_run = 0
+            self._voiced_rms_sum += rms
+            self._voiced_frames += 1
         elif self._speech_start is not None:
             self._silence_run += 1
             if self._silence_run >= self._end_of_turn_frames:
                 ended = self._close_turn()
+        if self._noise_tracking:
+            ended = self._track_noise(rms, voiced=rms >= threshold) or ended
 
         self._frame_index += 1
         return ended
+
+    def _tracked_threshold(self, rms: float) -> float:
+        if self._noise_est is None:
+            self._init_rms.append(rms)
+            estimate = sum(self._init_rms) / len(self._init_rms)
+            if len(self._init_rms) >= NOISE_INIT_FRAMES:
+                self._noise_est = estimate
+        else:
+            estimate = self._noise_est
+        return max(self._noise_floor, self._noise_factor * estimate)
+
+    def _track_noise(self, rms: float, *, voiced: bool) -> SpeechEnded | None:
+        """말하지 않는 프레임으로 잡음 추정을 따라가고, 턴이 너무 길면 소음이 굳은 것으로 보고 닫는다."""
+        if self._noise_est is None:
+            return None
+        if self._speech_start is None:
+            if not voiced:
+                self._noise_est += NOISE_TRACK_ALPHA * (rms - self._noise_est)
+            return None
+        if self._frame_index - self._speech_start < self._max_turn_frames:
+            return None
+        # 소음이 임계값을 넘은 채 굳었다. 지금의 세기를 새 잡음으로 받아들이고 턴을 닫는다.
+        self._noise_est = float(np.median(np.asarray(self._rms_window, dtype=np.float32)))
+        return self._close_turn()
 
     def _close_turn(self) -> SpeechEnded | None:
         """턴을 닫는다. 너무 짧으면 클릭음으로 보고 버린다.
@@ -104,10 +167,15 @@ class StreamingVad:
         start_ms = self._speech_start * self._frame_ms
         end_ms = (self._last_voiced + 1) * self._frame_ms
 
+        mean_rms = self._voiced_rms_sum / self._voiced_frames if self._voiced_frames else 0.0
         self._speech_start = None
         self._last_voiced = None
         self._silence_run = 0
+        self._voiced_rms_sum = 0.0
+        self._voiced_frames = 0
 
         if end_ms - start_ms < self._min_speech_ms:
             return None
-        return SpeechEnded(start_ms=start_ms, end_ms=end_ms)
+        return SpeechEnded(
+            start_ms=start_ms, end_ms=end_ms, mean_rms=mean_rms, threshold=self._last_threshold
+        )
