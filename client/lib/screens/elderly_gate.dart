@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -14,7 +16,15 @@ import 'elderly_login_screen.dart' show ElderlyLoginScreen;
 /// 가입한 어르신(승인 대기, pending)은 보호자가 승인할 때까지 대기 화면에 머문다 — 이 상태에서는
 /// 서버가 전화를 걸지 않고 통화 기록·연락처도 열어 주지 않는다. 연결·승인됐으면 홈으로 들어간다.
 class ElderlyGate extends StatefulWidget {
-  const ElderlyGate({super.key, this.homeBuilder, this.linkCode});
+  const ElderlyGate({
+    super.key,
+    this.homeBuilder,
+    this.linkCode,
+    this.pollInterval = const Duration(seconds: 4),
+  });
+
+  /// 연결·승인을 기다리는 동안 서버에 상태를 다시 묻는 간격. 테스트는 짧게 줄인다.
+  final Duration pollInterval;
 
   /// 활성 어르신이 들어갈 홈. 기본은 어르신 홈이고, 테스트는 가벼운 화면을 넣는다.
   final WidgetBuilder? homeBuilder;
@@ -34,12 +44,40 @@ class _ElderlyGateState extends State<ElderlyGate> {
   PairingCode? _linkCode;
   bool _issuing = false;
   String? _codeError;
+  Timer? _poll;
+
+  /// 이 화면에서 연결·승인을 기다리는 모습을 본 적이 있다 — 그다음 active가 되면 "연결됐어요"를 먼저 보여 준다.
+  bool _sawWaiting = false;
+  bool _showConnected = false;
 
   @override
   void initState() {
     super.initState();
     _status = NulbomApi.myStatus();
     _linkCode = widget.linkCode;
+    _poll = Timer.periodic(widget.pollInterval, (_) => _checkWaiting());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// 새로고침 버튼 대신, 기다리는 동안 저절로 상태를 확인한다. 연결되면 "연결됐어요" 화면으로 바뀐다.
+  Future<void> _checkWaiting() async {
+    if (!_sawWaiting) return;
+    try {
+      final me = await NulbomApi.myStatus();
+      if (!mounted || me.status != 'active') return;
+      _poll?.cancel();
+      setState(() {
+        _showConnected = true;
+        _status = Future.value(me);
+      });
+    } catch (_) {
+      // 잠깐 끊겨도 다음 확인 때 다시 본다.
+    }
   }
 
   /// 새 연결 코드(8자리, 24시간)를 받는다. 이전 코드는 서버에서 바로 못 쓰게 된다.
@@ -120,6 +158,8 @@ class _ElderlyGateState extends State<ElderlyGate> {
           );
         }
         final me = snapshot.data!;
+        if (me.status == 'active' && _showConnected) return _connectedScreen(me);
+        _sawWaiting = me.status != 'active';
         if (me.status == 'active') {
           if (!me.shareAgreed) return _shareConsentScreen();
           return widget.homeBuilder?.call(context) ?? const ElderlyHomePage();
@@ -128,15 +168,15 @@ class _ElderlyGateState extends State<ElderlyGate> {
           return _screen(
             title: '보호자 연결을 기다리고 있어요',
             detail: '${me.name} 어르신, 보호자에게 연결 코드를 알려 주세요.\n'
-                '보호자가 코드를 입력해 연결하면 안부 전화가 시작돼요.\n연결이 끝났다면 새로고침을 눌러 주세요.',
-            retryLabel: '새로고침',
+                '보호자가 코드를 입력해 연결하면 안부 전화가 시작돼요.\n연결되면 이 화면이 저절로 바뀌어요.',
+            waiting: true,
             extra: _linkCodeBox(),
           );
         }
         return _screen(
           title: '보호자 승인을 기다리고 있어요',
-          detail: '${me.name} 어르신, 보호자가 승인하면 안부 전화가 시작돼요.\n승인이 끝났다면 새로고침을 눌러 주세요.',
-          retryLabel: '새로고침',
+          detail: '${me.name} 어르신, 보호자가 승인하면 안부 전화가 시작돼요.\n승인되면 이 화면이 저절로 바뀌어요.',
+          waiting: true,
         );
       },
     );
@@ -282,10 +322,60 @@ class _ElderlyGateState extends State<ElderlyGate> {
     );
   }
 
+  /// 보호자가 연결(또는 승인)한 순간. 시작하기를 누르면 어르신 홈으로 들어간다.
+  Widget _connectedScreen(MyStatus me) {
+    return Scaffold(
+      backgroundColor: eBg,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle_rounded, size: 72, color: eAccent),
+                const SizedBox(height: 24),
+                Text(
+                  '연결되었습니다',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    color: eInk,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '${me.name} 어르신, 보호자와 연결됐어요.\n이제 안부 전화가 시작돼요.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.notoSansKr(fontSize: 17, height: 1.6, color: eInkSoft),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () => setState(() => _showConnected = false),
+                    style: ElevatedButton.styleFrom(backgroundColor: eAccent),
+                    child: const Text(
+                      '시작하기',
+                      style: TextStyle(fontSize: 19, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _screen({
     required String title,
     String? detail,
-    required String retryLabel,
+    String? retryLabel,
+    bool waiting = false,
     Widget? extra,
   }) {
     return Scaffold(
@@ -318,18 +408,31 @@ class _ElderlyGateState extends State<ElderlyGate> {
                 ],
                 ?extra,
                 const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: _reload,
-                    style: ElevatedButton.styleFrom(backgroundColor: eAccent),
-                    child: Text(
-                      retryLabel,
-                      style: const TextStyle(fontSize: 18, color: Colors.white),
+                if (waiting)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.sync_rounded, size: 18, color: eInkSoft),
+                      const SizedBox(width: 8),
+                      Text(
+                        '연결을 기다리는 중이에요',
+                        style: GoogleFonts.notoSansKr(fontSize: 15, color: eInkSoft),
+                      ),
+                    ],
+                  ),
+                if (retryLabel != null)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _reload,
+                      style: ElevatedButton.styleFrom(backgroundColor: eAccent),
+                      child: Text(
+                        retryLabel,
+                        style: const TextStyle(fontSize: 18, color: Colors.white),
+                      ),
                     ),
                   ),
-                ),
                 TextButton(
                   onPressed: _logout,
                   child: const Text('처음 화면으로', style: TextStyle(color: eInkSoft)),

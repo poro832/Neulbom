@@ -29,27 +29,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('보호자 승인을 기다리고 있어요'), findsOneWidget);
-    expect(find.text('새로고침'), findsOneWidget);
+    expect(find.textContaining('저절로 바뀌어요'), findsOneWidget);
+    expect(find.text('새로고침'), findsNothing);
   });
 
-  testWidgets('새로고침했을 때 승인됐으면 대기 화면이 풀린다', (tester) async {
+  testWidgets('기다리다 승인되면 저절로 "연결되었습니다"가 뜨고, 시작하기로 홈에 들어간다', (tester) async {
     var status = 'pending';
     NulbomApi.client =
         MockClient((request) async =>
             json({'status': status, 'name': '홍길동', 'share_agreed': true}));
 
     await tester.pumpWidget(
-      MaterialApp(home: ElderlyGate(homeBuilder: (_) => const Text('어르신 홈'))),
+      MaterialApp(
+        home: ElderlyGate(
+          pollInterval: const Duration(seconds: 1),
+          homeBuilder: (_) => const Text('어르신 홈'),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('보호자 승인을 기다리고 있어요'), findsOneWidget);
 
     status = 'active';
-    await tester.tap(find.text('새로고침'));
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
     expect(find.text('보호자 승인을 기다리고 있어요'), findsNothing);
+    expect(find.text('연결되었습니다'), findsOneWidget);
+    expect(find.text('어르신 홈'), findsNothing);
+
+    await tester.tap(find.text('시작하기'));
+    await tester.pumpAndSettle();
     expect(find.text('어르신 홈'), findsOneWidget);
+  });
+
+  testWidgets('처음부터 연결된 어르신은 "연결되었습니다" 없이 바로 홈이다', (tester) async {
+    NulbomApi.client = MockClient((request) async =>
+        json({'status': 'active', 'name': '홍길동', 'share_agreed': true}));
+
+    await tester.pumpWidget(
+      MaterialApp(home: ElderlyGate(homeBuilder: (_) => const Text('어르신 홈'))),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('어르신 홈'), findsOneWidget);
+    expect(find.text('연결되었습니다'), findsNothing);
   });
 
   testWidgets('서버가 거절하면 그 문장과 다시 시도를 보여 준다', (tester) async {
@@ -121,7 +145,7 @@ void main() {
 
       expect(find.text('보호자 연결을 기다리고 있어요'), findsOneWidget);
       expect(find.text('연결 코드 보기'), findsOneWidget);
-      expect(find.text('새로고침'), findsOneWidget);
+      expect(find.text('새로고침'), findsNothing);
       expect(find.text('어르신 홈'), findsNothing);
       expect(calls, ['GET /v1/me/status']);
     });
@@ -161,17 +185,28 @@ void main() {
       expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
     });
 
-    testWidgets('보호자가 연결했으면 새로고침에서 홈으로 들어간다', (tester) async {
+    testWidgets('보호자가 연결하면 저절로 "연결되었습니다"가 뜨고 시작하기로 홈에 들어간다', (tester) async {
       var status = 'unlinked';
       NulbomApi.client = MockClient((request) async =>
           json({'status': status, 'name': '홍길동', 'share_agreed': true}));
 
-      await open(tester);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ElderlyGate(
+            pollInterval: const Duration(seconds: 1),
+            homeBuilder: (_) => const Text('어르신 홈'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
       status = 'active';
-      await tester.tap(find.text('새로고침'));
+      await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
 
       expect(find.text('보호자 연결을 기다리고 있어요'), findsNothing);
+      expect(find.text('연결되었습니다'), findsOneWidget);
+      await tester.tap(find.text('시작하기'));
+      await tester.pumpAndSettle();
       expect(find.text('어르신 홈'), findsOneWidget);
     });
   });

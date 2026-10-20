@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'calling_screen.dart';
 import 'ai_chat_screen.dart';
 import 'emergency_screen.dart';
+import '../utils/korean.dart';
 
 // 색상
 const Color eBg = Color(0xFFEFF6FF);
@@ -20,7 +21,11 @@ const Color eAccentSoft = Color(0xFFE6F0FF);
 const Color eBrass = Color(0xFFFFC21A);
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  const MainScreen({super.key, this.onOpenEmergency});
+
+  /// 비상 연락 카드를 눌렀을 때. 홈 화면이 아래 메뉴의 비상연락 탭으로 옮겨 주도록 넘겨 받는다.
+  /// 없으면(단독으로 쓰일 때) 새 화면으로 연다.
+  final VoidCallback? onOpenEmergency;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -242,7 +247,7 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          '$_friendName과 통화하기',
+                          '${withWaGwa(_friendName)} 통화하기',
                           style: GoogleFonts.notoSansKr(
                             fontSize: 28,
                             fontWeight: FontWeight.w800,
@@ -288,6 +293,11 @@ class _MainScreenState extends State<MainScreen> {
                   iconColor: eAccent,
                   icon: Icons.warning_amber_rounded,
                   onTap: () {
+                    final open = widget.onOpenEmergency;
+                    if (open != null) {
+                      open();
+                      return;
+                    }
                     Navigator.push(
                       context,
                       MaterialPageRoute(

@@ -418,10 +418,10 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
               ),
         body: IndexedStack(
           index: _tabIndex,
-          children: const [
-            MainScreen(),
-            HistoryScreen(),
-            EmergencyScreen(),
+          children: [
+            MainScreen(onOpenEmergency: () => setState(() => _tabIndex = 2)),
+            const HistoryScreen(),
+            const EmergencyScreen(),
           ],
         ),
         bottomNavigationBar: Container(
