@@ -254,9 +254,11 @@ def test_an_elder_withdrawal_cascades_to_every_table_and_nothing_else():
     seed_everything(pool)
     others_before = {elder_id: counts_for_elder(pool, elder_id) for elder_id in (13, 14)}
 
-    r = client.request("DELETE", "/v1/me", json={"confirm": True}, headers=elder_keys[12])
+    asked = client.post("/v1/me/withdrawal", json={"confirm": True}, headers=elder_keys[12])
+    assert asked.status_code == 202
+    r = client.post("/v1/elders/12/withdrawal/approve", headers=guardian_keys[1])
 
-    assert r.status_code == 204
+    assert r.status_code == 200 and r.json() == {"status": "deleted"}
     assert deleter.calls == [["12-a.wav"]]
     assert elder_row(pool, 12) is None
     assert counts_for_elder(pool, 12) == dict.fromkeys(PER_ELDER, 0)

@@ -382,9 +382,16 @@ class ElderWorld:
         self.other_headers = kit.elder_headers(13)
 
     def withdraw(self, body=None, headers=None):
-        return self.kit.client.request(
-            "DELETE", "/v1/me", json={"confirm": True} if body is None else body, headers=headers or self.headers
+        """어르신이 탈퇴를 요청하고, 보호자 1이 승인해 지워질 때까지 한다. 마지막 응답을 돌려준다.
+        보호자가 없는 어르신(연결 전)은 요청이 곧 탈퇴라 첫 응답이 마지막이다."""
+        headers = headers or self.headers
+        first = self.kit.client.post(
+            "/v1/me/withdrawal", json={"confirm": True} if body is None else body, headers=headers
         )
+        if first.status_code != 202:
+            return first
+        elder_id = 13 if headers is self.other_headers else 12
+        return self.kit.client.post(f"/v1/elders/{elder_id}/withdrawal/approve", headers=self.kit.guardian_headers)
 
 
 def test_withdrawing_deletes_the_elder_and_the_key_stops_working():
@@ -392,7 +399,7 @@ def test_withdrawing_deletes_the_elder_and_the_key_stops_working():
 
     r = w.withdraw()
 
-    assert r.status_code == 204 and r.content == b""
+    assert r.status_code == 200 and r.json() == {"status": "deleted"}
     assert w.kit.data.elders.get(12) is None
     assert w.kit.client.get("/v1/me/status", headers=w.headers).status_code == 401
     assert w.withdraw().status_code == 401  # 이미 지워진 어르신의 열쇠는 그대로 401이다
@@ -401,7 +408,7 @@ def test_withdrawing_deletes_the_elder_and_the_key_stops_working():
 def test_the_calls_mentions_contacts_and_alerts_are_gone():
     w = ElderWorld(FakeDeleter())
 
-    assert w.withdraw().status_code == 204
+    assert w.withdraw().status_code == 200
 
     content = w.kit.data.content
     assert w.kit.reports.call_lines(12, 100) == []
@@ -419,7 +426,7 @@ def test_the_calls_mentions_contacts_and_alerts_are_gone():
 def test_other_elders_are_untouched():
     w = ElderWorld(FakeDeleter())
 
-    assert w.withdraw().status_code == 204
+    assert w.withdraw().status_code == 200
 
     content = w.kit.data.content
     assert [line.call_id for line in w.kit.reports.call_lines(13, 100)] == [3]
@@ -433,7 +440,7 @@ def test_other_elders_are_untouched():
 
 def test_the_same_number_can_sign_up_again_as_a_new_elder():
     w = ElderWorld(FakeDeleter())
-    assert w.withdraw().status_code == 204
+    assert w.withdraw().status_code == 200
 
     r = w.kit.client.post("/v1/elders/signup", json={"name": "어르신 12", "phone": "070-1111-2222", "agreed": True})
 
@@ -447,7 +454,7 @@ def test_the_deleter_gets_exactly_that_elders_recording_keys():
     deleter = FakeDeleter()
     w = ElderWorld(deleter)
 
-    assert w.withdraw().status_code == 204
+    assert w.withdraw().status_code == 200
 
     assert deleter.calls == [[A, B]]
 
@@ -459,7 +466,7 @@ def test_a_deleter_failure_or_error_never_stops_the_deletion(deleter, caplog):
     with caplog.at_level(logging.DEBUG):
         r = w.withdraw()
 
-    assert r.status_code == 204
+    assert r.status_code == 200
     assert w.kit.data.elders.get(12) is None and w.kit.data.contacts.list(12) == []
     assert "어르신이 탈퇴했다 elder_id=12 녹음=2개 삭제시도 실패=2" in caplog.text
     assert "20261005T090000Z" not in caplog.text and "20261006T090000Z" not in caplog.text  # 키는 남기지 않는다
@@ -469,7 +476,7 @@ def test_without_a_deleter_the_elder_is_still_deleted(caplog):
     w = ElderWorld(deleter=None)
 
     with caplog.at_level(logging.DEBUG):
-        assert w.withdraw().status_code == 204
+        assert w.withdraw().status_code == 200
 
     assert w.kit.data.elders.get(12) is None
     assert "어르신이 탈퇴했다 elder_id=12 녹음=2개 삭제시도 실패=2" in caplog.text
@@ -486,7 +493,7 @@ def test_an_elder_with_no_recordings_does_not_call_the_deleter(caplog):
     with caplog.at_level(logging.DEBUG):
         r = w.withdraw(headers=bearer(signed["elder_key"]))  # 연결 전 어르신도 탈퇴할 수 있다
 
-    assert r.status_code == 204
+    assert r.status_code == 200
     assert deleter.calls == []
     assert "녹음=0개 삭제시도 실패=0" in caplog.text
 
@@ -502,7 +509,7 @@ def test_the_recordings_still_on_the_server_disk_are_removed_too(tmp_path, caplo
         (folder / name).write_bytes(b"RIFF")
 
     with caplog.at_level(logging.DEBUG):
-        assert w.withdraw().status_code == 204
+        assert w.withdraw().status_code == 200
 
     assert not (folder / A).exists() and not (folder / (A + MARKER_SUFFIX)).exists() and not (folder / B).exists()
     assert (folder / C).exists() and (folder / (C + MARKER_SUFFIX)).exists()  # 다른 어르신의 녹음은 그대로다
@@ -522,7 +529,7 @@ def test_a_recording_key_that_is_not_a_plain_file_name_never_touches_other_paths
     for key in ("../outside.wav", "sub/x.wav", "..", "."):
         w.kit.data.elders.add_audio_key(12, key)
 
-    assert w.withdraw().status_code == 204
+    assert w.withdraw().status_code == 200
 
     assert outside.exists() and nested.exists() and folder.is_dir()
     assert w.kit.data.elders.get(12) is None
@@ -546,7 +553,7 @@ def test_a_local_file_that_cannot_be_removed_never_stops_the_deletion(tmp_path, 
     monkeypatch.setattr(Path, "unlink", refuse)
 
     with caplog.at_level(logging.DEBUG):
-        assert w.withdraw().status_code == 204
+        assert w.withdraw().status_code == 200
 
     assert w.kit.data.elders.get(12) is None
     assert A not in caplog.text  # 파일 이름(키)은 로그에 남기지 않는다
@@ -586,7 +593,7 @@ def test_the_elder_withdrawal_log_has_numbers_only(caplog):
     w = ElderWorld(FakeDeleter())
 
     with caplog.at_level(logging.DEBUG):
-        assert w.withdraw().status_code == 204
+        assert w.withdraw().status_code == 200
 
     assert "어르신이 탈퇴했다 elder_id=12 녹음=2개 삭제시도 실패=0" in caplog.text
     for secret in ("어르신 12", "070-1111-2222", "이웃 김씨", "010-2222-3333", "허리가 아파요", A, B):

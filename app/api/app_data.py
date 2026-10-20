@@ -18,6 +18,7 @@ from datetime import time as time_of_day
 from pathlib import Path as PathType  # fastapi.Path(주소 인자)와 이름이 겹친다
 
 from fastapi import FastAPI, Header, HTTPException, Path, Query, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, field_validator
 
 from app.api.account_deletion import withdraw_elder, withdraw_guardian
@@ -48,6 +49,7 @@ from app.api.invites import InviteStore, hash_invite_code, new_invite_code
 from app.api.link_codes import CodeCollision, InMemoryLinkCodeStore, LinkCodeStore
 from app.api.pairing import PairingStore, hash_code, new_code
 from app.api.rate_limit import FailureLimiter, InFlightLimiter, KeyedFailureLimiter
+from app.api.withdrawals import WITHDRAWAL_TTL_SECONDS, InMemoryWithdrawalStore, WithdrawalRequest, WithdrawalStore
 from app.api.reports import (
     DayStat,
     Reports,
@@ -108,6 +110,8 @@ MAX_ELDERS_PER_GUARDIAN = 10
 LINK_CODE_RETRIES = 5
 # 보호자가 어르신 전화번호를 고친 뒤, 새 폰이 번호만으로 한 번 로그인할 수 있는 시간.
 PHONE_CLAIM_SECONDS = 24 * 3600
+NEED_WITHDRAW_APPROVAL = "보호자의 승인이 필요해요"
+NO_WITHDRAWAL = "탈퇴 요청이 없어요"
 # 틀린 번호, 열리지 않은 번호, 이미 쓴 번호, 만료 모두 같은 문장이다 — 어느 쪽인지 알려 주면 등록된 번호를 찾아내는 데 쓰인다.
 BAD_ELDER_LOGIN = "이 폰으로는 로그인할 수 없어요. 보호자에게 어르신 관리에서 번호를 확인해 달라고 부탁해 주세요"
 
@@ -165,6 +169,9 @@ class AppData:
     password_reset_slots: InFlightLimiter = field(default_factory=InFlightLimiter)
     # 어르신 탈퇴 때 S3 녹음을 지운다(RECORDINGS_BUCKET이 없으면 None — 녹음은 버킷의 30일 수명 규칙에 맡긴다).
     recording_deleter: RecordingDeleter | None = None
+    # 어르신 탈퇴 요청(보호자 전원이 승인해야 탈퇴된다) / 보호자에게 푸시를 보내는 쪽(없으면 푸시 없이 요청 목록만)
+    withdrawals: WithdrawalStore = field(default_factory=InMemoryWithdrawalStore)
+    notifier: object | None = None
     # 어르신 탈퇴 때 서버 디스크에 남은 녹음 파일도 지운다(보관기가 쓰는 폴더). None이면 건드리지 않는다.
     recordings_dir: PathType | None = None
 
@@ -943,15 +950,8 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         logger.info("보호자가 탈퇴했다 guardian_id=%s 어르신 연결 해제=%s", guardian_id, detached)
         return Response(status_code=204)
 
-    @app.delete("/v1/me")
-    @guarded
-    def withdraw_elder_me(body: ElderWithdrawRequest, authorization: str | None = Header(default=None)) -> Response:
-        """어르신 탈퇴 — 어르신 열쇠와 {"confirm": true}. 녹음(서버 디스크·S3)은 최선으로 지우고, 어르신과 통화·점수·
-        요약·언급·연락처·열쇠·코드를 지운다. 연결 전·승인 대기 어르신도 탈퇴할 수 있다."""
-        elder_id = elder_id_of(authorization)
-        if data.elders.get(elder_id) is None:
-            # 지워진 어르신의 열쇠다(Postgres에서는 CASCADE로 열쇠도 지워져 위에서 이미 401이다).
-            raise HTTPException(status_code=401, detail=NEED_KEY)
+    def delete_elder_now(elder_id: int) -> None:
+        """어르신을 지운다(녹음 포함). 승인이 끝났거나 보호자가 없는 어르신에게만 부른다."""
         result = withdraw_elder(
             elder_id,
             elders=data.elders,
@@ -962,6 +962,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             content=data.content,
             reports=data.reports,
             alerts=data.alerts,
+            withdrawals=data.withdrawals,
         )
         logger.info(
             "어르신이 탈퇴했다 elder_id=%s 녹음=%s개 삭제시도 실패=%s 서버 파일 삭제=%s개",
@@ -970,6 +971,147 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             result.failed,
             result.local_removed,
         )
+
+    @app.delete("/v1/me")
+    @guarded
+    def withdraw_elder_me(body: ElderWithdrawRequest, authorization: str | None = Header(default=None)) -> Response:
+        """보호자가 없는 어르신(연결 전)의 즉시 탈퇴 — 어르신 열쇠와 {"confirm": true}. 보호자가 있는 어르신은
+        승인이 필요해 `POST /v1/me/withdrawal`을 써야 한다(여기서는 409). 녹음(서버 디스크·S3)은 최선으로 지운다."""
+        elder_id = elder_id_of(authorization)
+        if data.elders.get(elder_id) is None:
+            # 지워진 어르신의 열쇠다(Postgres에서는 CASCADE로 열쇠도 지워져 위에서 이미 401이다).
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        if data.elders.guardians_of(elder_id):
+            raise HTTPException(status_code=409, detail=NEED_WITHDRAW_APPROVAL)
+        delete_elder_now(elder_id)
+        return Response(status_code=204)
+
+    # ------------------------------------------------ 어르신 탈퇴 요청: 보호자 전원이 승인해야 탈퇴된다
+
+    def live_withdrawal(elder_id: int) -> WithdrawalRequest | None:
+        """살아 있는(만료되지 않은) 요청. 만료된 요청은 여기서 지운다."""
+        request = data.withdrawals.get(elder_id)
+        if request is None:
+            return None
+        if request.requested_at + WITHDRAWAL_TTL_SECONDS <= data.wall_clock():
+            data.withdrawals.cancel(elder_id)
+            return None
+        return request
+
+    def withdrawal_view(request: WithdrawalRequest, guardians: list[int]) -> dict:
+        return {
+            "status": "rejected" if request.rejected else "waiting",
+            "requested_at": iso_kst(request.requested_at),
+            "expires_at": iso_kst(request.requested_at + WITHDRAWAL_TTL_SECONDS),
+            "approved": len(request.approved_by & set(guardians)),
+            "total": len(guardians),
+        }
+
+    @app.post("/v1/me/withdrawal")
+    @guarded
+    def request_withdrawal(body: ElderWithdrawRequest, authorization: str | None = Header(default=None)) -> JSONResponse:
+        """어르신 탈퇴 요청. 보호자가 있으면 요청을 만들고 보호자에게 알린다(202). 보호자가 모두 승인하면 탈퇴된다.
+        보호자가 없는 어르신(연결 전)은 바로 탈퇴한다(200). 이미 열린 요청이 있으면 그대로 돌려준다."""
+        elder_id = elder_id_of(authorization)
+        if data.elders.get(elder_id) is None:
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        guardians = data.elders.guardians_of(elder_id)
+        if not guardians:
+            delete_elder_now(elder_id)
+            return JSONResponse(status_code=200, content={"status": "deleted"})
+        request = live_withdrawal(elder_id)
+        if request is None or request.rejected:
+            request = data.withdrawals.open(elder_id, data.wall_clock())
+            logger.info("어르신이 탈퇴를 요청했다 elder_id=%s 보호자=%s명", elder_id, len(guardians))
+            notify = getattr(data.notifier, "notify_withdrawal", None)
+            if notify is not None:
+                for guardian_id in guardians:
+                    try:
+                        notify(guardian_id, elder_id)
+                    except Exception:
+                        logger.exception("탈퇴 요청 푸시를 보내지 못했다 guardian_id=%s", guardian_id)
+        return JSONResponse(status_code=202, content=withdrawal_view(request, guardians))
+
+    @app.get("/v1/me/withdrawal")
+    @guarded
+    def my_withdrawal(authorization: str | None = Header(default=None)) -> dict:
+        elder_id = elder_id_of(authorization)
+        request = live_withdrawal(elder_id)
+        if request is None:
+            return {"status": "none"}
+        return withdrawal_view(request, data.elders.guardians_of(elder_id))
+
+    @app.delete("/v1/me/withdrawal")
+    @guarded
+    def cancel_withdrawal(authorization: str | None = Header(default=None)) -> Response:
+        """어르신이 탈퇴 요청을 취소한다(거절된 요청을 치우는 데도 쓴다)."""
+        elder_id = elder_id_of(authorization)
+        data.withdrawals.cancel(elder_id)
+        return Response(status_code=204)
+
+    @app.get("/v1/guardian/withdrawals")
+    @guarded
+    def guardian_withdrawals(authorization: str | None = Header(default=None)) -> dict:
+        """내 어르신들의 열린 탈퇴 요청(거절된 것은 빼고)."""
+        guardian_id = guardian_id_of(authorization)
+        items = []
+        for ref in data.elders.elders_of(guardian_id):
+            request = live_withdrawal(ref.elder_id)
+            if request is None or request.rejected:
+                continue
+            view = withdrawal_view(request, data.elders.guardians_of(ref.elder_id))
+            items.append(
+                {
+                    "elder_id": ref.elder_id,
+                    "name": ref.name,
+                    "requested_at": view["requested_at"],
+                    "expires_at": view["expires_at"],
+                    "approved": view["approved"],
+                    "total": view["total"],
+                    "approved_by_me": guardian_id in request.approved_by,
+                }
+            )
+        return {"withdrawals": items}
+
+    @app.post("/v1/elders/{elder_id}/withdrawal/approve")
+    @guarded
+    def approve_withdrawal(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        """탈퇴 요청을 승인한다. 보호자가 모두 승인하면 어르신이 지워진다."""
+        guardian_id = active_guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        if live_withdrawal(elder_id) is None:
+            raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
+        request = data.withdrawals.approve(elder_id, guardian_id)
+        if request is None:
+            raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
+        guardians = data.elders.guardians_of(elder_id)
+        logger.info(
+            "탈퇴 요청을 승인했다 elder_id=%s guardian_id=%s 승인=%s/%s",
+            elder_id,
+            guardian_id,
+            len(request.approved_by & set(guardians)),
+            len(guardians),
+        )
+        if guardians and set(guardians) <= request.approved_by:
+            delete_elder_now(elder_id)
+            return {"status": "deleted"}
+        return withdrawal_view(request, guardians)
+
+    @app.post("/v1/elders/{elder_id}/withdrawal/reject")
+    @guarded
+    def reject_withdrawal(
+        elder_id: int = Path(ge=1, le=MAX_ELDER_ID),
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        """탈퇴 요청을 거절한다. 어르신 앱에 거절됐다고 보이고, 어르신은 나중에 다시 요청할 수 있다."""
+        guardian_id = active_guardian_id_of(authorization)
+        owned_elder(guardian_id, elder_id)
+        if live_withdrawal(elder_id) is None or not data.withdrawals.reject(elder_id, data.wall_clock()):
+            raise HTTPException(status_code=404, detail=NO_WITHDRAWAL)
+        logger.info("탈퇴 요청을 거절했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
         return Response(status_code=204)
 
     # ------------------------------------------------ 보호자 코드로 어르신 가입

@@ -147,6 +147,10 @@ class ElderDirectory(Protocol):
         """
         ...
 
+    def guardians_of(self, elder_id: int) -> list[int]:
+        """그 어르신을 맡은 보호자들(번호 오름차순). 연결 전이거나 없는 어르신이면 빈 목록."""
+        ...
+
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
         """그 보호자의 어르신일 때만, 새 폰이 번호만으로 한 번 로그인할 수 있는 시간을 until(유닉스 시각)까지 연다."""
         ...
@@ -352,6 +356,10 @@ class InMemoryElderDirectory:
             self._phone_text[elder_id] = phone
             self._phones[elder_id] = wanted
             return True
+
+    def guardians_of(self, elder_id: int) -> list[int]:
+        access = self._entries.get(elder_id)
+        return [] if access is None or access.guardian_id is None else [access.guardian_id]
 
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
         with self._lock:

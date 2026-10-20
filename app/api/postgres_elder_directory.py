@@ -249,6 +249,13 @@ class PostgresElderDirectory:
             raise PhoneTaken(wanted) from exc
         return updated == 1
 
+    def guardians_of(self, elder_id: int) -> list[int]:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT guardian_id FROM elders WHERE elder_id = %s", (elder_id,)
+            ).fetchone()
+        return [] if row is None or row[0] is None else [row[0]]
+
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
         with self._pool.connection() as conn:
             updated = conn.execute(

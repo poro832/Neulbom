@@ -99,12 +99,13 @@ def withdraw_elder(
     content: Any = None,
     reports: Any = None,
     alerts: Any = None,
+    withdrawals: Any = None,
 ) -> ElderWithdrawal:
     """어르신을 지운다: 녹음 키 읽기 → 서버 디스크의 녹음 파일 → S3 녹음 최선 삭제 → 어르신 행 삭제 → (메모리 저장소 정리).
 
     보관기(app/archiver.py)는 올린 녹음을 24시간, 못 올린 녹음을 최대 30일 recordings/에 둔다. 디스크를 S3보다 먼저
     지운다 — 남겨 두면 아직 안 올린 녹음을 보관기가 탈퇴 뒤에 S3로 올린다.
-    elder_keys·contacts·content·reports·alerts는 메모리 저장소의 CASCADE 대신이다. 어르신 행이 지워진 뒤라
+    elder_keys·contacts·content·reports·alerts·withdrawals는 메모리 저장소의 CASCADE 대신이다. 어르신 행이 지워진 뒤라
     실패해도 탈퇴를 되돌리지 않고 남기기만 한다(Postgres에서는 이미 비어 있다).
     """
     keys = elders.audio_keys_of(elder_id)
@@ -117,6 +118,7 @@ def withdraw_elder(
         ("통화 내용", content),
         ("통화", reports),
         ("알림", alerts),
+        ("탈퇴 요청", withdrawals),
     ):
         if store is None:
             continue

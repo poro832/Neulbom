@@ -93,3 +93,26 @@ def test_store_errors_are_swallowed(caplog):
     elders = InMemoryElderDirectory({12: ElderAccess(1, True, "김할머니")})
     notifier = PushNotifier(devices=BrokenDevices(), elders=elders, sender=FakeSender(), spawn=run_now)
     notifier.notify(1, 12)  # 예외 없이 끝나야 한다
+
+
+def test_a_withdrawal_request_push_says_approval_is_needed():
+    sender = FakeSender()
+    notifier, _ = make(sender)
+
+    notifier.notify_withdrawal(1, 12)
+
+    assert [s[0] for s in sender.sent] == [T1, T2]
+    _, title, body, data = sender.sent[0]
+    assert (title, body, data) == ("늘봄", "김할머니 어르신 탈퇴를 요청했어요. 승인이 필요해요", {"elder_id": "12"})
+
+
+def test_a_withdrawal_request_push_without_a_name_and_without_a_sender():
+    sender = FakeSender()
+    notifier, _ = make(sender, name="")
+    notifier.notify_withdrawal(1, 12)
+    assert sender.sent[0][2] == "어르신 탈퇴를 요청했어요. 승인이 필요해요"
+
+    spawned = []
+    off = PushNotifier(devices=InMemoryDeviceStore(), elders=InMemoryElderDirectory({}), sender=None, spawn=spawned.append)
+    off.notify_withdrawal(1, 12)
+    assert spawned == []
