@@ -90,7 +90,7 @@ def make_app_kit(now: float | None = None) -> AppKit:
         reports=reports,
         alerts=alerts,
         invites=InMemoryInviteStore(),
-        links=InMemoryLinkCodeStore(clock=clock),
+        links=InMemoryLinkCodeStore(),
         wall_clock=clock,
     )
     elder_store = InMemoryElderKeyStore(wall_clock=clock)

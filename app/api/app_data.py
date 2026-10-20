@@ -106,6 +106,10 @@ LATEST_CALL_TIME = time_of_day(21, 0)
 MAX_ELDERS_PER_GUARDIAN = 10
 # 연결 코드 지문이 다른 어르신과 겹칠 때 새 코드로 다시 시도하는 횟수(1억 가지라 사실상 한 번이면 된다).
 LINK_CODE_RETRIES = 5
+# 보호자가 어르신 전화번호를 고친 뒤, 새 폰이 번호만으로 한 번 로그인할 수 있는 시간.
+PHONE_CLAIM_SECONDS = 24 * 3600
+# 틀린 번호, 열리지 않은 번호, 이미 쓴 번호, 만료 모두 같은 문장이다 — 어느 쪽인지 알려 주면 등록된 번호를 찾아내는 데 쓰인다.
+BAD_ELDER_LOGIN = "이 폰으로는 로그인할 수 없어요. 보호자에게 어르신 관리에서 번호를 확인해 달라고 부탁해 주세요"
 
 # 한 보호자의 승인 대기 상한. 코드를 찍어 보는 사람이 보호자 화면을 도배하지 못하게 한다.
 MAX_PENDING_PER_GUARDIAN = 5
@@ -147,6 +151,8 @@ class AppData:
     links: LinkCodeStore = field(default_factory=InMemoryLinkCodeStore)
     elder_signup_attempts: FailureLimiter = field(default_factory=FailureLimiter)
     link_attempts: FailureLimiter = field(default_factory=FailureLimiter)
+    # 새 폰 로그인 시도 한도(실패와 성공 모두 센다 — 인증 없는 주소라 번호를 찍어 보는 것을 늦춘다)
+    elder_login_attempts: FailureLimiter = field(default_factory=FailureLimiter)
     # 보호자 이메일 인증: Firebase 증명서 확인기(없으면 인증 주소는 닫힌다) / 서버 전체 분당 20회 실패 한도 /
     # 동시에 확인하는 수(보호자마다 하나, 서버 전체 4개 — 넘으면 기다리지 않고 429)
     email_verifier: EmailVerifier | None = None
@@ -248,6 +254,10 @@ class ElderSignupRequest(BaseModel):
     name: str = Field(min_length=1, max_length=30)
     phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
     agreed: bool
+
+
+class ElderLoginRequest(BaseModel):
+    phone: str = Field(pattern=r"^[0-9+\- ]{9,20}$")
 
 
 class LinkRequest(BaseModel):
@@ -553,9 +563,12 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if not changed:
             raise HTTPException(status_code=404, detail=NO_ELDER)
         removed = data.elder_keys.remove_for_elder(elder_id)
+        # 새 폰은 24시간 안에 번호만으로 한 번 로그인할 수 있다(연결 코드를 따로 받지 않는다).
+        until = data.wall_clock() + PHONE_CLAIM_SECONDS
+        data.elders.open_new_phone_login(elder_id, guardian_id, until)
         # 번호·이름은 남기지 않는다.
         logger.info("어르신 전화번호를 바꿨다 elder_id=%s guardian_id=%s 지운 열쇠=%s", elder_id, guardian_id, removed)
-        return {"phone": phone}
+        return {"phone": phone, "new_phone_login_until": iso_kst(until)}
 
     @app.get("/v1/guardian/alerts")
     @guarded
@@ -992,6 +1005,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         try:
             data.content.agree_share(elder_id)
             data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
+            link_code = fresh_link_code(elder_id)
         except Exception:
             # 행만 남고 열쇠가 없으면 번호가 막히고 연결 코드도 못 받는다 — 방금 만든 행을 거둬 다시 가입하게 한다.
             try:
@@ -1002,34 +1016,67 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                 logger.warning("어르신 가입 도중 저장소 오류로 가입을 되돌렸다 elder_id=%s", elder_id)
             raise
         logger.info("연결 전 어르신이 가입했다 elder_id=%s key=%s", elder_id, new.key_prefix)
-        return {"elder_key": new.key, "status": STATUS_UNLINKED}
+        return {"elder_key": new.key, "status": STATUS_UNLINKED, "link_code": link_code}
 
-    @app.post("/v1/me/link-code")
-    @guarded
-    def issue_link_code(authorization: str | None = Header(default=None)) -> dict:
-        elder_id = elder_id_of(authorization)
-        access = data.elders.get(elder_id)
-        if access is None:
-            raise HTTPException(status_code=401, detail=NEED_KEY)
-        if access.guardian_id is not None:
-            raise HTTPException(status_code=409, detail=ALREADY_LINKED)
+    def fresh_link_code(elder_id: int) -> str:
+        """새 고정 코드를 정한다(이전 코드는 무효). 지문이 겹치면 다시 뽑는다."""
         for _ in range(LINK_CODE_RETRIES):
             code = new_invite_code()
             try:
-                expires_at = data.links.issue(elder_id, hash_invite_code(code))
+                data.links.issue(elder_id, hash_invite_code(code), code)
             except CodeCollision:
                 continue
-            # 코드 원문은 응답에만 있다. 로그에는 발급 사실만 남긴다.
-            logger.info("연결 코드를 발급했다 elder_id=%s", elder_id)
-            return {"code": code, "expires_at": iso_kst(expires_at)}
+            return code
         raise HTTPException(status_code=503, detail=UNAVAILABLE)
 
-    def elder_for_link_code(code: str, *, consume: bool) -> int:
-        """코드의 어르신. 틀림·만료·소진은 모두 같은 401이고 같은 한도로 센다."""
+    @app.get("/v1/me/link-code")
+    @guarded
+    def show_link_code(authorization: str | None = Header(default=None)) -> dict:
+        """내 고정 연결 코드. 언제든 다시 본다(연결된 뒤에도). 아직 없으면 지금 정한다."""
+        elder_id = elder_id_of(authorization)
+        if data.elders.get(elder_id) is None:
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        code = data.links.code_of(elder_id)
+        if code is None:
+            code = fresh_link_code(elder_id)
+            logger.info("연결 코드를 정했다 elder_id=%s", elder_id)
+        return {"code": code}
+
+    @app.post("/v1/elders/login")
+    @guarded
+    def elder_login(body: ElderLoginRequest) -> dict:
+        """새 폰의 어르신 로그인. 보호자가 번호를 고쳐 둔 번호만, 24시간 안에, 딱 한 번 열쇠를 받는다."""
+        if data.elder_login_attempts.blocked():
+            raise HTTPException(status_code=429, detail=TRY_LATER)
+        data.elder_login_attempts.record_failure()  # 성공도 센다 — 번호를 찍어 보는 것을 늦춘다
+        elder_id = data.elders.claim_new_phone(body.phone.strip(), data.wall_clock())
+        if elder_id is None:
+            logger.warning("새 폰 로그인 실패")
+            raise HTTPException(status_code=401, detail=BAD_ELDER_LOGIN)
+        new = generate_elder_key()
+        data.elder_keys.replace(elder_id=elder_id, key_prefix=new.key_prefix, key_hash=new.key_hash)
+        access = data.elders.get(elder_id)
+        logger.info("어르신 새 폰이 로그인했다 elder_id=%s key=%s", elder_id, new.key_prefix)
+        return {"elder_key": new.key, "elder_name": "" if access is None else access.name}
+
+    @app.post("/v1/me/link-code")
+    @guarded
+    def renew_link_code(authorization: str | None = Header(default=None)) -> dict:
+        """새 고정 코드를 만든다. 코드가 새어 나갔을 때 쓴다 — 이전 코드는 바로 못 쓰고, 이미 연결된 보호자는 그대로다."""
+        elder_id = elder_id_of(authorization)
+        if data.elders.get(elder_id) is None:
+            raise HTTPException(status_code=401, detail=NEED_KEY)
+        code = fresh_link_code(elder_id)
+        # 코드 원문은 응답에만 있다. 로그에는 바꾼 사실만 남긴다.
+        logger.info("연결 코드를 새로 만들었다 elder_id=%s", elder_id)
+        return {"code": code}
+
+    def elder_for_link_code(code: str) -> int:
+        """코드의 어르신. 틀린 코드는 401이고 한도로 센다. 고정 코드라 연결에 써도 코드는 그대로다."""
         if data.link_attempts.blocked():
             raise HTTPException(status_code=429, detail=TRY_LATER)
         code_hash = hash_invite_code(code)
-        elder_id = data.links.consume(code_hash) if consume else data.links.find(code_hash)
+        elder_id = data.links.find(code_hash)
         if elder_id is None:
             data.link_attempts.record_failure()
             logger.warning("연결 실패")
@@ -1040,7 +1087,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     @guarded
     def preview_link(body: LinkRequest, authorization: str | None = Header(default=None)) -> dict:
         active_guardian_id_of(authorization)
-        elder_id = elder_for_link_code(body.code, consume=False)
+        elder_id = elder_for_link_code(body.code)
         access = data.elders.get(elder_id)
         phone = data.elders.phone_of(elder_id)
         if access is None or phone is None or access.guardian_id is not None:
@@ -1056,10 +1103,10 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         # 코드를 쓰기 전에 확인한다 — 한도에 걸린 보호자가 코드를 태우지 않게.
         if len(data.elders.elders_of(guardian_id)) >= MAX_ELDERS_PER_GUARDIAN:
             raise HTTPException(status_code=409, detail=TOO_MANY_ELDERS)
-        elder_id = elder_for_link_code(body.code, consume=True)
+        elder_id = elder_for_link_code(body.code)
         # 보호자가 이 확인을 누르는 것이 승인이다: 연결과 전화 동의(consent_at)가 함께 기록된다.
         if not data.elders.link(elder_id, guardian_id):
-            # 코드는 이미 소진됐다(그 사이 다른 경로로 연결된 어르신). 어르신이 새 코드를 만든다.
+            # 그 사이 다른 경로로 이미 연결된 어르신이다.
             data.link_attempts.record_failure()
             logger.warning("연결 실패")
             raise HTTPException(status_code=401, detail=BAD_LINK)

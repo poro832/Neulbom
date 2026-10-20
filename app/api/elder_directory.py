@@ -147,6 +147,14 @@ class ElderDirectory(Protocol):
         """
         ...
 
+    def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
+        """그 보호자의 어르신일 때만, 새 폰이 번호만으로 한 번 로그인할 수 있는 시간을 until(유닉스 시각)까지 연다."""
+        ...
+
+    def claim_new_phone(self, phone: str, now: float) -> int | None:
+        """열려 있는(만료 전) 번호면 닫고 어르신 번호를 돌려준다. 동시에 와도 한 쪽만 얻는다. 아니면 None."""
+        ...
+
     # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
 
     def detach_all_from(self, guardian_id: int) -> list[int]:
@@ -193,6 +201,8 @@ class InMemoryElderDirectory:
         self._profiles = dict(guardians or {})
         # 바꾼 안부 전화 시각만 둔다. 없으면 DEFAULT_CALL_TIME이다(DB의 기본값과 같게).
         self._call_times: dict[int, time] = {}
+        # 새 폰 로그인이 열린 어르신과 닫히는 시각.
+        self._claims: dict[int, float] = {}
         # 메모리 모드에는 통화 표가 없다. 녹음 키는 시험이 add_audio_key로 심는다.
         self._audio_keys: dict[int, list[str]] = {}
         self._guardians = {
@@ -215,6 +225,7 @@ class InMemoryElderDirectory:
         self._phone_text.pop(elder_id, None)
         self._phones.pop(elder_id, None)
         self._call_times.pop(elder_id, None)
+        self._claims.pop(elder_id, None)
         self._audio_keys.pop(elder_id, None)
 
     def get(self, elder_id: int) -> ElderAccess | None:
@@ -341,6 +352,26 @@ class InMemoryElderDirectory:
             self._phone_text[elder_id] = phone
             self._phones[elder_id] = wanted
             return True
+
+    def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
+        with self._lock:
+            access = self._entries.get(elder_id)
+            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+                return False
+            self._claims[elder_id] = until
+            return True
+
+    def claim_new_phone(self, phone: str, now: float) -> int | None:
+        wanted = digits_of(phone)
+        if not wanted:
+            return None
+        with self._lock:
+            for elder_id, digits in self._phones.items():
+                if digits != wanted:
+                    continue
+                until = self._claims.pop(elder_id, None)
+                return elder_id if until is not None and until > now else None
+            return None
 
     def detach_all_from(self, guardian_id: int) -> list[int]:
         with self._lock:
