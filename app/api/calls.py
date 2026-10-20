@@ -117,7 +117,7 @@ def build_app(
                 raise HTTPException(status_code=401, detail="열쇠가 필요합니다")
 
             access = elders.get(body.elder_id)
-            if access is None or access.guardian_id != guardian_id:
+            if access is None or not access.has_guardian(guardian_id):
                 raise HTTPException(status_code=404, detail="등록되지 않은 어르신입니다")
             if not access.consenting:
                 raise HTTPException(status_code=403, detail="어르신의 동의가 없습니다")

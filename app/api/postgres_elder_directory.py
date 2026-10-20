@@ -10,10 +10,18 @@ from psycopg.errors import UniqueViolation
 from app.api.elder_directory import (
     ElderAccess,
     ElderRef,
+    MAX_GUARDIANS_PER_ELDER,
     GuardianProfile,
     PendingLimit,
     PhoneTaken,
     digits_of,
+)
+
+
+# 이 보호자가 그 어르신을 함께 보는가(elders 행을 기준으로 쓴다).
+MEMBER = (
+    "EXISTS (SELECT 1 FROM elder_guardians g "
+    "WHERE g.elder_id = elders.elder_id AND g.guardian_id = %s)"
 )
 
 
@@ -24,13 +32,22 @@ class PostgresElderDirectory:
     def get(self, elder_id: int) -> ElderAccess | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT guardian_id, consent_at IS NOT NULL, name, agreed_at IS NOT NULL "
+                "SELECT guardian_id, consent_at IS NOT NULL, name, agreed_at IS NOT NULL, "
+                "  ARRAY(SELECT g.guardian_id FROM elder_guardians g "
+                "        WHERE g.elder_id = elders.elder_id AND g.guardian_id IS DISTINCT FROM elders.guardian_id "
+                "        ORDER BY g.guardian_id) "
                 "FROM elders WHERE elder_id = %s",
                 (elder_id,),
             ).fetchone()
         if row is None:
             return None
-        return ElderAccess(guardian_id=row[0], consenting=row[1], name=row[2], agreed=row[3])
+        return ElderAccess(
+            guardian_id=row[0],
+            consenting=row[1],
+            name=row[2],
+            agreed=row[3],
+            co_guardians=tuple(row[4]) if row[0] is not None else (),
+        )
 
     def find_by_phone(self, phone: str) -> int | None:
         wanted = digits_of(phone)
@@ -52,11 +69,15 @@ class PostgresElderDirectory:
                 "  CASE WHEN consent_at IS NOT NULL THEN 'active' "
                 "       WHEN agreed_at IS NOT NULL THEN 'pending' "
                 "       ELSE 'unconsented' END, "
-                "  CASE WHEN consent_at IS NULL AND agreed_at IS NOT NULL THEN phone_number END "
-                "FROM elders WHERE guardian_id = %s ORDER BY elder_id",
+                "  CASE WHEN consent_at IS NULL AND agreed_at IS NOT NULL THEN phone_number END, "
+                "  (SELECT count(*) FROM elder_guardians c WHERE c.elder_id = elders.elder_id) "
+                "FROM elders WHERE " + MEMBER + " ORDER BY elder_id",
                 (guardian_id,),
             ).fetchall()
-        return [ElderRef(elder_id=r[0], name=r[1], status=r[2], phone=r[3]) for r in rows]
+        return [
+            ElderRef(elder_id=r[0], name=r[1], status=r[2], phone=r[3], guardian_count=r[4])
+            for r in rows
+        ]
 
     def guardian_profile(self, guardian_id: int) -> GuardianProfile | None:
         with self._pool.connection() as conn:
@@ -110,6 +131,12 @@ class PostgresElderDirectory:
                 "UPDATE elders SET guardian_id = %s WHERE elder_id = %s",
                 (guardian_id, elder_id),
             ).rowcount
+            if updated == 1:
+                # 새 대표는 표에 들어가 있다(트리거). 운영 도구의 배정은 보호자를 바꾸는 일이라 옛 보호자는 뺀다.
+                conn.execute(
+                    "DELETE FROM elder_guardians WHERE elder_id = %s AND guardian_id <> %s",
+                    (elder_id, guardian_id),
+                )
         return updated == 1
 
     def phone_of(self, elder_id: int) -> str | None:
@@ -151,14 +178,34 @@ class PostgresElderDirectory:
             ).rowcount
         return deleted == 1
 
-    def link(self, elder_id: int, guardian_id: int) -> bool:
+    def link(
+        self, elder_id: int, guardian_id: int, max_guardians: int = MAX_GUARDIANS_PER_ELDER
+    ) -> bool:
+        # 어르신 행을 잠근 채로 첫 연결인지 추가 연결인지 가른다 — 동시에 와도 대표는 한 명이고 한도를 넘지 않는다.
         with self._pool.connection() as conn:
-            updated = conn.execute(
-                "UPDATE elders SET guardian_id = %s, consent_at = now() "
-                "WHERE elder_id = %s AND guardian_id IS NULL AND agreed_at IS NOT NULL",
-                (guardian_id, elder_id),
+            row = conn.execute(
+                "SELECT guardian_id, consent_at IS NOT NULL, agreed_at IS NOT NULL "
+                "FROM elders WHERE elder_id = %s FOR UPDATE",
+                (elder_id,),
+            ).fetchone()
+            if row is None or not row[2]:
+                return False
+            if row[0] is None:
+                # 대표가 된다. 보호자 목록에는 트리거가 넣는다.
+                conn.execute(
+                    "UPDATE elders SET guardian_id = %s, consent_at = now() WHERE elder_id = %s",
+                    (guardian_id, elder_id),
+                )
+                return True
+            if not row[1]:
+                return False
+            added = conn.execute(
+                "INSERT INTO elder_guardians (elder_id, guardian_id) SELECT %s, %s "
+                "WHERE (SELECT count(*) FROM elder_guardians WHERE elder_id = %s) < %s "
+                "ON CONFLICT DO NOTHING",
+                (elder_id, guardian_id, elder_id, max_guardians),
             ).rowcount
-        return updated == 1
+        return added == 1
 
     def create_pending(
         self, *, guardian_id: int, name: str, phone: str, max_pending: int
@@ -223,7 +270,7 @@ class PostgresElderDirectory:
         # 스케줄러의 명부가 이 칸을 매분 새로 읽는다 — 저장하면 다음 확인부터 적용된다.
         with self._pool.connection() as conn:
             updated = conn.execute(
-                "UPDATE elders SET call_time = %s WHERE elder_id = %s AND guardian_id = %s",
+                "UPDATE elders SET call_time = %s WHERE elder_id = %s AND " + MEMBER,
                 (value, elder_id, guardian_id),
             ).rowcount
         return updated == 1
@@ -242,7 +289,7 @@ class PostgresElderDirectory:
                 if taken:
                     raise PhoneTaken(wanted)
                 updated = conn.execute(
-                    "UPDATE elders SET phone_number = %s WHERE elder_id = %s AND guardian_id = %s",
+                    "UPDATE elders SET phone_number = %s WHERE elder_id = %s AND " + MEMBER,
                     (phone, elder_id, guardian_id),
                 ).rowcount
         except errors.UniqueViolation as exc:
@@ -251,16 +298,17 @@ class PostgresElderDirectory:
 
     def guardians_of(self, elder_id: int) -> list[int]:
         with self._pool.connection() as conn:
-            row = conn.execute(
-                "SELECT guardian_id FROM elders WHERE elder_id = %s", (elder_id,)
-            ).fetchone()
-        return [] if row is None or row[0] is None else [row[0]]
+            rows = conn.execute(
+                "SELECT guardian_id FROM elder_guardians WHERE elder_id = %s ORDER BY guardian_id",
+                (elder_id,),
+            ).fetchall()
+        return [row[0] for row in rows]
 
     def open_new_phone_login(self, elder_id: int, guardian_id: int, until: float) -> bool:
         with self._pool.connection() as conn:
             updated = conn.execute(
                 "UPDATE elders SET phone_claim_until = to_timestamp(%s) "
-                "WHERE elder_id = %s AND guardian_id = %s",
+                "WHERE elder_id = %s AND " + MEMBER,
                 (until, elder_id, guardian_id),
             ).rowcount
         return updated == 1
@@ -289,12 +337,28 @@ class PostgresElderDirectory:
         # 보호자 행을 지우기 **전에** 부른다. elders.guardian_id가 ON DELETE CASCADE라 그대로 지우면 어르신까지
         # 지워진다. consent_at을 비우면 스케줄러 명부(consent_at IS NOT NULL)에서 빠져 안부 전화가 멈춘다.
         # agreed_at·share_agreed_at·call_time과 통화 기록은 건드리지 않는다.
+        # 다른 보호자가 남은 어르신은 이어진다: 대표였다면 남은 사람 중 번호가 가장 작은 사람이 대표가 되고 전화 동의는 그대로다.
         with self._pool.connection() as conn:
-            rows = conn.execute(
-                "UPDATE elders SET guardian_id = NULL, consent_at = NULL WHERE guardian_id = %s RETURNING elder_id",
-                (guardian_id,),
+            gone = conn.execute(
+                "DELETE FROM elder_guardians WHERE guardian_id = %s RETURNING elder_id", (guardian_id,)
             ).fetchall()
-        return sorted(row[0] for row in rows)
+            primary = conn.execute(
+                "SELECT elder_id FROM elders WHERE guardian_id = %s", (guardian_id,)
+            ).fetchall()
+            affected = sorted({row[0] for row in gone} | {row[0] for row in primary})
+            if affected:
+                conn.execute(
+                    "UPDATE elders SET "
+                    "  guardian_id = CASE WHEN guardian_id = %s THEN ("
+                    "    SELECT min(g.guardian_id) FROM elder_guardians g WHERE g.elder_id = elders.elder_id"
+                    "  ) ELSE guardian_id END, "
+                    "  consent_at = CASE WHEN EXISTS ("
+                    "    SELECT 1 FROM elder_guardians g WHERE g.elder_id = elders.elder_id"
+                    "  ) THEN consent_at ELSE NULL END "
+                    "WHERE elder_id = ANY(%s)",
+                    (guardian_id, affected),
+                )
+        return affected
 
     def delete_elder(self, elder_id: int) -> bool:
         # calls(→ call_metrics·call_transcripts·call_turns·call_reports·call_medication·call_mentions·

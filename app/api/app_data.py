@@ -29,6 +29,7 @@ from app.api.contacts import ContactStore, TooManyContacts
 from app.api.devices import DeviceStore, InMemoryDeviceStore
 from app.api.elder_auth import ElderAuth, ElderKeyStore, elder_key_label, generate_elder_key
 from app.api.elder_directory import (
+    MAX_GUARDIANS_PER_ELDER,
     STATUS_PENDING,
     STATUS_UNLINKED,
     ElderDirectory,
@@ -90,6 +91,8 @@ BAD_LINK = "연결 코드를 확인해 주세요"
 LINK_WAITING = "보호자 연결을 기다리고 있어요"
 ALREADY_LINKED = "이미 보호자가 연결돼 있어요"
 TOO_MANY_ELDERS = "더 이상 어르신을 연결할 수 없어요"
+TOO_MANY_GUARDIANS = "이 어르신은 보호자가 가득 찼어요"
+ALREADY_LINKED = "이미 연결된 어르신이에요"
 PHONE_USED = "이미 등록된 번호예요"
 BAD_MONTH = "달을 확인해 주세요"
 BAD_PASSWORD = "비밀번호를 확인해 주세요"
@@ -372,7 +375,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
 
     def owned_elder(guardian_id: int, elder_id: int):
         access = data.elders.get(elder_id)
-        if access is None or access.guardian_id != guardian_id:
+        if access is None or not access.has_guardian(guardian_id):
             raise HTTPException(status_code=404, detail=NO_ELDER)
         return access
 
@@ -431,6 +434,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
                     "week_alerts": s.week_alerts,
                     "status": s.status,
                     "phone": s.phone,
+                    "guardian_count": s.guardian_count,
                 }
                 for s in summaries
             ],
@@ -634,11 +638,11 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
     def my_contacts(authorization: str | None = Header(default=None)) -> dict:
         elder_id = ready_elder_id_of(authorization)
         access = data.elders.get(elder_id)
-        profile = None if access is None else data.elders.guardian_profile(access.guardian_id)
+        profiles = [] if access is None else [data.elders.guardian_profile(g) for g in access.guardian_ids]
         return {
-            "guardians": []
-            if profile is None
-            else [{"name": profile.name, "relation": "보호자", "phone": profile.phone}],
+            "guardians": [
+                {"name": p.name, "relation": "보호자", "phone": p.phone} for p in profiles if p is not None
+            ],
             "contacts": [
                 {"contact_id": c.contact_id, "name": c.name, "relation": c.relation, "phone": c.phone}
                 for c in data.contacts.list(elder_id)
@@ -1263,18 +1267,34 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             raise HTTPException(status_code=401, detail=BAD_LINK)
         return elder_id
 
+    def linkable(access, guardian_id: int) -> bool:
+        """연결 코드로 이을 수 있는 어르신인가 — 아직 보호자가 없거나, 전화 동의가 끝난 어르신(추가 보호자)."""
+        return access.guardian_id is None or access.consenting
+
+    def refuse_if_full_or_member(access, guardian_id: int) -> None:
+        if access.has_guardian(guardian_id):
+            raise HTTPException(status_code=409, detail=ALREADY_LINKED)
+        if len(access.guardian_ids) >= MAX_GUARDIANS_PER_ELDER:
+            raise HTTPException(status_code=409, detail=TOO_MANY_GUARDIANS)
+
     @app.post("/v1/guardian/link/preview")
     @guarded
     def preview_link(body: LinkRequest, authorization: str | None = Header(default=None)) -> dict:
-        active_guardian_id_of(authorization)
+        guardian_id = active_guardian_id_of(authorization)
         elder_id = elder_for_link_code(body.code)
         access = data.elders.get(elder_id)
         phone = data.elders.phone_of(elder_id)
-        if access is None or phone is None or access.guardian_id is not None:
+        if access is None or phone is None or not linkable(access, guardian_id):
             data.link_attempts.record_failure()
             logger.warning("연결 실패")
             raise HTTPException(status_code=401, detail=BAD_LINK)
-        return {"name": access.name, "phone_masked": mask_phone(phone)}
+        refuse_if_full_or_member(access, guardian_id)
+        # 이미 다른 보호자가 있으면 숫자만 알린다 — 이름은 알리지 않는다.
+        return {
+            "name": access.name,
+            "phone_masked": mask_phone(phone),
+            "other_guardians": len(access.guardian_ids),
+        }
 
     @app.post("/v1/guardian/link")
     @guarded
@@ -1284,14 +1304,27 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if len(data.elders.elders_of(guardian_id)) >= MAX_ELDERS_PER_GUARDIAN:
             raise HTTPException(status_code=409, detail=TOO_MANY_ELDERS)
         elder_id = elder_for_link_code(body.code)
-        # 보호자가 이 확인을 누르는 것이 승인이다: 연결과 전화 동의(consent_at)가 함께 기록된다.
-        if not data.elders.link(elder_id, guardian_id):
-            # 그 사이 다른 경로로 이미 연결된 어르신이다.
+        before = data.elders.get(elder_id)
+        if before is not None and before.guardian_id is not None:
+            refuse_if_full_or_member(before, guardian_id)
+        # 보호자가 이 확인을 누르는 것이 승인이다: 첫 보호자면 연결과 전화 동의(consent_at)가 함께 기록되고,
+        # 이미 보호자가 있으면 추가 보호자로 들어간다(어르신 확인은 필요 없다 — 코드 입력이 곧 승인).
+        if not data.elders.link(elder_id, guardian_id, MAX_GUARDIANS_PER_ELDER):
+            # 그 사이 다른 경로로 이미 연결되었거나 한도에 닿았다.
             data.link_attempts.record_failure()
             logger.warning("연결 실패")
             raise HTTPException(status_code=401, detail=BAD_LINK)
         access = data.elders.get(elder_id)
         logger.info("어르신을 연결했다 elder_id=%s guardian_id=%s", elder_id, guardian_id)
+        if before is not None and before.guardian_id is not None:
+            # 추가 보호자가 들어왔다 — 이미 보던 보호자들에게 알린다.
+            notify = getattr(data.notifier, "notify_linked", None)
+            if notify is not None:
+                for other in before.guardian_ids:
+                    try:
+                        notify(other, elder_id)
+                    except Exception:
+                        logger.exception("연결 푸시를 보내지 못했다 guardian_id=%s", other)
         return {"elder_id": elder_id, "name": "" if access is None else access.name, "status": "active"}
 
     @app.post("/v1/signup")
@@ -1484,7 +1517,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         # 없는 통화, 남의 통화, 동의 전은 모두 같은 404다 — 존재 여부를 알려 주지 않는다.
         if (
             access is None
-            or access.guardian_id != guardian_id
+            or not access.has_guardian(guardian_id)
             or not data.content.share_agreed(elder_id)
         ):
             raise HTTPException(status_code=404, detail=NO_CALL)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -25,10 +27,11 @@ def kst(*args) -> float:
 class World:
     """두 구현에 같은 통화를 심는 도우미."""
 
-    def __init__(self, reports, add_call, add_alert):
+    def __init__(self, reports, add_call, add_alert, join=None):
         self.reports = reports
         self.add_call = add_call
         self.add_alert = add_alert
+        self.join = join  # join(elder_id, guardian_id): 그 보호자도 그 어르신을 함께 본다
 
 
 def _memory():
@@ -52,7 +55,11 @@ def _memory():
             alert_type="risk_rise", severity="warning", message="m",
         )
 
-    return World(reports, add_call, add_alert)
+    def join(elder_id, guardian_id):
+        access = directory.get(elder_id)
+        directory._entries[elder_id] = replace(access, co_guardians=(*access.co_guardians, guardian_id))
+
+    return World(reports, add_call, add_alert, join)
 
 
 def _postgres():
@@ -80,7 +87,13 @@ def _postgres():
             alert_type="risk_rise", severity="warning", message="m",
         )
 
-    return World(PostgresReports(pool=pool), add_call, add_alert)
+    def join(elder_id, guardian_id):
+        with pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO elder_guardians (elder_id, guardian_id) VALUES (%s, %s)", (elder_id, guardian_id)
+            )
+
+    return World(PostgresReports(pool=pool), add_call, add_alert, join)
 
 
 @pytest.fixture(
@@ -318,3 +331,16 @@ def test_in_memory_summaries_show_a_pending_elders_phone():
 
     assert by_id[pending].status == "pending" and by_id[pending].phone == "010-9999-1111"
     assert by_id[12].status == "active" and by_id[12].phone is None
+
+
+def test_a_second_guardian_sees_the_same_elder_with_the_same_numbers_and_the_count(world):
+    world.add_call(call_id=1, elder_id=12, status="completed", created_at=kst(2026, 10, 5, 9), score=10)
+    world.join(12, 2)
+
+    first = {s.elder_id: s for s in world.reports.elder_summaries(1, SUNDAY)}
+    second = {s.elder_id: s for s in world.reports.elder_summaries(2, SUNDAY)}
+
+    assert sorted(second) == [12, 14]  # 자기 어르신 14와 함께 보는 12
+    assert second[12].week_calls == first[12].week_calls == 1
+    assert first[12].guardian_count == second[12].guardian_count == 2
+    assert first[13].guardian_count == 1 and second[14].guardian_count == 1

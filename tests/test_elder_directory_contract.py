@@ -247,8 +247,7 @@ def test_linking_fills_guardian_and_consent_exactly_once(directory):
 
     access = directory.get(elder_id)
     assert access.guardian_id == 1 and access.consenting and access.status == "active"
-    assert directory.link(elder_id, 1) is False
-    assert directory.link(elder_id, 2) is False  # 이미 연결된 어르신은 다른 보호자가 가져가지 못한다
+    assert directory.link(elder_id, 1) is False  # 같은 보호자가 또 연결해도 달라지지 않는다
 
 
 def test_linking_an_unknown_elder_is_false(directory):
@@ -580,3 +579,128 @@ def test_two_phones_using_the_same_open_window_get_one_winner(directory):
         thread.join()
 
     assert sorted(results, key=lambda r: r is None) == [13, None]
+
+
+# ------------------------------------------------ 여러 보호자가 한 어르신을 함께 본다
+
+
+def linked_elder(directory, phone="010-9999-1111"):
+    elder_id = directory.create_unlinked(name="홍길동", phone=phone)
+    assert directory.link(elder_id, 1) is True
+    return elder_id
+
+
+def test_a_second_guardian_joins_without_changing_the_first_or_the_consent(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+
+    assert directory.link(elder_id, second) is True
+
+    access = directory.get(elder_id)
+    assert access.guardian_id == 1 and access.consenting and access.status == "active"
+    assert access.guardian_ids == (1, second)
+    assert directory.guardians_of(elder_id) == [1, second]
+    assert directory.link(elder_id, second) is False  # 이미 보호자다
+
+
+def test_both_guardians_list_the_elder_with_the_count_and_not_the_names(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    directory.link(elder_id, second)
+
+    for guardian in (1, second):
+        ref = next(r for r in directory.elders_of(guardian) if r.elder_id == elder_id)
+        assert ref.status == "active" and ref.guardian_count == 2
+
+
+def test_every_guardian_can_change_the_call_time_and_the_phone(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    directory.link(elder_id, second)
+
+    assert directory.set_call_time(elder_id, second, time(6, 45)) is True
+    assert directory.call_time_of(elder_id) == time(6, 45)
+    assert directory.set_phone(elder_id, second, "010-8888-7777") is True
+    assert directory.phone_of(elder_id) == "010-8888-7777"
+    assert directory.open_new_phone_login(elder_id, second, 5000.0) is True
+    assert directory.claim_new_phone("010-8888-7777", 1000.0) == elder_id
+
+
+def test_a_stranger_still_cannot_change_anything(directory):
+    elder_id = linked_elder(directory)
+    stranger = directory.add_guardian("남", "010-5555-6666")
+
+    assert directory.set_call_time(elder_id, stranger, time(6, 45)) is False
+    assert directory.set_phone(elder_id, stranger, "010-8888-7777") is False
+    assert directory.open_new_phone_login(elder_id, stranger, 5000.0) is False
+    assert directory.elders_of(stranger) == []
+
+
+def test_the_limit_of_guardians_per_elder_is_enforced(directory):
+    elder_id = linked_elder(directory)
+    joined = [directory.add_guardian(f"보호자 {i}", f"010-0000-00{i:02d}") for i in range(2, 5)]
+    for guardian in joined:
+        assert directory.link(elder_id, guardian, 4) is True
+    extra = directory.add_guardian("다섯째", "010-0000-0099")
+
+    assert directory.link(elder_id, extra, 4) is False  # 4명이 가득 찼다
+    assert directory.link(elder_id, extra, 5) is True
+    assert directory.guardians_of(elder_id) == sorted([1, *joined, extra])
+
+
+def test_a_pending_elder_cannot_be_joined_by_another_guardian(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert directory.link(12, other) is False  # 어르신 12는 보호자 1의 승인 대기다
+
+
+def test_one_guardian_leaving_keeps_the_elder_for_the_others(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    directory.link(elder_id, second)
+
+    assert directory.detach_all_from(second) == [elder_id]
+
+    access = directory.get(elder_id)
+    assert access.guardian_ids == (1,) and access.consenting and access.status == "active"
+    assert directory.elders_of(second) == []
+
+
+def test_the_primary_leaving_hands_the_role_to_the_smallest_remaining_id(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    third = directory.add_guardian("셋째", "010-5555-6666")
+    directory.link(elder_id, third)
+    directory.link(elder_id, second)
+
+    assert elder_id in directory.detach_all_from(1)
+
+    access = directory.get(elder_id)
+    assert access.guardian_id == second and access.guardian_ids == (second, third)
+    assert access.consenting and access.status == "active"  # 안부 전화는 계속 나간다
+
+
+def test_the_last_guardian_leaving_unlinks_the_elder(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    directory.link(elder_id, second)
+
+    directory.detach_all_from(1)
+    directory.detach_all_from(second)
+
+    access = directory.get(elder_id)
+    assert access.guardian_id is None and access.consenting is False and access.status == "unlinked"
+    assert directory.guardians_of(elder_id) == []
+    assert directory.link(elder_id, 1) is True  # 새 보호자가 다시 이어받는다
+
+
+def test_an_admin_assignment_replaces_the_guardians(directory):
+    elder_id = linked_elder(directory)
+    second = directory.add_guardian("둘째", "010-3333-4444")
+    directory.link(elder_id, second)
+    third = directory.add_guardian("셋째", "010-5555-6666")
+
+    assert directory.assign_elder(elder_id, third) is True
+
+    assert directory.get(elder_id).guardian_ids == (third,)
+    assert directory.guardians_of(elder_id) == [third]

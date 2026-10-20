@@ -63,15 +63,22 @@ class AlertRules:
             if access is None or access.guardian_id is None:
                 logger.warning("알림을 받을 보호자를 모른다 — 버린다 elder_id=%s", elder_id)
                 return
-            created = self._alerts.raise_alert(
-                elder_id=elder_id,
-                guardian_id=access.guardian_id,
-                call_id=call_id,
-                alert_type=alert_type,
-                severity=severity,
-                message=message,
-            )
-            if created:
+            # 함께 보는 보호자 전원에게 한 건씩. 한 명이 실패해도 나머지는 계속한다.
+            for guardian_id in access.guardian_ids:
+                try:
+                    created = self._alerts.raise_alert(
+                        elder_id=elder_id,
+                        guardian_id=guardian_id,
+                        call_id=call_id,
+                        alert_type=alert_type,
+                        severity=severity,
+                        message=message,
+                    )
+                except Exception:
+                    logger.exception("알림 생성 실패 call_id=%s elder_id=%s guardian_id=%s", call_id, elder_id, guardian_id)
+                    continue
+                if not created:
+                    continue
                 logger.info(
                     "알림을 남겼다 call_id=%s elder_id=%s type=%s severity=%s",
                     call_id,
@@ -81,7 +88,7 @@ class AlertRules:
                 )
                 if self._notifier is not None:
                     try:
-                        self._notifier.notify(access.guardian_id, elder_id)
+                        self._notifier.notify(guardian_id, elder_id)
                     except Exception:
                         # 푸시 때문에 알림 저장이 막히지 않는다(바깥 except가 '알림 생성 실패'로 오해하지 않게 따로 잡는다).
                         logger.exception("푸시를 시작하지 못했다 call_id=%s elder_id=%s", call_id, elder_id)

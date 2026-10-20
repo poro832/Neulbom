@@ -53,6 +53,30 @@ CREATE TABLE elders (
 );
 
 CREATE INDEX elders_guardian_idx ON elders (guardian_id);
+
+-- 어르신을 함께 보는 보호자들. elders.guardian_id는 그중 대표(맨 먼저 연결한 사람)다.
+CREATE TABLE elder_guardians (
+    elder_id    BIGINT NOT NULL REFERENCES elders(elder_id) ON DELETE CASCADE,
+    guardian_id BIGINT NOT NULL REFERENCES guardians(guardian_id) ON DELETE CASCADE,
+    linked_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (elder_id, guardian_id)
+);
+CREATE INDEX elder_guardians_guardian_idx ON elder_guardians (guardian_id);
+
+-- 대표 보호자 칸에 누군가 적히면 그 사람도 보호자 목록에 들어간다.
+CREATE FUNCTION elder_primary_guardian_sync() RETURNS trigger AS $$
+BEGIN
+    INSERT INTO elder_guardians (elder_id, guardian_id)
+    VALUES (NEW.elder_id, NEW.guardian_id)
+    ON CONFLICT DO NOTHING;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER elders_primary_guardian_sync
+AFTER INSERT OR UPDATE OF guardian_id ON elders
+FOR EACH ROW WHEN (NEW.guardian_id IS NOT NULL)
+EXECUTE FUNCTION elder_primary_guardian_sync();
 -- 스케줄러가 "지금 걸 어르신"을 찾는 쿼리. 동의 안 한 분은 아예 인덱스에 없다.
 CREATE INDEX elders_due_idx ON elders (call_time) WHERE consent_at IS NOT NULL;
 
@@ -366,7 +390,7 @@ CREATE TABLE contacts (
 CREATE INDEX contacts_elder_idx ON contacts (elder_id, contact_id);
 
 -- 웹훅이 다시 와도 한 통화에 같은 종류 알림이 둘 생기지 않게 한다.
-CREATE UNIQUE INDEX alerts_call_type_idx ON alerts (call_id, alert_type) WHERE call_id IS NOT NULL;
+CREATE UNIQUE INDEX alerts_call_type_idx ON alerts (call_id, alert_type, guardian_id) WHERE call_id IS NOT NULL;
 
 -- 보호자 개인 코드. 지문만 저장한다. 보호자당 활성(revoked_at IS NULL) 코드는 하나뿐이다.
 CREATE TABLE guardian_invites (

@@ -44,7 +44,7 @@ class AlertStore(Protocol):
         severity: str,
         message: str,
     ) -> bool:
-        """알림을 남긴다. 같은 (call_id, alert_type)가 이미 있으면 False.
+        """알림을 남긴다. 같은 (call_id, alert_type, guardian_id)가 이미 있으면 False.
 
         웹훅은 재전송되므로 같은 통화에서 같은 알림이 두 번 들어올 수 있다. call_id가
         None이면 중복 검사를 하지 않는다.
@@ -56,7 +56,7 @@ class AlertStore(Protocol):
         ...
 
     def count_since(self, elder_id: int, since: float) -> int:
-        """since(유닉스 시각) 이후 그 어르신께 생긴 알림 수."""
+        """since(유닉스 시각) 이후 그 어르신께 생긴 알림 수. 보호자가 여럿이어도 같은 통화·종류는 하나로 센다."""
         ...
 
     def remove_for_elder(self, elder_id: int) -> int:
@@ -87,7 +87,10 @@ class InMemoryAlertStore:
     ) -> bool:
         with self._lock:
             if call_id is not None and any(
-                row.call_id == call_id and row.alert_type == alert_type for row in self._rows
+                row.call_id == call_id
+                and row.alert_type == alert_type
+                and row.guardian_id == guardian_id
+                for row in self._rows
             ):
                 return False
             self._rows.append(
@@ -112,7 +115,13 @@ class InMemoryAlertStore:
 
     def count_since(self, elder_id: int, since: float) -> int:
         with self._lock:
-            return sum(1 for row in self._rows if row.elder_id == elder_id and row.created_at >= since)
+            return len(
+                {
+                    (row.call_id if row.call_id is not None else -row.alert_id, row.alert_type)
+                    for row in self._rows
+                    if row.elder_id == elder_id and row.created_at >= since
+                }
+            )
 
     def remove_for_elder(self, elder_id: int) -> int:
         with self._lock:

@@ -140,3 +140,17 @@ def test_count_since_counts_only_that_elders_recent_alerts(make):
     assert store.count_since(12, clock.now - 50) == 1
     assert store.count_since(12, clock.now - 500) == 2
     assert store.count_since(13, clock.now - 500) == 1
+
+
+def test_each_guardian_gets_their_own_alert_for_the_same_call_and_the_elder_counts_it_once(make):
+    clock = Clock()
+    store, _ = make(clock)
+
+    assert raise_one(store, guardian_id=1, call_id=1) is True
+    assert raise_one(store, guardian_id=2, call_id=1) is True  # 다른 보호자라 따로 남는다
+    assert raise_one(store, guardian_id=2, call_id=1) is False  # 같은 보호자의 재전송은 막힌다
+
+    assert len(store.recent_for_guardian(1, 10)) == 1 and len(store.recent_for_guardian(2, 10)) == 1
+    assert store.count_since(12, 0.0) == 1
+    raise_one(store, guardian_id=1, call_id=None)  # 통화 없는 알림은 따로 센다
+    assert store.count_since(12, 0.0) == 2

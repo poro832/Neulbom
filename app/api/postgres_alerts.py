@@ -23,13 +23,13 @@ class PostgresAlertStore:
         severity: str,
         message: str,
     ) -> bool:
-        # call_id가 있으면 부분 유니크 인덱스(alerts_call_type_idx)가 중복을 막는다.
+        # call_id가 있으면 부분 유니크 인덱스(alerts_call_type_idx: 통화·종류·보호자)가 중복을 막는다.
         with self._pool.connection() as conn:
             row = conn.execute(
                 "INSERT INTO alerts (elder_id, guardian_id, call_id, alert_type, severity, "
                 "                    message, created_at) "
                 "VALUES (%s, %s, %s, %s, %s, %s, to_timestamp(%s)) "
-                "ON CONFLICT (call_id, alert_type) WHERE call_id IS NOT NULL DO NOTHING "
+                "ON CONFLICT (call_id, alert_type, guardian_id) WHERE call_id IS NOT NULL DO NOTHING "
                 "RETURNING alert_id",
                 (elder_id, guardian_id, call_id, alert_type, severity, message, self._clock()),
             ).fetchone()
@@ -48,7 +48,8 @@ class PostgresAlertStore:
     def count_since(self, elder_id: int, since: float) -> int:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT count(*) FROM alerts WHERE elder_id = %s AND created_at >= to_timestamp(%s)",
+                "SELECT count(DISTINCT (coalesce(call_id, -alert_id), alert_type)) FROM alerts "
+                "WHERE elder_id = %s AND created_at >= to_timestamp(%s)",
                 (elder_id, since),
             ).fetchone()
         return row[0]

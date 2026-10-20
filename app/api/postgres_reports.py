@@ -37,8 +37,12 @@ class PostgresReports:
                        WHEN e.agreed_at IS NOT NULL THEN 'pending'
                        ELSE 'unconsented' END,
                   CASE WHEN e.consent_at IS NULL AND e.agreed_at IS NOT NULL
-                       THEN e.phone_number END
-                FROM elders e WHERE e.guardian_id = %(g)s ORDER BY e.elder_id
+                       THEN e.phone_number END,
+                  (SELECT count(*) FROM elder_guardians n WHERE n.elder_id = e.elder_id)
+                FROM elders e
+                WHERE EXISTS (SELECT 1 FROM elder_guardians m
+                              WHERE m.elder_id = e.elder_id AND m.guardian_id = %(g)s)
+                ORDER BY e.elder_id
                 """,
                 {"lo": lo, "hi": hi, "g": guardian_id},
             ).fetchall()
