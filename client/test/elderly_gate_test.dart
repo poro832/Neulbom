@@ -78,13 +78,26 @@ void main() {
 
   testWidgets('서버가 거절하면 그 문장과 다시 시도를 보여 준다', (tester) async {
     NulbomApi.client =
+        MockClient((request) async => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
+
+    await tester.pumpWidget(const MaterialApp(home: ElderlyGate()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
+    expect(find.text('다시 시도'), findsOneWidget);
+  });
+
+  testWidgets('열쇠가 더는 맞지 않으면(탈퇴 처리·번호 변경) 연결이 끝났다고 알리고 처음 화면으로 보낸다', (tester) async {
+    NulbomApi.client =
         MockClient((request) async => json({'detail': '열쇠가 필요합니다'}, 401));
 
     await tester.pumpWidget(const MaterialApp(home: ElderlyGate()));
     await tester.pumpAndSettle();
 
-    expect(find.text('열쇠가 필요합니다'), findsOneWidget);
-    expect(find.text('다시 시도'), findsOneWidget);
+    expect(find.text('이 폰의 연결이 끝났어요'), findsOneWidget);
+    expect(find.textContaining('탈퇴가 처리됐거나'), findsOneWidget);
+    expect(find.text('다시 시도'), findsNothing);
+    expect(find.text('처음 화면으로'), findsOneWidget);
   });
 
   testWidgets('공유에 동의하지 않은 어르신은 홈 대신 재동의 화면을 본다', (tester) async {

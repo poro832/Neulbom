@@ -25,7 +25,10 @@ const Color eAccentSoft = Color(0xFFE6F0FF);
 const Color eBrass = Color(0xFFFFC21A);
 
 class GuardianScreen extends StatefulWidget {
-  const GuardianScreen({super.key});
+  const GuardianScreen({super.key, this.withdrawalPollInterval = const Duration(seconds: 30)});
+
+  /// 어르신 탈퇴 요청이 새로 왔는지 서버에 다시 묻는 간격. 푸시가 꺼져 있어도 화면이 열려 있으면 알아차린다.
+  final Duration withdrawalPollInterval;
 
   @override
   State<GuardianScreen> createState() => _GuardianScreenState();
@@ -41,10 +44,16 @@ class _GuardianScreenState extends State<GuardianScreen> {
   bool _loading = true;
   String? _loadError;
 
+  // 어르신이 탈퇴를 요청한 건. 보호자가 모두 승인해야 어르신이 지워진다.
+  List<GuardianWithdrawal> _withdrawals = [];
+  Timer? _withdrawalTimer;
+  final Set<int> _decidingWithdrawals = {};
+
   @override
   void initState() {
     super.initState();
     _load();
+    _withdrawalTimer = Timer.periodic(widget.withdrawalPollInterval, (_) => _loadWithdrawals());
     _dateRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -113,6 +122,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
       final pending = all.where((e) => e.status == 'pending').toList();
       final elders = all.where((e) => e.status != 'pending').map(_elderToMap).toList();
       final alerts = (await NulbomApi.guardianAlerts()).map(_alertToMap).toList();
+      await _loadWithdrawals();
       if (!mounted) return;
       setState(() {
         _elders = elders;
@@ -159,7 +169,132 @@ class _GuardianScreenState extends State<GuardianScreen> {
   @override
   void dispose() {
     _dateRefreshTimer?.cancel();
+    _withdrawalTimer?.cancel();
     super.dispose();
+  }
+
+  /// 탈퇴 요청 목록을 읽는다. 못 읽어도 화면의 나머지는 그대로 둔다.
+  Future<void> _loadWithdrawals() async {
+    try {
+      final items = await NulbomApi.guardianWithdrawals();
+      if (!mounted) return;
+      setState(() => _withdrawals = items);
+    } catch (_) {
+      // 다음에 다시 본다.
+    }
+  }
+
+  Future<void> _decideWithdrawal(GuardianWithdrawal item, {required bool approve}) async {
+    if (_decidingWithdrawals.contains(item.elderId)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: eCard,
+        title: Text(
+          approve ? '탈퇴를 승인할까요?' : '탈퇴를 거절할까요?',
+          style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700, color: eInk),
+        ),
+        content: Text(
+          approve
+              ? '${item.name} 어르신의 통화 기록과 정보가 모두 지워지고 되돌릴 수 없어요.'
+              : '${item.name} 어르신은 계속 이용하게 돼요.',
+          style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            key: const Key('withdrawal-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              approve ? '승인' : '거절',
+              style: TextStyle(color: approve ? const Color(0xFFF44336) : eAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    _decidingWithdrawals.add(item.elderId);
+    try {
+      if (approve) {
+        final result = await NulbomApi.approveWithdrawal(item.elderId);
+        messenger.showSnackBar(SnackBar(
+          content: Text(result.deleted
+              ? '탈퇴를 승인했어요. ${item.name} 어르신의 정보가 지워졌어요.'
+              : '탈퇴를 승인했어요. 다른 보호자의 승인을 기다려요.'),
+        ));
+        if (result.deleted && mounted) _reload();
+      } else {
+        await NulbomApi.rejectWithdrawal(item.elderId);
+        messenger.showSnackBar(const SnackBar(content: Text('탈퇴를 거절했어요.')));
+      }
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
+    } finally {
+      _decidingWithdrawals.remove(item.elderId);
+    }
+    await _loadWithdrawals();
+  }
+
+  Widget _buildWithdrawalCard(GuardianWithdrawal item) {
+    final busy = _decidingWithdrawals.contains(item.elderId);
+    return Container(
+      key: Key('withdrawal-${item.elderId}'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: eCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF44336), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${item.name} 어르신이 탈퇴를 요청했어요',
+            style: GoogleFonts.notoSansKr(fontSize: 16, fontWeight: FontWeight.w700, color: eInk),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            item.approvedByMe
+                ? '승인했어요. 다른 보호자의 승인을 기다리고 있어요. (${item.total}명 중 ${item.approved}명)'
+                : '보호자가 모두 승인하면 어르신의 통화 기록과 정보가 지워져요. (${item.total}명 중 ${item.approved}명 승인)',
+            style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+          ),
+          if (!item.approvedByMe) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    key: Key('withdrawal-reject-${item.elderId}'),
+                    onPressed: busy ? null : () => _decideWithdrawal(item, approve: false),
+                    child: const Text('거절'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    key: Key('withdrawal-approve-${item.elderId}'),
+                    onPressed: busy ? null : () => _decideWithdrawal(item, approve: true),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF44336)),
+                    child: const Text('승인', style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   String _formatDate(DateTime date) =>
@@ -302,6 +437,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   ],
                 ),
                 const SizedBox(height: 28),
+
+                // 어르신이 탈퇴를 요청했다면 가장 위에서 보인다
+                ..._withdrawals.map(_buildWithdrawalCard),
 
                 // 어르신 상태 카드들
                 Text(

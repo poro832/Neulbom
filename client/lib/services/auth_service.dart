@@ -215,9 +215,17 @@ class AuthService {
     await _clearPrefs();
   }
 
-  /// 어르신 탈퇴. 서버가 거절하면 [ApiException]을 올리고 아무것도 지우지 않는다.
-  static Future<void> deleteElderAccount() async {
-    await NulbomApi.deleteElderAccount();
+  /// 어르신 탈퇴를 요청한다. 서버가 거절하면 [ApiException]을 올리고 아무것도 지우지 않는다.
+  /// 보호자가 있으면 승인을 기다리는 상태(waiting)로 돌아오고 폰의 정보는 그대로다.
+  /// 보호자가 없어 바로 탈퇴됐으면(deleted) 폰의 열쇠와 정보를 지운다.
+  static Future<WithdrawalStatus> requestElderWithdrawal() async {
+    final result = await NulbomApi.requestWithdrawal();
+    if (result.deleted) await forgetElderPhone();
+    return result;
+  }
+
+  /// 서버에서 이미 탈퇴가 끝난 어르신의 열쇠와 폰의 정보를 지운다(보호자가 승인해 탈퇴됐을 때).
+  static Future<void> forgetElderPhone() async {
     await NulbomApi.clearElderKey();
     await _clearPrefs();
   }

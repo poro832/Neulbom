@@ -86,19 +86,84 @@ void main() {
       expect(rejected, 1);
     });
 
-    test('어르신 탈퇴: 어르신 열쇠로 DELETE /v1/me에 확인 값을 싣는다', () async {
+    test('어르신 탈퇴 요청: 어르신 열쇠로 POST /v1/me/withdrawal에 확인 값을 싣는다', () async {
       late http.Request seen;
       NulbomApi.client = MockClient((request) async {
         seen = request;
-        return noContent();
+        return json({
+          'status': 'waiting',
+          'requested_at': '2026-10-20T10:00:00+09:00',
+          'expires_at': '2026-10-27T10:00:00+09:00',
+          'approved': 0,
+          'total': 2,
+        }, 202);
       });
 
-      await NulbomApi.deleteElderAccount(key: 'nle_test');
+      final result = await NulbomApi.requestWithdrawal(key: 'nle_test');
 
-      expect(seen.method, 'DELETE');
-      expect(seen.url.path, '/v1/me');
+      expect(seen.method, 'POST');
+      expect(seen.url.path, '/v1/me/withdrawal');
       expect(seen.headers['Authorization'], 'Bearer nle_test');
       expect(jsonDecode(seen.body), {'confirm': true});
+      expect(result.waiting, isTrue);
+      expect(result.total, 2);
+      expect(result.expiresAt, isNotNull);
+    });
+
+    test('내 탈퇴 요청 상태와 취소', () async {
+      final calls = <String>[];
+      NulbomApi.client = MockClient((request) async {
+        calls.add('${request.method} ${request.url.path}');
+        if (request.method == 'DELETE') return noContent();
+        return json({'status': 'rejected', 'approved': 0, 'total': 1});
+      });
+
+      final status = await NulbomApi.myWithdrawal(key: 'nle_test');
+      await NulbomApi.cancelWithdrawal(key: 'nle_test');
+
+      expect(status.rejected, isTrue);
+      expect(calls, ['GET /v1/me/withdrawal', 'DELETE /v1/me/withdrawal']);
+    });
+
+    test('보호자: 탈퇴 요청 목록·승인·거절', () async {
+      final calls = <String>[];
+      final auth = <String?>[];
+      NulbomApi.client = MockClient((request) async {
+        calls.add('${request.method} ${request.url.path}');
+        auth.add(request.headers['Authorization']);
+        if (request.url.path == '/v1/guardian/withdrawals') {
+          return json({
+            'withdrawals': [
+              {
+                'elder_id': 12,
+                'name': '홍길동',
+                'requested_at': '2026-10-20T10:00:00+09:00',
+                'expires_at': '2026-10-27T10:00:00+09:00',
+                'approved': 1,
+                'total': 2,
+                'approved_by_me': false,
+              }
+            ]
+          });
+        }
+        if (request.url.path.endsWith('/reject')) return noContent();
+        return json({'status': 'deleted'});
+      });
+
+      final list = await NulbomApi.guardianWithdrawals(key: 'nlb_test');
+      final approved = await NulbomApi.approveWithdrawal(12, key: 'nlb_test');
+      await NulbomApi.rejectWithdrawal(12, key: 'nlb_test');
+
+      expect(list.single.name, '홍길동');
+      expect(list.single.approved, 1);
+      expect(list.single.approvedByMe, isFalse);
+      expect(approved.deleted, isTrue);
+      expect(calls, [
+        'GET /v1/guardian/withdrawals',
+        'POST /v1/elders/12/withdrawal/approve',
+        'POST /v1/elders/12/withdrawal/reject',
+      ]);
+      expect(auth.toSet(), {'Bearer nlb_test'});
     });
   });
 
@@ -174,27 +239,45 @@ void main() {
       expect(NulbomApi.guardianKey, '');
     });
 
-    test('어르신 탈퇴가 성공하면 폰의 어르신 열쇠와 정보를 지운다', () async {
+    test('어르신 탈퇴 요청이 바로 탈퇴됐으면(보호자 없음) 폰의 어르신 열쇠와 정보를 지운다', () async {
       SharedPreferences.setMockInitialValues({
         'user_type': 'elderly',
         'is_logged_in': true,
         'elder_key': 'nle_test',
       });
-      NulbomApi.client = MockClient((request) async => noContent());
+      NulbomApi.client = MockClient((request) async => json({'status': 'deleted'}));
 
-      await AuthService.deleteElderAccount();
+      final result = await AuthService.requestElderWithdrawal();
 
+      expect(result.deleted, isTrue);
       expect(await NulbomApi.elderKey(), isNull);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getBool('is_logged_in'), isNull);
     });
 
-    test('어르신 탈퇴를 서버가 거절하면 열쇠를 그대로 둔다', () async {
+    test('보호자 승인을 기다리는 동안에는 열쇠와 로그인 정보를 그대로 둔다', () async {
+      SharedPreferences.setMockInitialValues({
+        'user_type': 'elderly',
+        'is_logged_in': true,
+        'elder_key': 'nle_test',
+      });
+      NulbomApi.client = MockClient((request) async =>
+          json({'status': 'waiting', 'approved': 0, 'total': 1}, 202));
+
+      final result = await AuthService.requestElderWithdrawal();
+
+      expect(result.waiting, isTrue);
+      expect(await NulbomApi.elderKey(), 'nle_test');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('is_logged_in'), isTrue);
+    });
+
+    test('어르신 탈퇴 요청을 서버가 거절하면 열쇠를 그대로 둔다', () async {
       SharedPreferences.setMockInitialValues({'user_type': 'elderly', 'elder_key': 'nle_test'});
       NulbomApi.client = MockClient(
           (request) async => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
 
-      await expectLater(AuthService.deleteElderAccount(), throwsA(isA<ApiException>()));
+      await expectLater(AuthService.requestElderWithdrawal(), throwsA(isA<ApiException>()));
 
       expect(await NulbomApi.elderKey(), 'nle_test');
     });
@@ -310,7 +393,21 @@ void main() {
   });
 
   group('어르신 홈 메뉴', () {
-    Future<List<String>> openDeleteFlow(WidgetTester tester, http.Response Function() onDelete) async {
+    const waitingBody = {
+      'status': 'waiting',
+      'requested_at': '2026-10-20T10:00:00+09:00',
+      'expires_at': '2026-10-27T10:00:00+09:00',
+      'approved': 0,
+      'total': 1,
+    };
+
+    /// 탈퇴 요청 주소들에 테스트가 정한 답을 준다. 탈퇴하기 메뉴를 눌러 첫 확인창까지 연다.
+    Future<List<String>> openDeleteFlow(
+      WidgetTester tester, {
+      http.Response Function()? onRequest,
+      http.Response Function()? onStatus,
+      bool openConfirm = true,
+    }) async {
       tester.view.physicalSize = const Size(1200, 4000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -321,68 +418,9 @@ void main() {
       final calls = <String>[];
       NulbomApi.client = MockClient((request) async {
         calls.add('${request.method} ${request.url.path}');
-        if (request.method == 'DELETE' && request.url.path == '/v1/me') return onDelete();
-        if (request.url.path == '/v1/me/calls') return json({'calls': []});
-        if (request.url.path == '/v1/me/contacts') return json({'guardians': [], 'contacts': []});
-        return json({'detail': 'x'}, 404);
-      });
-      await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage()));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('탈퇴하기'));
-      await tester.pumpAndSettle();
-      return calls;
-    }
-
-    testWidgets('탈퇴하기: 두 번 확인해야 서버를 부르고, 끝나면 로그인 화면으로 간다', (tester) async {
-      final calls = await openDeleteFlow(tester, noContent);
-
-      expect(find.textContaining('통화 기록이 모두 지워지고'), findsOneWidget);
-      expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
-      await tester.tap(find.text('계속'));
-      await tester.pumpAndSettle();
-      expect(find.text('정말 탈퇴할까요?'), findsOneWidget);
-      expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
-      await tester.tap(find.text('탈퇴하기').last);
-      await tester.pumpAndSettle();
-
-      expect(calls, contains('DELETE /v1/me'));
-      expect(find.byType(ElderlyLoginScreen), findsOneWidget);
-      expect(await NulbomApi.elderKey(), isNull);
-    });
-
-    testWidgets('첫 확인에서 취소하면 서버를 부르지 않는다', (tester) async {
-      final calls = await openDeleteFlow(tester, noContent);
-
-      await tester.tap(find.text('취소'));
-      await tester.pumpAndSettle();
-
-      expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
-      expect(find.byType(ElderlyHomePage), findsOneWidget);
-    });
-
-    testWidgets('두 번째 확인에서 취소해도 서버를 부르지 않는다', (tester) async {
-      final calls = await openDeleteFlow(tester, noContent);
-
-      await tester.tap(find.text('계속'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('취소'));
-      await tester.pumpAndSettle();
-
-      expect(calls.where((c) => c.startsWith('DELETE')), isEmpty);
-      expect(await NulbomApi.elderKey(), 'nle_saved');
-    });
-
-    testWidgets('지우는 동안 뒤로가기를 눌러도 화면을 떠나지 않고, 끝나면 로그인 화면으로 간다', (tester) async {
-      final gate = Completer<void>();
-      tester.view.physicalSize = const Size(1200, 4000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.resetPhysicalSize);
-      SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved', 'ai_friend_name': '봄이'});
-      NulbomApi.client = MockClient((request) async {
-        if (request.method == 'DELETE' && request.url.path == '/v1/me') {
-          await gate.future;
+        if (request.url.path == '/v1/me/withdrawal') {
+          if (request.method == 'POST') return (onRequest ?? () => json(waitingBody, 202))();
+          if (request.method == 'GET') return (onStatus ?? () => json({'status': 'none'}))();
           return noContent();
         }
         if (request.url.path == '/v1/me/calls') return json({'calls': []});
@@ -391,13 +429,112 @@ void main() {
       });
       await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage()));
       await tester.pumpAndSettle();
+      if (!openConfirm) return calls;
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('탈퇴하기'));
+      await tester.pumpAndSettle();
+      return calls;
+    }
+
+    bool asked(List<String> calls) => calls.contains('POST /v1/me/withdrawal');
+
+    testWidgets('탈퇴하기: 두 번 확인해야 서버에 요청하고, 보호자가 있으면 승인을 기다린다', (tester) async {
+      final calls = await openDeleteFlow(tester);
+
+      expect(find.textContaining('보호자의 승인이 필요해요'), findsOneWidget);
+      expect(asked(calls), isFalse);
+      await tester.tap(find.text('계속'));
+      await tester.pumpAndSettle();
+      expect(find.text('정말 탈퇴를 요청할까요?'), findsOneWidget);
+      expect(asked(calls), isFalse);
+      await tester.tap(find.text('요청하기'));
+      await tester.pumpAndSettle();
+
+      expect(asked(calls), isTrue);
+      expect(find.text('보호자에게 알렸어요'), findsOneWidget);
+      await tester.tap(find.text('확인'));
+      await tester.pumpAndSettle();
+      // 아직 탈퇴되지 않았다: 홈에 남고 열쇠도 그대로이며 승인을 기다린다는 배너가 뜬다
+      expect(find.byType(ElderlyHomePage), findsOneWidget);
+      expect(await NulbomApi.elderKey(), 'nle_saved');
+      expect(find.byKey(const Key('withdrawal-banner')), findsOneWidget);
+      expect(find.text('탈퇴를 요청했어요'), findsOneWidget);
+    });
+
+    testWidgets('보호자가 없어 바로 탈퇴되면 로그인 화면으로 가고 열쇠를 지운다', (tester) async {
+      await openDeleteFlow(tester, onRequest: () => json({'status': 'deleted'}));
+
+      await tester.tap(find.text('계속'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('요청하기'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ElderlyLoginScreen), findsOneWidget);
+      expect(await NulbomApi.elderKey(), isNull);
+    });
+
+    testWidgets('승인을 기다리는 동안 메뉴는 탈퇴 승인 대기 중이고, 다시 누르면 이미 요청했다고 알린다', (tester) async {
+      final calls = await openDeleteFlow(tester, onStatus: () => json(waitingBody), openConfirm: false);
+
+      expect(find.text('탈퇴를 요청했어요'), findsOneWidget); // 홈을 열 때 서버에 물어 배너가 떴다
+      await tester.tap(find.byIcon(Icons.more_horiz_rounded));
+      await tester.pumpAndSettle();
+      expect(find.text('탈퇴 승인 대기 중'), findsOneWidget);
+      await tester.tap(find.text('탈퇴 승인 대기 중'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('이미 탈퇴를 요청했어요'), findsOneWidget);
+      expect(asked(calls), isFalse);
+    });
+
+    testWidgets('첫 확인에서 취소하면 서버에 요청하지 않는다', (tester) async {
+      final calls = await openDeleteFlow(tester);
+
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+
+      expect(asked(calls), isFalse);
+      expect(find.byType(ElderlyHomePage), findsOneWidget);
+    });
+
+    testWidgets('두 번째 확인에서 취소해도 서버에 요청하지 않는다', (tester) async {
+      final calls = await openDeleteFlow(tester);
+
+      await tester.tap(find.text('계속'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+
+      expect(asked(calls), isFalse);
+      expect(await NulbomApi.elderKey(), 'nle_saved');
+    });
+
+    testWidgets('요청하는 동안 뒤로가기를 눌러도 화면을 떠나지 않고, 끝나면 바로 탈퇴된 경우 로그인 화면으로 간다', (tester) async {
+      final gate = Completer<void>();
+      tester.view.physicalSize = const Size(1200, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved', 'ai_friend_name': '봄이'});
+      NulbomApi.client = MockClient((request) async {
+        if (request.method == 'POST' && request.url.path == '/v1/me/withdrawal') {
+          await gate.future;
+          return json({'status': 'deleted'});
+        }
+        if (request.url.path == '/v1/me/withdrawal') return json({'status': 'none'});
+        if (request.url.path == '/v1/me/calls') return json({'calls': []});
+        if (request.url.path == '/v1/me/contacts') return json({'guardians': [], 'contacts': []});
+        return json({'detail': 'x'}, 404);
+      });
+      await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage()));
+      await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.more_horiz_rounded));
       await tester.pumpAndSettle();
       await tester.tap(find.text('탈퇴하기'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('계속'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('탈퇴하기').last);
+      await tester.tap(find.text('요청하기'));
       await tester.pump();
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -413,16 +550,47 @@ void main() {
     });
 
     testWidgets('서버가 거절하면 문장을 보이고 어르신 화면에 남는다', (tester) async {
-      await openDeleteFlow(tester, () => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
+      await openDeleteFlow(tester, onRequest: () => json({'detail': '잠시 뒤에 다시 해 주세요'}, 503));
 
       await tester.tap(find.text('계속'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('탈퇴하기').last);
+      await tester.tap(find.text('요청하기'));
       await tester.pumpAndSettle();
 
       expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
       expect(find.byType(ElderlyHomePage), findsOneWidget);
       expect(await NulbomApi.elderKey(), 'nle_saved');
+    });
+
+    testWidgets('보호자가 거절하면 배너로 알리고, 확인을 누르면 요청을 치운다', (tester) async {
+      final calls = await openDeleteFlow(
+        tester,
+        onStatus: () => json({'status': 'rejected', 'approved': 0, 'total': 1}),
+        openConfirm: false,
+      );
+
+      expect(find.text('보호자가 탈퇴를 거절했어요'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('withdrawal-banner-action')));
+      await tester.pumpAndSettle();
+
+      expect(calls, contains('DELETE /v1/me/withdrawal'));
+    });
+
+    testWidgets('승인을 기다리는 요청은 취소할 수 있다', (tester) async {
+      final calls = await openDeleteFlow(tester, onStatus: () => json(waitingBody), openConfirm: false);
+
+      await tester.tap(find.text('요청 취소'));
+      await tester.pumpAndSettle();
+
+      expect(calls, contains('DELETE /v1/me/withdrawal'));
+    });
+
+    testWidgets('보호자가 승인해 서버에서 탈퇴가 끝나면(열쇠가 401) 저절로 로그인 화면으로 간다', (tester) async {
+      await openDeleteFlow(tester, onStatus: () => json({'detail': '열쇠가 필요합니다'}, 401), openConfirm: false);
+
+      expect(find.byType(ElderlyLoginScreen), findsOneWidget);
+      expect(find.textContaining('탈퇴가 처리됐거나'), findsOneWidget);
+      expect(await NulbomApi.elderKey(), isNull);
     });
   });
 }

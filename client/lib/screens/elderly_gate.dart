@@ -164,8 +164,16 @@ class _ElderlyGateState extends State<ElderlyGate> {
           );
         }
         if (snapshot.hasError) {
+          final error = snapshot.error!;
+          if (error is ApiException && error.statusCode == 401) {
+            // 열쇠가 더는 맞지 않는다: 보호자가 탈퇴를 승인했거나, 번호를 바꿔 이 폰의 열쇠를 지웠다.
+            return _screen(
+              title: '이 폰의 연결이 끝났어요',
+              detail: '탈퇴가 처리됐거나, 보호자가 번호를 바꿨어요.\n처음 화면에서 다시 시작해 주세요.',
+            );
+          }
           return _screen(
-            title: _errorText(snapshot.error!),
+            title: _errorText(error),
             detail: null,
             retryLabel: '다시 시도',
           );

@@ -388,8 +388,42 @@ class NulbomApi {
   }
 
   /// 어르신 탈퇴: 서버가 이 어르신의 통화 기록·연락처·열쇠를 모두 지운다. 되돌릴 수 없다.
-  static Future<void> deleteElderAccount({String? key}) async {
-    await _send('DELETE', '/v1/me', key: await _elderKeyOrThrow(key), body: {'confirm': true});
+  /// 어르신 탈퇴를 요청한다. 보호자가 있으면 보호자 전원이 승인할 때까지 기다린다(waiting). 보호자가 없으면 바로 탈퇴된다(deleted).
+  static Future<WithdrawalStatus> requestWithdrawal({String? key}) async {
+    final json = await _send('POST', '/v1/me/withdrawal',
+        key: await _elderKeyOrThrow(key), body: {'confirm': true});
+    return WithdrawalStatus.fromJson(json);
+  }
+
+  /// 내 탈퇴 요청의 지금 상태. 요청이 없으면 none이다.
+  static Future<WithdrawalStatus> myWithdrawal({String? key}) async {
+    final json = await _send('GET', '/v1/me/withdrawal', key: await _elderKeyOrThrow(key));
+    return WithdrawalStatus.fromJson(json);
+  }
+
+  /// 탈퇴 요청을 취소한다(보호자가 거절한 요청을 치우는 데도 쓴다).
+  static Future<void> cancelWithdrawal({String? key}) async {
+    await _send('DELETE', '/v1/me/withdrawal', key: await _elderKeyOrThrow(key));
+  }
+
+  /// 보호자: 내 어르신들의 열린 탈퇴 요청.
+  static Future<List<GuardianWithdrawal>> guardianWithdrawals({String? key}) async {
+    final json = await _send('GET', '/v1/guardian/withdrawals', key: _guardianKeyOrThrow(key));
+    return (json['withdrawals'] as List<dynamic>)
+        .map((item) => GuardianWithdrawal.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 보호자: 탈퇴 요청을 승인한다. 보호자가 모두 승인하면 deleted, 아니면 waiting이다.
+  static Future<WithdrawalStatus> approveWithdrawal(int elderId, {String? key}) async {
+    final json = await _send('POST', '/v1/elders/$elderId/withdrawal/approve',
+        key: _guardianKeyOrThrow(key));
+    return WithdrawalStatus.fromJson(json);
+  }
+
+  /// 보호자: 탈퇴 요청을 거절한다. 어르신 앱에 거절됐다고 보인다.
+  static Future<void> rejectWithdrawal(int elderId, {String? key}) async {
+    await _send('POST', '/v1/elders/$elderId/withdrawal/reject', key: _guardianKeyOrThrow(key));
   }
 
   // ------------------------------------------------------------ 보호자 코드로 가입
