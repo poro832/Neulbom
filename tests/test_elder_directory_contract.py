@@ -460,3 +460,45 @@ def test_the_new_call_time_lands_in_the_column_the_scheduler_reads():
     # 동의한 어르신(13)만 명부에 나오고, 새 시간으로 나온다
     entries = PostgresRoster(pool=directory._pool).entries()
     assert [(e.elder_id, e.call_time) for e in entries] == [(13, time(18, 30))]
+
+
+# ------------------------------------------------ 전화번호 바꾸기
+
+
+def test_the_guardian_can_change_the_phone_and_the_old_number_stops_matching(directory):
+    assert directory.set_phone(13, 1, "010-7777-1313") is True
+
+    assert directory.phone_of(13) == "010-7777-1313"
+    assert directory.find_by_phone("010-7777-1313") == 13
+    assert directory.find_by_phone("070-0000-0013") is None
+    assert directory.phone_of(12) == "070-0000-0012"  # 다른 어르신은 그대로
+
+
+def test_a_number_another_elder_uses_cannot_be_taken(directory):
+    from app.api.elder_directory import PhoneTaken
+
+    with pytest.raises(PhoneTaken):
+        directory.set_phone(13, 1, "070 0000 0012")  # 숫자만 비교한다
+
+    assert directory.phone_of(13) == "070-0000-0013"
+
+
+def test_changing_to_ones_own_number_again_is_allowed(directory):
+    assert directory.set_phone(13, 1, "070-0000-0013") is True
+    assert directory.set_phone(13, 1, "07000000013") is True
+    assert directory.find_by_phone("070-0000-0013") == 13
+
+
+def test_another_guardian_or_an_unknown_elder_cannot_change_the_phone(directory):
+    other = directory.add_guardian("다른 보호자", "010-3333-4444")
+
+    assert directory.set_phone(13, other, "010-7777-1313") is False
+    assert directory.set_phone(4242, 1, "010-7777-1313") is False
+    assert directory.phone_of(13) == "070-0000-0013"
+
+
+def test_an_unlinked_elder_has_no_guardian_to_change_the_phone(directory):
+    elder_id = directory.create_unlinked(name="홍길동", phone="010-9999-1111")
+
+    assert directory.set_phone(elder_id, 1, "010-7777-1313") is False
+    assert directory.phone_of(elder_id) == "010-9999-1111"

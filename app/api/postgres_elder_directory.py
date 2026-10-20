@@ -228,6 +228,27 @@ class PostgresElderDirectory:
             ).rowcount
         return updated == 1
 
+    def set_phone(self, elder_id: int, guardian_id: int, phone: str) -> bool:
+        from psycopg import errors
+
+        wanted = digits_of(phone)
+        try:
+            with self._pool.connection() as conn:
+                taken = conn.execute(
+                    "SELECT 1 FROM elders "
+                    "WHERE regexp_replace(phone_number, '[^0-9]', '', 'g') = %s AND elder_id <> %s LIMIT 1",
+                    (wanted, elder_id),
+                ).fetchone()
+                if taken:
+                    raise PhoneTaken(wanted)
+                updated = conn.execute(
+                    "UPDATE elders SET phone_number = %s WHERE elder_id = %s AND guardian_id = %s",
+                    (phone, elder_id, guardian_id),
+                ).rowcount
+        except errors.UniqueViolation as exc:
+            raise PhoneTaken(wanted) from exc
+        return updated == 1
+
     def detach_all_from(self, guardian_id: int) -> list[int]:
         # 보호자 행을 지우기 **전에** 부른다. elders.guardian_id가 ON DELETE CASCADE라 그대로 지우면 어르신까지
         # 지워진다. consent_at을 비우면 스케줄러 명부(consent_at IS NOT NULL)에서 빠져 안부 전화가 멈춘다.

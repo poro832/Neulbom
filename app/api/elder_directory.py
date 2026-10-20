@@ -140,6 +140,13 @@ class ElderDirectory(Protocol):
         """그 보호자의 어르신일 때만 안부 전화 시각을 바꾸고 True. 스케줄러는 이 값을 매분 새로 읽는다."""
         ...
 
+    def set_phone(self, elder_id: int, guardian_id: int, phone: str) -> bool:
+        """그 보호자의 어르신일 때만 전화번호를 바꾸고 True. 아니면 False.
+
+        다른 어르신이 이미 쓰는 번호(숫자만 비교)면 PhoneTaken. 같은 어르신의 자기 번호로 다시 바꾸는 것은 허용한다.
+        """
+        ...
+
     # ------------------------------------------------ 탈퇴 (app/api/account_deletion.py)
 
     def detach_all_from(self, guardian_id: int) -> list[int]:
@@ -321,6 +328,18 @@ class InMemoryElderDirectory:
             if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
                 return False
             self._call_times[elder_id] = value
+            return True
+
+    def set_phone(self, elder_id: int, guardian_id: int, phone: str) -> bool:
+        with self._lock:
+            access = self._entries.get(elder_id)
+            if access is None or access.guardian_id is None or access.guardian_id != guardian_id:
+                return False
+            wanted = digits_of(phone)
+            if any(other != elder_id and digits == wanted for other, digits in self._phones.items()):
+                raise PhoneTaken(wanted)
+            self._phone_text[elder_id] = phone
+            self._phones[elder_id] = wanted
             return True
 
     def detach_all_from(self, guardian_id: int) -> list[int]:

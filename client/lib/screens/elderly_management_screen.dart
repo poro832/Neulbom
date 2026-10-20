@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart' show ElderSummary;
 import '../services/nulbom_api.dart';
-import 'elderly_detail_screen.dart' show ElderlyDetailScreen;
+import 'elder_edit_dialog.dart' show showElderEditDialog;
 import 'link_elder_dialog.dart' show showLinkElderDialog;
 
 const Color eBg = Color(0xFFEFF6FF);
@@ -56,6 +56,13 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$what 기능은 추후 제공됩니다.'), backgroundColor: eAccent),
     );
+  }
+
+  /// 어르신 전화번호를 고친다(새 폰). 고쳤으면 목록을 다시 불러온다.
+  Future<void> _editElder(ElderSummary elder) async {
+    final changed = await showElderEditDialog(context, elder);
+    if (!changed || !mounted) return;
+    await _load();
   }
 
   /// 어르신이 앱에서 받은 연결 코드로 연결한다. 이름은 서버가 알고 있어 따로 받지 않는다.
@@ -156,19 +163,7 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                     for (final elder in _elders!)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: GestureDetector(
-                          onTap: elder.status == 'pending'
-                              ? null
-                              : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => ElderlyDetailScreen(
-                                        elderlyId: elder.elderId,
-                                        elderlyName: elder.name,
-                                      ),
-                                    ),
-                                  ),
-                          child: Container(
+                        child: Container(
                             decoration: BoxDecoration(
                               color: eCard,
                               border: Border.all(color: eLine),
@@ -209,6 +204,30 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                                   ),
                                 ),
                                 GestureDetector(
+                                  key: Key('edit-${elder.elderId}'),
+                                  onTap: () => _editElder(elder),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: eAccent.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: eAccent.withOpacity(0.3)),
+                                    ),
+                                    child: Text(
+                                      '수정',
+                                      style: GoogleFonts.notoSansKr(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: eAccent,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                GestureDetector(
                                   onTap: () => _notYet('어르신 삭제'),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
@@ -235,7 +254,6 @@ class _ElderlyManagementScreenState extends State<ElderlyManagementScreen> {
                               ],
                             ),
                           ),
-                        ),
                       ),
                 ],
 
