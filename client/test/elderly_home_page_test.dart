@@ -40,6 +40,7 @@ Future<void> openMenuCode(WidgetTester tester) async {
 }
 
 void main() {
+  greetingGroup();
   setUp(() {
     GoogleFonts.config.allowRuntimeFetching = false;
     SharedPreferences.setMockInitialValues({
@@ -116,5 +117,36 @@ void main() {
     await tester.tap(find.text('닫기'));
     await tester.pumpAndSettle();
     expect(find.text('잠시 뒤에 다시 해 주세요'), findsNothing);
+  });
+}
+
+
+void greetingTests() {
+  testWidgets('상단에 안녕하세요 ○○ 어르신 인사가 뜬다', (tester) async {
+    NulbomApi.client = server(<String>[], (_) => json({'code': '04829316'}));
+
+    await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage(name: '배주호')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('안녕하세요, 배주호 어르신'), findsOneWidget);
+  });
+
+  testWidgets('이름을 모르면 인사를 띄우지 않는다', (tester) async {
+    NulbomApi.client = server(<String>[], (_) => json({'code': '04829316'}));
+
+    await tester.pumpWidget(const MaterialApp(home: ElderlyHomePage()));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('elder-greeting')), findsNothing);
+  });
+}
+
+void greetingGroup() {
+  group('인사', () {
+    setUp(() {
+      GoogleFonts.config.allowRuntimeFetching = false;
+      SharedPreferences.setMockInitialValues({'elder_key': 'nle_saved', 'ai_friend_name': '봄이'});
+    });
+    greetingTests();
   });
 }

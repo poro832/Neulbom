@@ -166,10 +166,10 @@ class _ElderlyGateState extends State<ElderlyGate> {
         if (snapshot.hasError) {
           final error = snapshot.error!;
           if (error is ApiException && error.statusCode == 401) {
-            // 열쇠가 더는 맞지 않는다: 보호자가 탈퇴를 승인했거나, 번호를 바꿔 이 폰의 열쇠를 지웠다.
+            // 열쇠가 더는 맞지 않는다: 보호자가 탈퇴를 승인했거나, 번호를 바꿨거나, 다른 폰에서 로그인해 이 폰의 열쇠가 지워졌다.
             return _screen(
               title: '이 폰의 연결이 끝났어요',
-              detail: '탈퇴가 처리됐거나, 보호자가 번호를 바꿨어요.\n처음 화면에서 다시 시작해 주세요.',
+              detail: '탈퇴가 처리됐거나, 다른 폰에서 로그인했거나, 보호자가 번호를 바꿨어요.\n처음 화면에서 다시 시작해 주세요.',
             );
           }
           return _screen(
@@ -183,7 +183,7 @@ class _ElderlyGateState extends State<ElderlyGate> {
         _sawWaiting = me.status != 'active';
         if (me.status == 'active') {
           if (!me.shareAgreed) return _shareConsentScreen();
-          return widget.homeBuilder?.call(context) ?? const ElderlyHomePage();
+          return widget.homeBuilder?.call(context) ?? ElderlyHomePage(name: me.name);
         }
         if (me.status == 'unlinked') {
           return _screen(
