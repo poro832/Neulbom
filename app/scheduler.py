@@ -42,6 +42,10 @@ DEFAULT_GRACE_SECONDS = 1800
 DEFAULT_TICK_SECONDS = 60.0
 
 
+class TryLater(Exception):
+    """지금은 걸 수 없지만 곧 걸 수 있다(전화망의 동시 통화 한도 등). 실패가 아니다 — 다음 틱에 다시 본다."""
+
+
 @dataclass(frozen=True)
 class RosterEntry:
     """동의한 어르신 한 명과, 그분께 마지막으로 예약 통화를 만든 시각."""
@@ -132,6 +136,11 @@ class Scheduler:
         for elder_id in due_elders(entries, self._clock(), grace=self._grace):
             try:
                 self._place(elder_id)
+            except TryLater:
+                # 전화선이 다 찼다. 뒤 어르신도 같은 벽에 부딪히므로 이번 틱은 여기서 멈춘다. 통화 기록을 남기지
+                # 않았으니 다음 틱(유예 30분 안)에 같은 어르신부터 다시 건다.
+                logger.info("전화선이 차 있어 예약 발신을 미룬다 elder_id=%s — 다음 틱에 다시", elder_id)
+                break
             except Exception:
                 # 한 어르신 발신 실패가 뒤에 있는 어르신들의 그날 통화를
                 # 통째로 없애면 안 된다.

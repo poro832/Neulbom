@@ -502,3 +502,21 @@ def test_another_elders_calls_are_not_counted():
     found = store.recent_scheduled(12, 7)
 
     assert [call.call_id for call in found] == [mine.call_id]
+
+
+def test_a_busy_phone_line_asks_to_try_again_and_costs_no_daily_request():
+    """전화선(ClawOps 동시 통화 한도)이 차 있으면 503으로 '잠시 뒤에'를 알리고, 그 요청은 기록도 횟수도 남기지 않는다."""
+    from app.telephony.client import ConcurrentCallLimit
+
+    client, store, _, _ = make_client(FakeTelephony(fail_with=ConcurrentCallLimit("차 있다")))
+
+    response = client.post("/v1/calls/request", json={"elder_id": 12})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "지금 다른 통화 중이에요. 잠시 뒤에 다시 해 주세요"}
+    assert store.find_active(12) is None
+    assert store.count_requested_since(12, 0.0) == 0
+
+    # 전화선이 비면 같은 어르신이 바로 다시 요청할 수 있다.
+    retry, _, _, _ = make_client()
+    assert retry.post("/v1/calls/request", json={"elder_id": 12}).status_code == 202

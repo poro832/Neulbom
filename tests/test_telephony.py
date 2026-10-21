@@ -120,3 +120,27 @@ def test_a_carrier_refusal_carries_its_reason(monkeypatch):
     message = str(excinfo.value)
     assert "400" in message
     assert "From number not owned by account" in message
+
+
+def test_the_concurrent_call_limit_is_told_apart_from_other_failures(monkeypatch):
+    """ClawOps 계정은 동시에 한 통만 걸 수 있다. 그 429만 '잠시 뒤에'로 다룬다."""
+    from app.telephony.client import ConcurrentCallLimit
+
+    response = _fake_response(
+        status_code=429, text='{"error":"Concurrent call limit: 1/1","code":"CALL_LIMIT_EXCEEDED"}'
+    )
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(ConcurrentCallLimit):
+        _clawops().place_call(to="070-1", answer_url="https://x")
+
+
+def test_other_429_answers_stay_ordinary_failures(monkeypatch):
+    from app.telephony.client import ConcurrentCallLimit
+
+    response = _fake_response(status_code=429, text='{"error":"rate limited","code":"RATE_LIMITED"}')
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _clawops().place_call(to="070-1", answer_url="https://x")
+    assert not isinstance(excinfo.value, ConcurrentCallLimit)

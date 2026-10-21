@@ -460,3 +460,34 @@ def test_postgres_reads_the_dial_number_from_the_elders_table():
     assert store.find_elder(555) == "010-5555-0000"
     assert store.find_elder(424242) is None
     assert store.find_elder(ELDER) == "070-1111-2222"  # 시드된 어르신도 그대로
+
+
+# ------------------------------------------------------------ 발신되지 않은 기록 지우기
+
+
+def test_discarding_an_unplaced_call_removes_it_and_frees_the_elder(store):
+    call, created = store.find_active_or_create(ELDER, trigger_type="scheduled")
+    assert created
+
+    assert store.discard_unplaced(call.call_id) is True
+
+    assert store.find_active(ELDER) is None
+    again, created_again = store.find_active_or_create(ELDER, trigger_type="scheduled")
+    assert created_again and again.call_id != call.call_id
+
+
+def test_a_call_the_provider_accepted_is_never_discarded(store):
+    call, _ = store.find_active_or_create(ELDER, trigger_type="requested")
+    store.attach_sid(call.call_id, "CA-1")
+
+    assert store.discard_unplaced(call.call_id) is False
+    assert store.get(call.call_id).provider_call_sid == "CA-1"
+
+
+def test_a_finished_call_is_never_discarded_and_an_unknown_one_is_false(store):
+    call, _ = store.find_active_or_create(ELDER, trigger_type="scheduled")
+    store.mark_failed(call.call_id)
+
+    assert store.discard_unplaced(call.call_id) is False
+    assert store.get(call.call_id).status == "failed"
+    assert store.discard_unplaced(987654) is False

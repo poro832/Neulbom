@@ -104,6 +104,14 @@ class CallStore(Protocol):
         ...
 
     def mark_failed(self, call_id: int) -> None: ...
+    def discard_unplaced(self, call_id: int) -> bool:
+        """사업자에 발신이 닿지 않은(식별자가 없는, 아직 '예약됨'인) 통화 기록만 지우고 True.
+
+        동시 통화 한도처럼 '전화는 나가지 않았고 곧 다시 걸 수 있는' 경우에 쓴다. 실패로 남기면 오늘 이미 걸었다고
+        세어져 예약 통화가 다시 걸리지 않는다. 이미 식별자가 붙었거나 끝난 통화는 건드리지 않는다.
+        """
+        ...
+
     def mark_completed(self, call_id: int, audio_key: str) -> None:
         """통화가 정상적으로 끝났다. 녹음이 있어야 끝난 것이다."""
         ...
@@ -313,6 +321,15 @@ class InMemoryCallStore:
     def mark_failed(self, call_id: int) -> None:
         # 실패한 통화가 '진행 중'으로 남으면 그 어르신은 영원히 409를 받는다.
         self._finish(call_id, "failed")
+
+    def discard_unplaced(self, call_id: int) -> bool:
+        with self._lock:
+            call = self._calls.get(call_id)
+            if call is None or call.provider_call_sid is not None or call.status != "scheduled":
+                return False
+            del self._calls[call_id]
+            self._requests = [r for r in self._requests if r[2] != call_id]
+            return True
 
     def mark_completed(self, call_id: int, audio_key: str) -> None:
         self._finish(call_id, "completed", audio_key=audio_key)

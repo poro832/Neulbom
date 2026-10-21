@@ -7,6 +7,7 @@ Responder와 같은 패턴이다. 규약으로 분리해 두면 ClawOps 계정 �
 from __future__ import annotations
 
 import itertools
+import json
 from typing import Protocol
 
 import httpx
@@ -15,6 +16,13 @@ CLAWOPS_BASE_URL = "https://api.claw-ops.com"
 
 # 상태 통보를 받을 이벤트(공백으로 구분). 공식 문서의 기본값과 같다.
 STATUS_CALLBACK_EVENTS = "initiated ringing answered completed"
+
+
+class ConcurrentCallLimit(RuntimeError):
+    """사업자의 동시 통화 한도에 닿았다(ClawOps 429 CALL_LIMIT_EXCEEDED).
+
+    전화는 나가지 않았다. 앞선 통화가 끝나면 다시 걸 수 있으므로 호출부가 '잠시 뒤에'로 다룬다.
+    """
 
 
 class Telephony(Protocol):
@@ -92,6 +100,10 @@ class ClawOpsTelephony:
             data=data,
             timeout=self._timeout,
         )
+        if response.status_code == 429 and _is_call_limit(response.text):
+            raise ConcurrentCallLimit(
+                f"ClawOps 동시 통화 한도에 닿았다: status=429 body={_truncate(response.text)}"
+            )
         if response.is_error:
             # raise_for_status만 쓰면 "400 Bad Request"만 남아 원인(발신번호 회수,
             # 계정 문제 등)을 사업자 콘솔까지 가서 찾아야 한다(2026-10-09).
@@ -123,6 +135,13 @@ class ClawOpsTelephony:
 
 def _digits(number: str) -> str:
     return "".join(ch for ch in number if ch.isdigit())
+
+
+def _is_call_limit(body: str) -> bool:
+    try:
+        return json.loads(body).get("code") == "CALL_LIMIT_EXCEEDED"
+    except (ValueError, AttributeError):
+        return False
 
 
 def _truncate(body: str, limit: int = 300) -> str:

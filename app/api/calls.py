@@ -16,7 +16,7 @@ from fastapi import FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from app.api.dialer import DialFailed, answer_url_for, dial, status_callback_url_for
+from app.api.dialer import DialBusy, DialFailed, answer_url_for, dial, status_callback_url_for
 from app.api.elder_auth import ElderAuth, elder_key_label
 from app.api.elder_directory import ElderDirectory
 from app.api.guardian_auth import GuardianAuth, attempt_label
@@ -206,6 +206,8 @@ def build_app(
                 answer_url=answer_url,
                 status_callback_url=status_callback_url,
             )
+        except DialBusy as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except DialFailed as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

@@ -280,3 +280,58 @@ def test_a_scheduled_call_is_skipped_when_a_call_is_already_running(tmp_path):
     )
 
     assert telephony.placed == []
+
+
+def test_a_busy_phone_line_stops_the_tick_and_the_same_elder_is_tried_again_next_tick():
+    """전화선(동시 통화 한도)이 차 있으면 뒤 어르신도 같은 벽에 부딪히므로 이번 틱은 멈추고, 실패로 남기지 않아
+    다음 틱에 같은 어르신부터 다시 건다."""
+    from app.scheduler import TryLater
+
+    placed, attempts, busy = [], [], [True]
+
+    def place(elder_id):
+        attempts.append(elder_id)
+        if busy[0]:
+            raise TryLater("전화선이 찼다")
+        placed.append(elder_id)
+
+    scheduler = Scheduler(
+        roster=FakeRoster([entry(1), entry(2, time(9, 0))]),
+        place=place,
+        clock=lambda: at(9, 0),
+    )
+
+    assert scheduler.tick() == 0
+    assert attempts == [1]  # 2번은 시도하지 않았다
+
+    busy[0] = False
+    assert scheduler.tick() == 2
+    assert placed == [1, 2]
+
+
+def test_a_scheduled_dial_that_hits_the_phone_limit_leaves_no_call_behind():
+    """실제 발신 경로: 한도에 걸리면 통화 기록이 남지 않아 '오늘 이미 걸었다'로 세어지지 않는다."""
+    from app.api.dialer import DialBusy, place_scheduled_call
+    from app.api.lifecycle import CallLifecycle
+    from app.api.store import InMemoryCallStore
+    from app.media.stream_server import InMemoryCallRegistry
+    from app.telephony.client import ConcurrentCallLimit, FakeTelephony
+
+    store = InMemoryCallStore(phones={12: "070-1111-2222"})
+    lifecycle = CallLifecycle(store, InMemoryCallRegistry())
+
+    with pytest.raises(DialBusy):
+        place_scheduled_call(
+            12, store=store, telephony=FakeTelephony(fail_with=ConcurrentCallLimit("차 있다")),
+            lifecycle=lifecycle, answer_url="https://api.example.com/v1/voiceml",
+        )
+
+    assert store.find_active(12) is None
+    assert store.recent_scheduled(12, 10) == []
+    # 전화선이 비면 같은 어르신에게 다시 걸린다.
+    telephony = FakeTelephony()
+    place_scheduled_call(
+        12, store=store, telephony=telephony,
+        lifecycle=lifecycle, answer_url="https://api.example.com/v1/voiceml",
+    )
+    assert len(telephony.placed) == 1

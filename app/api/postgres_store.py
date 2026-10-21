@@ -228,6 +228,14 @@ class PostgresCallStore:
     def mark_failed(self, call_id: int) -> None:
         self._finish(call_id, "failed")
 
+    def discard_unplaced(self, call_id: int) -> bool:
+        with self._pool.connection() as conn:
+            deleted = conn.execute(
+                "DELETE FROM calls WHERE call_id = %s AND provider_call_sid IS NULL AND status = 'scheduled'",
+                (call_id,),
+            ).rowcount
+        return deleted == 1
+
     def mark_no_answer(self, call_id: int) -> None:
         """전화는 걸렸지만 오디오가 한 번도 붙지 않았다."""
         self._finish(call_id, "no_answer")

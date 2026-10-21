@@ -16,13 +16,18 @@ import logging
 
 from app.api.lifecycle import CallLifecycle
 from app.api.store import CallRecord, CallStore
-from app.telephony.client import Telephony
+from app.scheduler import TryLater
+from app.telephony.client import ConcurrentCallLimit, Telephony
 
 logger = logging.getLogger(__name__)
 
 
 class DialFailed(Exception):
     """발신에 실패했다. 통화는 실패로 표시됐고 재시도가 열려 있다."""
+
+
+class DialBusy(DialFailed, TryLater):
+    """전화망의 동시 통화 한도에 닿았다. 전화는 나가지 않았고 통화 기록도 남기지 않았다 — 잠시 뒤에 다시 걸면 된다."""
 
 
 def answer_url_for(public_base_url: str) -> str:
@@ -52,6 +57,12 @@ def dial(
             answer_url=answer_url,
             status_callback_url=status_callback_url,
         )
+    except ConcurrentCallLimit as exc:
+        # 앞선 통화가 아직 끝나지 않았다. 기록을 지워 두어야 예약 통화가 '오늘 이미 걸었다'로 잡히지 않아
+        # 다음 틱에 다시 걸리고, 수동 요청도 하루 횟수를 깎지 않는다.
+        store.discard_unplaced(call.call_id)
+        logger.warning("전화선이 차 있어 발신을 미룬다 call_id=%s", call.call_id)
+        raise DialBusy("지금 다른 통화 중이에요. 잠시 뒤에 다시 해 주세요") from exc
     except Exception as exc:
         # 발신 자체가 실패했다 — 실제 통화는 나가지 않았다. 안전하게
         # 실패 처리해 재시도를 열어준다.
