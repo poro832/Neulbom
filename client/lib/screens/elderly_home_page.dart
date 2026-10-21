@@ -19,7 +19,14 @@ const Color eLine = Color(0xFFD6E4FF);
 const Color eAccent = Color(0xFF1A6BFF);
 
 class ElderlyHomePage extends StatefulWidget {
-  const ElderlyHomePage({super.key, this.withdrawalPollInterval = const Duration(seconds: 20)});
+  const ElderlyHomePage({
+    super.key,
+    this.name,
+    this.withdrawalPollInterval = const Duration(seconds: 20),
+  });
+
+  /// 로그인한 어르신 이름. 상단 인사에 쓴다 — 여러 계정을 오갈 때 지금 누구인지 바로 보이게. 없으면 인사를 띄우지 않는다.
+  final String? name;
 
   /// 탈퇴 요청을 서버에 다시 묻는 간격. 보호자가 승인·거절한 것을 어르신 화면이 저절로 알아차린다.
   final Duration withdrawalPollInterval;
@@ -78,7 +85,9 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
       MaterialPageRoute(builder: (context) => const ElderlyLoginScreen()),
       (route) => false,
     );
-    messenger.showSnackBar(const SnackBar(content: Text('탈퇴가 처리됐거나 이 폰의 연결이 끝났어요.')));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('이 폰의 연결이 끝났어요. 탈퇴가 처리됐거나 다른 폰에서 로그인했어요.')),
+    );
   }
 
   /// 요청을 취소하거나(승인 대기), 거절된 요청을 치운다. 끝나면 상태를 다시 읽는다.
@@ -518,6 +527,21 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                 backgroundColor: eBg,
                 elevation: 0,
                 automaticallyImplyLeading: false,
+                centerTitle: false,
+                titleSpacing: 20,
+                title: (widget.name ?? '').trim().isEmpty
+                    ? null
+                    : Text(
+                        '안녕하세요, ${widget.name!.trim()} 어르신',
+                        key: const Key('elder-greeting'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.notoSansKr(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: eInk,
+                        ),
+                      ),
                 actions: [
                   Padding(
                     padding: const EdgeInsets.only(right: 16),
