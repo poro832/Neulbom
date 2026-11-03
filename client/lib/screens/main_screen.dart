@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'call_request_dialog.dart';
-import 'ai_chat_screen.dart';
 import 'emergency_screen.dart';
 import '../utils/korean.dart';
 
@@ -262,22 +261,6 @@ class _MainScreenState extends State<MainScreen> {
 
                 const SizedBox(height: 24),
 
-                _buildMenuCard(
-                  title: 'AI 채팅',
-                  description: '글로 편하게 이야기해요',
-                  backgroundColor: eAccentSoft,
-                  iconColor: eBrass,
-                  icon: Icons.chat_bubble_outline,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const AiChatScreen(),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 18),
                 _buildMenuCard(
                   title: '비상 연락',
                   description: '도움이 필요할 때 눌러요',
