@@ -139,4 +139,71 @@ void main() {
     expect(find.textContaining('연결하기 전에는'), findsOneWidget);
     expect(find.textContaining('전화가 곧 가요'), findsNothing);
   });
+
+  Future<void> openConfirm(WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => confirmAndRequestCall(context),
+              child: const Text('통화하기'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('통화하기'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('통화하기를 누르면 먼저 "전화를 진행하시겠습니까?"를 묻고, 아직 서버를 부르지 않는다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await NulbomApi.saveElderKey('nle_${'x' * 39}');
+    var called = false;
+    NulbomApi.client = MockClient((request) async {
+      called = true;
+      return _json({'call_id': 7, 'status': 'requested'}, 202);
+    });
+
+    await openConfirm(tester);
+
+    expect(find.text('전화를 진행하시겠습니까?'), findsOneWidget);
+    expect(called, isFalse);
+  });
+
+  testWidgets('"아니요"를 누르면 전화를 요청하지 않고 닫힌다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await NulbomApi.saveElderKey('nle_${'x' * 39}');
+    var called = false;
+    NulbomApi.client = MockClient((request) async {
+      called = true;
+      return _json({'call_id': 7, 'status': 'requested'}, 202);
+    });
+
+    await openConfirm(tester);
+    await tester.tap(find.byKey(const Key('call-confirm-no')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(called, isFalse);
+  });
+
+  testWidgets('"네"를 누르면 그때서야 전화를 요청한다', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await NulbomApi.saveElderKey('nle_${'x' * 39}');
+    String? path;
+    NulbomApi.client = MockClient((request) async {
+      path = request.url.path;
+      return _json({'call_id': 7, 'status': 'requested'}, 202);
+    });
+
+    await openConfirm(tester);
+    await tester.tap(find.byKey(const Key('call-confirm-yes')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(path, '/v1/me/call-request');
+    expect(find.textContaining('전화가 곧 가요.'), findsOneWidget);
+  });
 }

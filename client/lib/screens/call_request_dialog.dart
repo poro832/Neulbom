@@ -10,6 +10,53 @@ const Color _inkSoft = Color(0xFF3C5C8C);
 const Color _accent = Color(0xFF1A6BFF);
 const Color _card = Color(0xFFFFFFFF);
 
+/// "통화하기"를 잘못 눌렀을 때를 대비해, 전화를 요청하기 전에 한 번 더 묻는다.
+/// "네"를 눌렀을 때만 [showCallRequestDialog]로 이어진다.
+Future<void> confirmAndRequestCall(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: _card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      content: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          '전화를 진행하시겠습니까?',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.notoSansKr(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: _ink,
+            height: 1.5,
+          ),
+        ),
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        TextButton(
+          key: const Key('call-confirm-no'),
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: Text(
+            '아니요',
+            style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700, color: _inkSoft),
+          ),
+        ),
+        TextButton(
+          key: const Key('call-confirm-yes'),
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: Text(
+            '네',
+            style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700, color: _accent),
+          ),
+        ),
+      ],
+    ),
+  );
+  if (ok == true && context.mounted) {
+    await showCallRequestDialog(context);
+  }
+}
+
 /// 어르신이 "통화하기"를 눌렀을 때. 화면을 바꾸지 않고 팝업으로 알린다.
 ///
 /// 앱은 통화를 하지 않는다 — 서버에 전화를 걸어 달라고 요청하고, 어르신 전화기가 울리기를 기다릴 뿐이다.

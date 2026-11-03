@@ -860,7 +860,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   Widget _buildElderCard(BuildContext context, Map<String, dynamic> elder) {
     final hasTalked = elder['hasTalked'] as bool;
-    const pendingColor = Color(0xFFFF0000);
+    const pendingColor = Color(0xFFFF6B6B);
     return GestureDetector(
       onTap: () {
         Navigator.push(

@@ -202,7 +202,7 @@ class _MainScreenState extends State<MainScreen> {
 
                 // 다이얼 버튼 - 크기 증가
                 GestureDetector(
-                  onTap: () => showCallRequestDialog(context),
+                  onTap: () => confirmAndRequestCall(context),
                   child: Container(
                     width: screenWidth * 0.65,
                     height: screenWidth * 0.65,
