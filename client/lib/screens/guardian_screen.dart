@@ -61,6 +61,14 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   static const _weekdayShort = ['월', '화', '수', '목', '금', '토', '일'];
 
+  /// 점수 단계의 색: 60점부터 경고(빨강), 30점부터 주의(주황), 그 아래는 정상(초록). 기록이 없으면 정상 색이다.
+  static Color _scoreColor(Object? score) {
+    final value = score is num ? score.toDouble() : null;
+    if (value != null && value >= 60) return const Color(0xFFF44336);
+    if (value != null && value >= 30) return const Color(0xFFFFA726);
+    return const Color(0xFF4CAF50);
+  }
+
   static String _status(double? score) {
     if (score == null) return '기록 없음';
     if (score >= 60) return '경고';
@@ -501,7 +509,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
                         title: '평소와 다른 정도',
                         value: _scoreText(_selectedElder['weekScore']),
                         subtitle: '',
-                        color: const Color(0xFF4CAF50),
+                        color: _scoreColor(_selectedElder['weekScore']),
                       ),
                     ),
                   ],

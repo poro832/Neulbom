@@ -15,7 +15,7 @@ http.Response json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json; charset=utf-8'},
     );
 
-http.Client server({bool alerts = true, int eldersStatus = 200}) => MockClient((request) async {
+http.Client server({bool alerts = true, int eldersStatus = 200, double score = 20.0}) => MockClient((request) async {
       final path = request.url.path;
       if (path == '/v1/guardian/elders') {
         if (eldersStatus != 200) return json({'detail': '열쇠가 필요합니다'}, eldersStatus);
@@ -28,7 +28,7 @@ http.Client server({bool alerts = true, int eldersStatus = 200}) => MockClient((
               'last_call_at': null,
               'last_status': null,
               'week_calls': 2,
-              'week_avg_score': 20.0,
+              'week_avg_score': score,
               'week_alerts': 1,
             }
           ],
@@ -39,10 +39,10 @@ http.Client server({bool alerts = true, int eldersStatus = 200}) => MockClient((
           'week_start': '2026-10-04',
           'days': [
             for (var i = 4; i <= 10; i++)
-              {'date': '2026-10-${i.toString().padLeft(2, '0')}', 'calls': i == 5 ? 1 : 0, 'avg_score': i == 5 ? 20.0 : null},
+              {'date': '2026-10-${i.toString().padLeft(2, '0')}', 'calls': i == 5 ? 1 : 0, 'avg_score': i == 5 ? score : null},
           ],
           'total_calls': 3,
-          'avg_score': 20.0,
+          'avg_score': score,
         });
       }
       if (path == '/v1/guardian/alerts') {
@@ -89,6 +89,23 @@ void main() {
     expect(find.textContaining('평소와 다름'), findsWidgets); // 알림 종류
     expect(find.textContaining('김할머니'), findsNothing); // 옛 예시 데이터가 아니다
     expect(find.textContaining('우울'), findsNothing);
+  });
+
+  testWidgets('이번 주 평소와 다른 정도의 색은 점수 단계를 따른다(30점부터 주황, 60점부터 빨강)', (tester) async {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    Future<Color?> colorOf(double score, String label) async {
+      NulbomApi.client = server(score: score);
+      await tester.pumpWidget(MaterialApp(key: UniqueKey(), home: const GuardianScreen()));
+      await tester.pumpAndSettle();
+      return tester.widget<Text>(find.text(label).first).style?.color;
+    }
+
+    expect(await colorOf(20, '20점'), const Color(0xFF4CAF50));
+    expect(await colorOf(45, '45점'), const Color(0xFFFFA726));
+    expect(await colorOf(68, '68점'), const Color(0xFFF44336));
   });
 
   testWidgets('서버가 거절하면 그 문장과 다시 불러오기를 보여 준다', (tester) async {
