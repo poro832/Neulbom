@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../services/phone_dialer.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
 const Color eCard = Color(0xFFFFFFFF);
@@ -130,14 +131,19 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
             child: const Text('취소', style: TextStyle(fontSize: 18)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('$name 에게 전화 중... ($number)'),
-                  duration: const Duration(seconds: 3),
-                ),
-              );
+              // 전화 앱을 열어 번호를 채운다. 통화 버튼은 한 번 더 눌러야 걸린다.
+              final opened = await PhoneDialer.open(number);
+              if (!opened) {
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('전화 앱을 열지 못했어요. 직접 $number 번으로 걸어 주세요.'),
+                    duration: const Duration(seconds: 6),
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFD92D20),

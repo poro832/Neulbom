@@ -65,6 +65,7 @@ dependencies:
 
   # Google Fonts (Noto Sans KR)
   google_fonts: ^6.1.0
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
