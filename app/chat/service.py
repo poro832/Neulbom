@@ -79,6 +79,8 @@ class ChatService:
         self._clock = clock
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
+        self._locks: dict[int, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
 
     @property
     def available(self) -> bool:
@@ -91,28 +93,31 @@ class ChatService:
         now = self._clock()
         # 위급한 말은 잘리기 전의 글 전체에서 찾는다(긴 글 속에 있어도 놓치지 않는다).
         urgent = detect_urgent(text)
-        sent_today = self._store.elder_messages_since(elder_id, now - 86400)
-        over_limit = sent_today >= DAILY_LIMIT
-        no_model = self._model is None
-        if urgent is None:
-            if over_limit:
-                raise ChatLimitReached()
-            if no_model:
-                raise ChatUnavailable("모델 없음")
 
-        if urgent is not None and sent_today >= DAILY_LIMIT + URGENT_RESERVE:
-            # 예비분까지 다 썼다. 이 분류를 이미 알렸거나, 알림이 실패해 표시를 남기려는 시도마저 다 썼다면(절대 상한)
-            # 저장도 모델 호출도 알림 시도도 하지 않고 안내만 돌려준다.
-            exhausted = sent_today >= DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
-            if exhausted or self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category):
-                return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
+        # '개수 읽기 → 한도와 비교 → 저장'이 한 덩어리여야 한다. 같은 어르신의 요청이 겹쳐도 모두 같은 개수를 보고
+        # 통과하지 못하도록 어르신별로 이 구간만 직렬화한다(느린 모델 호출은 자물쇠 밖에서 한다).
+        with self._elder_lock(elder_id):
+            sent_today = self._store.elder_messages_since(elder_id, now - 86400)
+            over_limit = sent_today >= DAILY_LIMIT
+            no_model = self._model is None
+            if urgent is None:
+                if over_limit:
+                    raise ChatLimitReached()
+                if no_model:
+                    raise ChatUnavailable("모델 없음")
+            elif sent_today >= DAILY_LIMIT + URGENT_RESERVE:
+                # 예비분까지 다 썼다. 이 분류를 이미 알렸거나, 알림이 실패해 표시를 남기려는 시도마저 다 썼다면(절대 상한)
+                # 저장도 모델 호출도 알림 시도도 하지 않고 안내만 돌려준다.
+                exhausted = sent_today >= DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
+                if exhausted or self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category):
+                    return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
 
-        session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
-        message_id = self._store.add_message(
-            session, "elder", text[:MAX_MESSAGE_CHARS], now, urgent.category if urgent else None
-        )
-        if urgent is not None:
-            self._alert_guardians(elder_id, message_id, urgent.category, now)
+            session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
+            message_id = self._store.add_message(
+                session, "elder", text[:MAX_MESSAGE_CHARS], now, urgent.category if urgent else None
+            )
+            if urgent is not None:
+                self._alert_guardians(elder_id, message_id, urgent.category, now)
 
         if urgent is not None and (over_limit or no_model):
             reply = safety_notice(urgent.category)  # 모델을 부르지 않는다 — 안내만 나간다
@@ -125,6 +130,13 @@ class ChatService:
                 raise ChatUnavailable("빈 응답")
         self._store.add_message(session, "ai", reply, self._clock())
         return ChatReply(reply=reply, urgent=urgent.category if urgent else None)
+
+    def _elder_lock(self, elder_id: int) -> threading.Lock:
+        with self._locks_guard:
+            lock = self._locks.get(elder_id)
+            if lock is None:
+                lock = self._locks[elder_id] = threading.Lock()
+            return lock
 
     def summaries(self, elder_id: int, *, limit: int = 10) -> list[ChatSummary]:
         """보호자에게 보일 요약(동의 확인은 호출자가 한다). 끝난 대화 덩이가 아직 요약 전이면 지금 만든다."""

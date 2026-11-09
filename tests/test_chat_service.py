@@ -448,3 +448,49 @@ def test_a_failing_alerter_cannot_keep_the_storage_growing_past_the_absolute_cap
     assert service._store.elder_messages_since(12, 0) <= DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
     assert len(model.seen) == calls_before  # 한도를 넘었으니 모델은 부르지 않는다
     assert len(attempts) <= URGENT_RESERVE + URGENT_MARKER_ALLOWANCE  # 알림 시도도 무한하지 않다
+
+
+def test_concurrent_requests_cannot_slip_past_the_daily_limit_or_the_absolute_cap():
+    import threading
+    import time as _time
+
+    from app.chat.service import URGENT_MARKER_ALLOWANCE, URGENT_RESERVE
+
+    class SlowStore(InMemoryChatStore):
+        def elder_messages_since(self, elder_id, since):
+            count = super().elder_messages_since(elder_id, since)
+            _time.sleep(0.002)  # 읽기와 저장 사이를 넓혀 겹침을 드러낸다
+            return count
+
+    cap = DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
+    model = FakeModel()
+    service = ChatService(
+        store=SlowStore(), model=model, on_urgent=lambda e, c: False, clock=Clock()  # 알림은 계속 실패한다
+    )
+    for _ in range(DAILY_LIMIT - 5):
+        service.send(12, "응")
+
+    start = threading.Barrier(60)
+    errors = []
+
+    def worker(urgent):
+        start.wait()
+        try:
+            service.send(12, "가슴이 아파요" if urgent else "응")
+        except (ChatLimitReached, ChatUnavailable):
+            pass
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i % 2 == 0,)) for i in range(60)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    stored = service._store.elder_messages_since(12, 0)
+    assert stored <= cap
+    # 평범한 말은 한도(200) 안에서만 받는다 — 겹친 요청이 한도를 넘기지 못한다
+    ordinary = [m for m in service._store.history(service._store.session_for(12, service._clock(), SESSION_IDLE_SECONDS), 1000) if m.role == "elder" and m.text == "응"]
+    assert len(ordinary) <= DAILY_LIMIT
