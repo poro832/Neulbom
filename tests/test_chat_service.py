@@ -425,3 +425,26 @@ def test_the_summary_model_only_sees_a_bounded_recent_part_of_a_long_conversatio
     assert len(turns) <= SUMMARY_MAX_TURNS
     assert sum(len(text) for _, text in turns) <= SUMMARY_MAX_CHARS
     assert "149번째" in turns[-1][1] or "149번째" in turns[-2][1]  # 최근 것이 남는다
+
+
+def test_a_failing_alerter_cannot_keep_the_storage_growing_past_the_absolute_cap():
+    from app.chat.service import URGENT_MARKER_ALLOWANCE, URGENT_RESERVE
+
+    attempts = []
+
+    def always_fails(elder_id, category):
+        attempts.append(category)
+        return False  # 보호자가 없거나 모두 실패한다 — '알렸다'로 표시되지 않는다
+
+    model = FakeModel()
+    service, _, _ = make(model, on_urgent=always_fails)
+    for _ in range(DAILY_LIMIT):
+        service.send(12, "응")
+    calls_before = len(model.seen)
+
+    replies = [service.send(12, "가슴이 아파요") for _ in range(URGENT_RESERVE + URGENT_MARKER_ALLOWANCE + 50)]
+
+    assert all("119" in r.reply for r in replies)  # 안내는 계속 나간다
+    assert service._store.elder_messages_since(12, 0) <= DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
+    assert len(model.seen) == calls_before  # 한도를 넘었으니 모델은 부르지 않는다
+    assert len(attempts) <= URGENT_RESERVE + URGENT_MARKER_ALLOWANCE  # 알림 시도도 무한하지 않다

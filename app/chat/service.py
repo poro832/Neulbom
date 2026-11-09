@@ -32,6 +32,9 @@ MAX_REPLY_CHARS = 600
 # 하루 한도를 넘은 뒤에도 위급한 말은 알리고 안내하지만, 저장하는 양에는 상한이 있다. 이 예비분을 넘으면 같은 분류가
 # 이미 알려진 말은 저장하지 않고 안내만 돌려준다(저장 용량과, 그 글이 들어갈 요약 모델 요금을 한없이 늘리지 못하게).
 URGENT_RESERVE = 20
+# 예비분을 넘은 뒤에도 '아직 알리지 못한 분류'의 말은 알림 표시를 남기려고 몇 번 더 저장할 수 있다(알림이 실패하면 표시가
+# 남지 않아 다시 시도해야 하므로). 하지만 알림이 계속 실패해도 저장량이 늘지 못하도록, 한도 + 예비분 + 이 수가 절대 상한이다.
+URGENT_MARKER_ALLOWANCE = 8
 # 요약 모델에 넣는 대화의 상한. 대화가 아무리 길어도 최근 것만 이만큼 넣는다.
 SUMMARY_MAX_TURNS = 60
 SUMMARY_MAX_CHARS = 8000
@@ -97,13 +100,12 @@ class ChatService:
             if no_model:
                 raise ChatUnavailable("모델 없음")
 
-        if (
-            urgent is not None
-            and sent_today >= DAILY_LIMIT + URGENT_RESERVE
-            and self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category)
-        ):
-            # 예비분까지 다 썼고 이 분류는 이미 알렸다 — 저장도 모델 호출도 하지 않고 안내만 돌려준다.
-            return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
+        if urgent is not None and sent_today >= DAILY_LIMIT + URGENT_RESERVE:
+            # 예비분까지 다 썼다. 이 분류를 이미 알렸거나, 알림이 실패해 표시를 남기려는 시도마저 다 썼다면(절대 상한)
+            # 저장도 모델 호출도 알림 시도도 하지 않고 안내만 돌려준다.
+            exhausted = sent_today >= DAILY_LIMIT + URGENT_RESERVE + URGENT_MARKER_ALLOWANCE
+            if exhausted or self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category):
+                return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
 
         session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
         message_id = self._store.add_message(
