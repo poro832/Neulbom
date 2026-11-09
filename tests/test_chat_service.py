@@ -363,3 +363,65 @@ def test_the_alerter_reports_false_when_nobody_could_be_alerted_and_true_when_on
             return NoGuardians()
 
     assert make_urgent_alerter(elders=Empty(), alerts=good, notifier=None)(12, "medical") is False
+
+
+def test_urgent_messages_beyond_the_reserve_are_not_stored_but_still_get_the_notice_without_the_model():
+    from app.chat.service import URGENT_RESERVE
+
+    model = FakeModel()
+    service, _, alerts = make(model)
+    for _ in range(DAILY_LIMIT):
+        service.send(12, "응")
+    calls_before = len(model.seen)
+
+    replies = [service.send(12, "가슴이 아파요") for _ in range(URGENT_RESERVE + 30)]
+
+    assert all("119" in r.reply and r.urgent == "medical" for r in replies)
+    assert len(model.seen) == calls_before  # 한도를 넘은 뒤에는 모델을 부르지 않는다
+    assert alerts == [(12, "medical")]
+    stored = service._store.elder_messages_since(12, 0)
+    assert stored <= DAILY_LIMIT + URGENT_RESERVE  # 저장량에 상한이 있다
+
+
+def test_a_new_urgent_category_past_the_reserve_is_still_alerted_and_stored_once():
+    from app.chat.service import URGENT_RESERVE
+
+    service, _, alerts = make()
+    for _ in range(DAILY_LIMIT):
+        service.send(12, "응")
+    for _ in range(URGENT_RESERVE + 5):
+        service.send(12, "가슴이 아파요")
+    before = service._store.elder_messages_since(12, 0)
+
+    result = service.send(12, "더는 못 살겠어요. 죽고 싶어요")
+
+    assert result.urgent == "self_harm" and "109" in result.reply
+    assert alerts == [(12, "medical"), (12, "self_harm")]
+    assert service._store.elder_messages_since(12, 0) == before + 1  # 새 분류는 알림 표시를 위해 한 번 저장한다
+    service.send(12, "죽고 싶어요 정말")
+    assert service._store.elder_messages_since(12, 0) == before + 1  # 같은 분류는 더 저장하지 않는다
+
+
+def test_the_summary_model_only_sees_a_bounded_recent_part_of_a_long_conversation():
+    from app.chat.service import SUMMARY_MAX_CHARS, SUMMARY_MAX_TURNS
+
+    seen = []
+
+    class Recorder:
+        model_id = "m"
+
+        def summarize(self, turns):
+            seen.append(list(turns))
+            return "어르신이 이야기를 하셨어요."
+
+    service, clock, _ = make(summarizer=Recorder())
+    for i in range(150):
+        service.send(12, f"{i}번째 이야기 " + "가" * 250)
+    clock.now += SESSION_IDLE_SECONDS + 60
+
+    service.summaries(12)
+
+    (turns,) = seen
+    assert len(turns) <= SUMMARY_MAX_TURNS
+    assert sum(len(text) for _, text in turns) <= SUMMARY_MAX_CHARS
+    assert "149번째" in turns[-1][1] or "149번째" in turns[-2][1]  # 최근 것이 남는다

@@ -29,6 +29,12 @@ DAILY_LIMIT = 200  # 어르신 한 명이 하루에 보낼 수 있는 말(Bedroc
 MAX_MESSAGE_CHARS = 300  # 저장하고 모델에 보내는 길이. 위급한 말 찾기는 자르기 전 글 전체에서 한다
 MAX_REQUEST_CHARS = 2000  # 이보다 긴 글만 거절한다(앱은 300자까지만 받는다)
 MAX_REPLY_CHARS = 600
+# 하루 한도를 넘은 뒤에도 위급한 말은 알리고 안내하지만, 저장하는 양에는 상한이 있다. 이 예비분을 넘으면 같은 분류가
+# 이미 알려진 말은 저장하지 않고 안내만 돌려준다(저장 용량과, 그 글이 들어갈 요약 모델 요금을 한없이 늘리지 못하게).
+URGENT_RESERVE = 20
+# 요약 모델에 넣는 대화의 상한. 대화가 아무리 길어도 최근 것만 이만큼 넣는다.
+SUMMARY_MAX_TURNS = 60
+SUMMARY_MAX_CHARS = 8000
 URGENT_ALERT_WINDOW_SECONDS = 24 * 3600  # 같은 어르신께 같은 분류의 위급 알림은 하루 한 번
 SUMMARIZE_PER_REQUEST = 3  # 보호자가 한 번 열 때 새로 요약하는 대화 덩이의 최대 수
 PURGE_AFTER_SECONDS = 30 * 24 * 3600
@@ -82,13 +88,22 @@ class ChatService:
         now = self._clock()
         # 위급한 말은 잘리기 전의 글 전체에서 찾는다(긴 글 속에 있어도 놓치지 않는다).
         urgent = detect_urgent(text)
-        over_limit = self._store.elder_messages_since(elder_id, now - 86400) >= DAILY_LIMIT
+        sent_today = self._store.elder_messages_since(elder_id, now - 86400)
+        over_limit = sent_today >= DAILY_LIMIT
         no_model = self._model is None
         if urgent is None:
             if over_limit:
                 raise ChatLimitReached()
             if no_model:
                 raise ChatUnavailable("모델 없음")
+
+        if (
+            urgent is not None
+            and sent_today >= DAILY_LIMIT + URGENT_RESERVE
+            and self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category)
+        ):
+            # 예비분까지 다 썼고 이 분류는 이미 알렸다 — 저장도 모델 호출도 하지 않고 안내만 돌려준다.
+            return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
 
         session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
         message_id = self._store.add_message(
@@ -115,7 +130,7 @@ class ChatService:
         if self._summarizer is not None:
             for session_id in self._store.sessions_to_summarize(elder_id, now - SESSION_IDLE_SECONDS, SUMMARIZE_PER_REQUEST):
                 try:
-                    summary = self._summarizer.summarize(self._store.transcript(session_id))
+                    summary = self._summarizer.summarize(_limit_for_summary(self._store.transcript(session_id)))
                 except Exception:
                     # 실패는 '시도했다'로 표시하지 않는다 — 다음에 열 때 다시 해 본다. 말 내용은 로그에 남기지 않는다.
                     logger.exception("채팅 요약 실패 session_id=%s", session_id)
@@ -191,3 +206,16 @@ class ChatService:
             return
         self._store.mark_alerted(message_id, now)
         logger.info("채팅 위급 알림을 보냈다 elder_id=%s category=%s", elder_id, category)
+
+
+def _limit_for_summary(turns: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """요약 모델에 넣을 대화: 최근 것부터 SUMMARY_MAX_TURNS개, SUMMARY_MAX_CHARS 글자까지(오래된 것을 버린다)."""
+    kept: list[tuple[str, str]] = []
+    total = 0
+    for speaker, text in reversed(turns[-SUMMARY_MAX_TURNS:]):
+        if kept and total + len(text) > SUMMARY_MAX_CHARS:
+            break
+        kept.append((speaker, text[:SUMMARY_MAX_CHARS]))
+        total += len(text)
+    kept.reverse()
+    return kept
