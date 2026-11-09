@@ -511,6 +511,20 @@ class NulbomApi {
     return ElderMentions.fromJson(json);
   }
 
+  /// 어르신: AI 채팅에 말 한 마디를 보내고 답을 받는다 — 어르신 열쇠로 부른다.
+  /// 서버가 거절하면(429 하루 한도, 503 준비 중·잠시 뒤) 그 문장이 [ApiException.message]에 그대로 온다.
+  static Future<ChatAnswer> sendChat(String message, {String? key}) async {
+    final json = await _send('POST', '/v1/me/chat',
+        key: await _elderKeyOrThrow(key), body: {'message': message});
+    return ChatAnswer.fromJson(json);
+  }
+
+  /// 보호자: 어르신의 AI 채팅 요약(원문은 오지 않는다). 어르신이 동의하기 전에는 비어 있다.
+  static Future<ElderChats> elderChats(int elderId, {String? key}) async {
+    final json = await _send('GET', '/v1/elders/$elderId/chats', key: _guardianKeyOrThrow(key));
+    return ElderChats.fromJson(json);
+  }
+
   /// 보호자: 통화 한 건의 AI/어르신 대화 원문. 열 때마다 서버에 열람 기록이 남는다.
   static Future<List<CallTurn>> callTurns(int callId, {String? key}) async {
     final json = await _send('GET', '/v1/calls/$callId/turns', key: _guardianKeyOrThrow(key));

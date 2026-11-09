@@ -182,6 +182,10 @@ class PushNotifier:
         """다른 보호자가 이 어르신에 새로 연결됐다 — 이미 보던 보호자들에게 알린다."""
         self._notify(guardian_id, elder_id, "보호자가 새로 연결됐어요")
 
+    def notify_chat_urgent(self, guardian_id: int, elder_id: int) -> None:
+        """어르신이 채팅에서 위급할 수 있는 말을 했다 — 말 내용은 싣지 않는다."""
+        self._notify(guardian_id, elder_id, "채팅에서 위급할 수 있는 표현이 있었어요")
+
     def _notify(self, guardian_id: int, elder_id: int, what: str) -> None:
         if self._sender is None:
             return

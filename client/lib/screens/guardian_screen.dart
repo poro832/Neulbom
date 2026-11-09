@@ -112,7 +112,11 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
   Map<String, dynamic> _alertToMap(AlertItem a) {
     return {
-      'type': a.type == 'no_answer' ? '미응답' : '평소와 다름',
+      'type': a.type == 'no_answer'
+          ? '미응답'
+          : a.type == 'emergency_keyword'
+              ? '위급 표현'
+              : '평소와 다름',
       'elder': a.elderName,
       'time': _when(a.createdAt),
       'severity': a.severity == 'critical'
@@ -1129,7 +1133,7 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
     return GestureDetector(
       onTap: () {
-        final tabIndex = alert['type'] == '평소와 다름' ? 1 : 2;
+        final tabIndex = alert['type'] == '미응답' ? 2 : 1; // 위급 표현도 '건강 경고' 탭에서 본다
         Navigator.push(
           context,
           MaterialPageRoute(

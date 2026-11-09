@@ -63,7 +63,7 @@ class AppKit:
         return code
 
 
-def make_app_kit(now: float | None = None) -> AppKit:
+def make_app_kit(now: float | None = None, chat=None) -> AppKit:
     clock = WallClock(now if now is not None else kst(2026, 10, 8, 9, 0, 0))
     key_store = InMemoryGuardianKeyStore()
     new = generate_key()
@@ -96,6 +96,7 @@ def make_app_kit(now: float | None = None) -> AppKit:
     elder_store = InMemoryElderKeyStore(wall_clock=clock)
     data.elder_keys = elder_store
     data.elder_auth = ElderKeyAuth(elder_store)
+    data.chat = chat  # 채팅 주소는 서비스가 있을 때만 생긴다
 
     app = FastAPI()
     add_app_routes(app, data)

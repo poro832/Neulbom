@@ -7,6 +7,7 @@ import '../utils/kst.dart';
 import 'elder_call_time_card.dart';
 import 'elder_calls_screen.dart';
 import 'elder_mentions_section.dart';
+import 'elder_chats_section.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
 const Color eCard = Color(0xFFFFFFFF);
@@ -1291,6 +1292,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
               // 어르신이 통화에서 직접 하신 건강·기분 이야기(주간)
               ElderMentionsSection(elderId: widget.elderlyId, now: widget.now),
+              const SizedBox(height: 24),
+
+              // 어르신이 앱 AI 채팅에서 나눈 이야기의 요약(원문은 보이지 않는다)
+              ElderChatsSection(elderId: widget.elderlyId),
               const SizedBox(height: 24),
 
               // 상태 분석

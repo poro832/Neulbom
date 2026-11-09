@@ -528,3 +528,43 @@ class ElderMentions {
             .toList(),
       );
 }
+
+/// 어르신이 AI 채팅에서 보낸 말에 대한 AI의 답. [urgent]가 true면 위급할 수 있는 표현이 잡혀 보호자에게도 알려졌다.
+class ChatAnswer {
+  final String reply;
+  final bool urgent;
+
+  const ChatAnswer({required this.reply, required this.urgent});
+
+  factory ChatAnswer.fromJson(Map<String, dynamic> json) =>
+      ChatAnswer(reply: json['reply'] as String, urgent: (json['urgent'] as bool?) ?? false);
+}
+
+/// 보호자 앱에 보이는 AI 채팅 요약 한 건. 원문은 오지 않는다.
+class ChatSummaryItem {
+  final int sessionId;
+  final DateTime startedAt;
+  final String summary;
+
+  const ChatSummaryItem({required this.sessionId, required this.startedAt, required this.summary});
+
+  factory ChatSummaryItem.fromJson(Map<String, dynamic> json) => ChatSummaryItem(
+        sessionId: json['session_id'] as int,
+        startedAt: _asTime(json['started_at'])!,
+        summary: json['summary'] as String,
+      );
+}
+
+class ElderChats {
+  final bool shareAgreed; // false면 어르신이 아직 공유에 동의하지 않았다 — chats는 비어 있다
+  final List<ChatSummaryItem> chats;
+
+  const ElderChats({required this.shareAgreed, required this.chats});
+
+  factory ElderChats.fromJson(Map<String, dynamic> json) => ElderChats(
+        shareAgreed: (json['share_agreed'] as bool?) ?? false,
+        chats: ((json['chats'] as List<dynamic>?) ?? [])
+            .map((c) => ChatSummaryItem.fromJson(c as Map<String, dynamic>))
+            .toList(),
+      );
+}

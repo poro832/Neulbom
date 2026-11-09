@@ -161,6 +161,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
 
   static HealthAlert _toHealthAlert(AlertItem item) {
     final noAnswer = item.type == 'no_answer';
+    final urgent = item.type == 'emergency_keyword';
     final String severity;
     switch (item.severity) {
       case 'critical':
@@ -172,14 +173,16 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
     }
     return HealthAlert(
       alertId: '${item.alertId}',
-      type: noAnswer ? '미응답' : '평소와 다름',
+      type: noAnswer ? '미응답' : (urgent ? '위급 표현' : '평소와 다름'),
       elder: item.elderName,
       message: item.message,
       time: _timeText(item.createdAt),
       severity: severity,
       action: noAnswer
           ? '다시 연락해 보세요'
-          : (item.severity == 'critical' ? '가능하면 직접 연락해 보세요' : '안부를 한 번 확인해 보세요'),
+          : (urgent
+              ? '지금 바로 연락해 보세요'
+              : (item.severity == 'critical' ? '가능하면 직접 연락해 보세요' : '안부를 한 번 확인해 보세요')),
     );
   }
 
@@ -375,6 +378,7 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
       );
     }
 
+    final urgentAlerts = filteredAlerts.where((a) => a.type == '위급 표현').toList();
     final changeAlerts = filteredAlerts.where((a) => a.type == '평소와 다름').toList();
     final noResponseAlerts = filteredAlerts.where((a) => a.type == '미응답').toList();
 
@@ -384,6 +388,14 @@ class _HealthAlertsScreenState extends State<HealthAlertsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (urgentAlerts.isNotEmpty) ...[
+              _buildAlertSection(
+                title: '위급 표현',
+                color: const Color(0xFFD92D20),
+                alerts: urgentAlerts,
+              ),
+              const SizedBox(height: 20),
+            ],
             if (changeAlerts.isNotEmpty) ...[
               _buildAlertSection(
                 title: '평소와 다름',

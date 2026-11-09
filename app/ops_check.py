@@ -36,6 +36,8 @@ TABLE_MIGRATIONS = {
     "call_mentions": "2026-10-15-call-mentions.sql",
     "guardian_devices": "2026-10-13-guardian-devices.sql",
     "elder_link_codes": "2026-10-14-elder-link.sql",
+    "chat_sessions": "2026-11-09-ai-chat.sql",
+    "chat_messages": "2026-11-09-ai-chat.sql",
 }
 
 # (표, 칸) -> 그 칸을 더하는 SQL 파일
@@ -126,6 +128,7 @@ def check_environment(
     need(("PUBLIC_BASE_URL", "STREAM_BASE_URL"), "공개 주소", "전화 연결 주소를 만들 수 없다")
     need(("FIREBASE_PROJECT_ID",), "이메일 인증(Firebase)", "새 보호자가 이메일 인증을 못 해 어르신을 연결할 수 없다")
     need(("RECORDINGS_BUCKET",), "녹음 보관(S3)", "녹음이 보관되지 않는다", level=WARN)
+    need(("AWS_BEARER_TOKEN_BEDROCK",), "AI 채팅(Bedrock)", "앱의 AI 채팅이 '준비 중'으로 닫힌다", level=WARN)
 
     path = env.get("FCM_SERVICE_ACCOUNT_FILE", "").strip()
     if not path:

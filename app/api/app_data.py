@@ -178,6 +178,8 @@ class AppData:
     notifier: object | None = None
     # 어르신 탈퇴 때 서버 디스크에 남은 녹음 파일도 지운다(보관기가 쓰는 폴더). None이면 건드리지 않는다.
     recordings_dir: PathType | None = None
+    # 앱 AI 채팅(어르신의 글 대화·보호자용 요약). None이면 채팅 주소가 없다.
+    chat: object | None = None
 
 
 def iso_kst(epoch: float) -> str:
@@ -378,6 +380,18 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
         if access is None or not access.has_guardian(guardian_id):
             raise HTTPException(status_code=404, detail=NO_ELDER)
         return access
+
+    if data.chat is not None:
+        from app.api.chat_routes import add_chat_routes
+
+        add_chat_routes(
+            app,
+            data=data,
+            guarded=guarded,
+            guardian_id_of=guardian_id_of,
+            ready_elder_id_of=ready_elder_id_of,
+            owned_elder=owned_elder,
+        )
 
     # ------------------------------------------------ 어르신 연결
 

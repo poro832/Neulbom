@@ -757,6 +757,32 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
     return KeyAuth(PostgresGuardianKeyStore(pool=pool)), PostgresElderDirectory(pool=pool)
 
 
+def chat_service_for(pool, *, elders, alerts, notifier, env=os.environ):
+    """앱 AI 채팅. Bedrock API 키(AWS_BEARER_TOKEN_BEDROCK)가 없으면 모델 없이 만들어 채팅 주소가 '준비 중'(503)을 돌려준다."""
+    from app.chat.alerting import make_urgent_alerter
+    from app.chat.service import ChatService
+    from app.chat.store import InMemoryChatStore
+    from app.media.bedrock_chat import chat_model_from_env, summary_model_from_env
+    from app.media.call_summary import CallSummarizer
+
+    if pool is None:
+        store = InMemoryChatStore()
+    else:
+        from app.chat.postgres_store import PostgresChatStore
+
+        store = PostgresChatStore(pool=pool)
+    model = chat_model_from_env(env)
+    summary_model = summary_model_from_env(env)
+    if model is None:
+        logger.info("AI 채팅 꺼짐 — AWS_BEARER_TOKEN_BEDROCK이 없다")
+    return ChatService(
+        store=store,
+        model=model,
+        summarizer=None if summary_model is None else CallSummarizer(summary_model, summary_model.model),
+        on_urgent=make_urgent_alerter(elders=elders, alerts=alerts, notifier=notifier),
+    )
+
+
 def app_data_for(
     pool,
     *,
@@ -793,6 +819,7 @@ def app_data_for(
         )
         notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
         data.notifier = notifier
+        data.chat = chat_service_for(None, elders=elders, alerts=alerts, notifier=notifier)
         return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
     from app.api.postgres_alerts import PostgresAlertStore
@@ -830,6 +857,7 @@ def app_data_for(
     )
     notifier = PushNotifier(devices=data.devices, elders=elders, sender=push_sender)
     data.notifier = notifier
+    data.chat = chat_service_for(pool, elders=elders, alerts=alerts, notifier=notifier)
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
 
