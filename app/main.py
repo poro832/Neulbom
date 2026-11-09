@@ -524,6 +524,12 @@ def build_server(
         app.router.add_event_handler("startup", archiver.start)
         app.router.add_event_handler("shutdown", archiver.stop)
 
+    # 30일이 지난 AI 채팅 원문 지우기. 대화가 없어도 돌아야 하므로 서버가 뜰 때 켠다.
+    chat = None if app_data is None else getattr(app_data, "chat", None)
+    if chat is not None and hasattr(chat, "start"):
+        app.router.add_event_handler("startup", chat.start)
+        app.router.add_event_handler("shutdown", chat.stop)
+
     recorder = (
         None if call_content is None else ConversationRecorder(
             call_content, summarizer, classifier=medication, extractor=mentions

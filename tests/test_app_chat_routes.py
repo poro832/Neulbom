@@ -70,7 +70,7 @@ def test_bad_messages_are_refused_without_calling_the_model():
     headers = kit.elder_headers(12)
 
     assert kit.client.post("/v1/me/chat", json={"message": ""}, headers=headers).status_code == 422
-    assert kit.client.post("/v1/me/chat", json={"message": "가" * 301}, headers=headers).status_code == 422
+    assert kit.client.post("/v1/me/chat", json={"message": "가" * 2001}, headers=headers).status_code == 422
     blank = kit.client.post("/v1/me/chat", json={"message": "   "}, headers=headers)
     assert blank.status_code == 422 and blank.json()["detail"] == CHAT_EMPTY
     assert model.calls == 0
@@ -162,3 +162,38 @@ def test_the_summaries_need_the_owning_guardians_key():
 def test_without_the_chat_service_there_are_no_chat_addresses():
     kit = make_app_kit()
     assert kit.client.post("/v1/me/chat", json={"message": "안녕"}, headers=kit.elder_headers(12)).status_code == 404
+
+
+def test_a_long_message_is_accepted_and_still_checked_for_urgent_words():
+    kit, _, _, _ = make()
+    text = "오늘 있었던 일을 길게 적어요. " * 30 + "숨이 안 쉬어져요"
+
+    r = kit.client.post("/v1/me/chat", json={"message": text}, headers=kit.elder_headers(12))
+
+    assert r.status_code == 200 and r.json()["urgent"] is True
+    assert len(kit.client.get("/v1/guardian/alerts", headers=kit.guardian_headers).json()["alerts"]) == 1
+
+
+def test_an_urgent_message_gets_the_notice_and_alerts_even_when_the_chat_is_not_ready():
+    kit, _, _, _ = make(model=None)
+    headers = kit.elder_headers(12)
+
+    urgent = kit.client.post("/v1/me/chat", json={"message": "가슴이 너무 아파요"}, headers=headers)
+
+    assert urgent.status_code == 200 and "119" in urgent.json()["reply"]
+    assert len(kit.client.get("/v1/guardian/alerts", headers=kit.guardian_headers).json()["alerts"]) == 1
+    # 평범한 말은 여전히 '준비 중'이다
+    assert kit.client.post("/v1/me/chat", json={"message": "안녕"}, headers=headers).status_code == 503
+
+
+def test_an_urgent_message_gets_through_after_the_daily_limit():
+    kit, _, _, _ = make()
+    headers = kit.elder_headers(12)
+    for _ in range(DAILY_LIMIT):
+        kit.client.post("/v1/me/chat", json={"message": "응"}, headers=headers)
+
+    assert kit.client.post("/v1/me/chat", json={"message": "응"}, headers=headers).status_code == 429
+    urgent = kit.client.post("/v1/me/chat", json={"message": "어지러워서 쓰러질 것 같아요"}, headers=headers)
+
+    assert urgent.status_code == 200 and "119" in urgent.json()["reply"]
+    assert len(kit.client.get("/v1/guardian/alerts", headers=kit.guardian_headers).json()["alerts"]) == 1

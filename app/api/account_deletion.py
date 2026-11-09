@@ -100,6 +100,7 @@ def withdraw_elder(
     reports: Any = None,
     alerts: Any = None,
     withdrawals: Any = None,
+    chat: Any = None,
 ) -> ElderWithdrawal:
     """어르신을 지운다: 녹음 키 읽기 → 서버 디스크의 녹음 파일 → S3 녹음 최선 삭제 → 어르신 행 삭제 → (메모리 저장소 정리).
 
@@ -119,6 +120,7 @@ def withdraw_elder(
         ("통화", reports),
         ("알림", alerts),
         ("탈퇴 요청", withdrawals),
+        ("AI 채팅", chat),
     ):
         if store is None:
             continue

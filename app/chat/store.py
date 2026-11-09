@@ -39,8 +39,8 @@ class ChatStore(Protocol):
         """since 이후 그 어르신이 보낸 말의 수(하루 한도에 쓴다)."""
         ...
 
-    def alerted_since(self, elder_id: int, since: float) -> bool:
-        """since 이후 그 어르신 때문에 위급 알림을 이미 보냈는가."""
+    def alerted_since(self, elder_id: int, since: float, category: str) -> bool:
+        """since 이후 그 어르신의 그 분류(urgent) 때문에 위급 알림을 이미 보냈는가."""
         ...
 
     def mark_alerted(self, message_id: int, now: float) -> None: ...
@@ -133,10 +133,13 @@ class InMemoryChatStore:
                 if m.role == "elder" and m.created_at >= since and self._elder_of(m.session_id) == elder_id
             )
 
-    def alerted_since(self, elder_id: int, since: float) -> bool:
+    def alerted_since(self, elder_id: int, since: float, category: str) -> bool:
         with self._lock:
             return any(
-                m.alerted_at is not None and m.alerted_at >= since and self._elder_of(m.session_id) == elder_id
+                m.alerted_at is not None
+                and m.alerted_at >= since
+                and m.urgent == category
+                and self._elder_of(m.session_id) == elder_id
                 for m in self._messages
             )
 

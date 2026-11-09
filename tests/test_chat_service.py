@@ -42,7 +42,7 @@ class FakeModel:
 def make(model=None, summarizer=None, on_urgent="record", clock=None):
     clock = clock or Clock()
     alerts_sent: list[tuple[int, str]] = []
-    handler = (lambda elder_id, category: alerts_sent.append((elder_id, category))) if on_urgent == "record" else on_urgent
+    handler = (lambda elder_id, category: alerts_sent.append((elder_id, category)) or True) if on_urgent == "record" else on_urgent
     service = ChatService(
         store=InMemoryChatStore(),
         model=model if model is not None else FakeModel(),
@@ -133,6 +133,7 @@ def test_a_failing_alerter_does_not_stop_the_answer_and_is_retried_next_time():
         calls.append(category)
         if len(calls) == 1:
             raise RuntimeError("푸시 서버 죽음")
+        return True
 
     service, clock, _ = make(on_urgent=flaky)
 
@@ -202,10 +203,10 @@ def test_old_messages_are_purged_after_thirty_days():
     service.send(12, "옛날 말")
     session = service._store.session_for(12, clock.now, SESSION_IDLE_SECONDS)
     clock.now += 31 * 86400
-    service.send(12, "새 말")  # 보낼 때 정리가 돈다
 
-    old = [m.text for m in service._store.history(session, 10)]
-    assert "옛날 말" not in old
+    # 아무도 새 말을 보내지 않아도 지워진다 — 채팅을 그만둔 어르신의 원문도 30일에 지워야 한다.
+    assert service.purge_expired() == 2  # 어르신의 말과 AI의 답
+    assert service._store.history(session, 10) == []
 
 
 def test_the_alerter_writes_one_alert_per_guardian_without_the_words_and_pushes_each():
@@ -236,3 +237,129 @@ def test_the_alerter_writes_one_alert_per_guardian_without_the_words_and_pushes_
         assert record.message == GUARDIAN_ALERT_MESSAGE and record.call_id is None
     assert notifier.sent == [(1, 12), (2, 12)]
     alert(999, "medical")  # 모르는 어르신은 조용히 넘어간다
+
+
+def test_the_purger_thread_deletes_expired_text_without_any_chat_and_stops_cleanly():
+    import time as _time
+
+    service, clock, _ = make()
+    service.send(12, "옛날 말")
+    session = service._store.session_for(12, clock.now, SESSION_IDLE_SECONDS)
+    clock.now += 31 * 86400
+
+    service.start()
+    deadline = _time.time() + 5
+    while service._store.history(session, 10) and _time.time() < deadline:
+        _time.sleep(0.02)
+    service.stop()
+
+    assert service._store.history(session, 10) == []
+    assert service._thread is None
+
+
+def test_an_alerter_that_reaches_nobody_is_not_remembered_so_the_next_message_tries_again():
+    calls = []
+
+    def nobody(elder_id, category):
+        calls.append(category)
+        return False  # 보호자가 없거나 모두 실패했다
+
+    service, clock, _ = make(on_urgent=nobody)
+    service.send(12, "가슴이 아파요")
+    clock.now += 30
+    service.send(12, "가슴이 아파요 정말")
+
+    assert len(calls) == 2
+
+
+def test_a_different_urgent_category_alerts_again_the_same_day():
+    service, clock, alerts = make()
+
+    service.send(12, "가슴이 아파요")
+    clock.now += 60
+    service.send(12, "더는 못 살겠어요. 죽고 싶어요")
+
+    assert alerts == [(12, "medical"), (12, "self_harm")]
+
+
+def test_an_urgent_message_still_alerts_and_gets_the_notice_after_the_daily_limit_without_calling_the_model():
+    model = FakeModel()
+    service, _, alerts = make(model)
+    for _ in range(DAILY_LIMIT):
+        service.send(12, "응")
+    calls_before = len(model.seen)
+
+    result = service.send(12, "가슴이 너무 아파요")
+
+    assert alerts == [(12, "medical")]
+    assert result.urgent == "medical" and "119" in result.reply
+    assert len(model.seen) == calls_before  # 한도를 넘었으니 모델 요금은 늘지 않는다
+    with pytest.raises(ChatLimitReached):
+        service.send(12, "그냥 이야기")
+
+
+def test_an_urgent_message_alerts_even_when_there_is_no_model():
+    service = ChatService(store=InMemoryChatStore(), model=None, on_urgent=lambda e, c: True)
+
+    result = service.send(12, "숨이 안 쉬어져요")
+    assert result.urgent == "medical" and "119" in result.reply
+    with pytest.raises(ChatUnavailable):
+        service.send(12, "그냥 이야기")
+
+
+def test_an_urgent_phrase_past_the_stored_length_is_still_found_and_the_stored_text_is_cut():
+    service, _, alerts = make()
+    long_text = "오늘은 " + "그냥 이런저런 이야기를 해요. " * 30 + "가슴이 아파요"
+    assert len(long_text) > 300
+
+    result = service.send(12, long_text)
+
+    assert result.urgent == "medical" and alerts == [(12, "medical")]
+    session = service._store.session_for(12, service._clock(), SESSION_IDLE_SECONDS)
+    stored = service._store.history(session, 10)[0].text
+    assert len(stored) == 300
+
+
+def test_removing_an_elder_removes_their_chat_through_the_service():
+    service, _, _ = make()
+    service.send(12, "안녕")
+    assert service.remove_for_elder(12) >= 1
+
+
+def test_the_alerter_reports_false_when_nobody_could_be_alerted_and_true_when_only_the_push_fails():
+    class Access:
+        guardian_ids = (1, 2)
+
+    class Elders:
+        def get(self, elder_id):
+            return Access()
+
+    class BrokenAlerts:
+        def raise_alert(self, **kwargs):
+            raise RuntimeError("DB 끊김")
+
+    class GoodAlerts:
+        def __init__(self):
+            self.rows = 0
+
+        def raise_alert(self, **kwargs):
+            self.rows += 1
+            return True
+
+    class BrokenNotifier:
+        def notify_chat_urgent(self, guardian_id, elder_id):
+            raise RuntimeError("푸시 서버 죽음")
+
+    assert make_urgent_alerter(elders=Elders(), alerts=BrokenAlerts(), notifier=None)(12, "medical") is False
+    good = GoodAlerts()
+    assert make_urgent_alerter(elders=Elders(), alerts=good, notifier=BrokenNotifier())(12, "medical") is True
+    assert good.rows == 2  # 푸시가 실패해도 두 보호자 모두 알림 기록은 남았다
+
+    class NoGuardians:
+        guardian_ids = ()
+
+    class Empty:
+        def get(self, elder_id):
+            return NoGuardians()
+
+    assert make_urgent_alerter(elders=Empty(), alerts=good, notifier=None)(12, "medical") is False

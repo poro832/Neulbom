@@ -1,10 +1,11 @@
 """AI 채팅 서비스 — 어르신의 글 말동무 대화, 위급한 말 알림, 보호자에게 보일 요약.
 
 세 가지를 지킨다.
-  1. **위급한 말의 알림은 AI 모델에 기대지 않는다.** 규칙(`urgent.py`)이 찾고, 모델 호출보다 **먼저** 알린다.
-     모델이 느리거나 죽어도 알림과 안내는 나간다.
-  2. **보호자에게는 요약만 보인다.** 원문은 보이지 않고 30일 뒤 지운다. 요약은 어르신이 공유에 동의하고
-     보호자가 열 때 처음 만든다 — 동의하지 않은 대화는 요약하지도 않는다.
+  1. **위급한 말의 알림은 AI 모델에도, 하루 한도에도, 글 길이 제한에도 기대지 않는다.** 규칙(`urgent.py`)이 찾고,
+     한도·모델 상태를 보기 **전에** 먼저 알린다. 모델이 느리거나 죽어도, 오늘 한도를 다 썼어도 알림과 안내는 나간다.
+     (한도를 넘은 위급한 말은 모델을 부르지 않고 안내 문장만 돌려준다 — 요금은 늘지 않는다.)
+  2. **보호자에게는 요약만 보인다.** 원문은 보이지 않고 30일 뒤 지운다. 지우기는 대화가 없어도 돈다(`start`).
+     요약은 어르신이 공유에 동의하고 보호자가 열 때 처음 만든다 — 동의하지 않은 대화는 요약하지도 않는다.
   3. **점수에 닿지 않는다.** 이 대화는 위험 점수 계산에 들어가지 않는다.
 """
 
@@ -25,9 +26,10 @@ logger = logging.getLogger(__name__)
 SESSION_IDLE_SECONDS = 30 * 60  # 마지막 말 뒤 30분 조용하면 대화가 끝난 것이다
 HISTORY_LIMIT = 20  # 모델에게 보이는 최근 말의 수(비용과 길이를 막는다)
 DAILY_LIMIT = 200  # 어르신 한 명이 하루에 보낼 수 있는 말(Bedrock 요금 사고를 막는 안전망)
-MAX_MESSAGE_CHARS = 300
+MAX_MESSAGE_CHARS = 300  # 저장하고 모델에 보내는 길이. 위급한 말 찾기는 자르기 전 글 전체에서 한다
+MAX_REQUEST_CHARS = 2000  # 이보다 긴 글만 거절한다(앱은 300자까지만 받는다)
 MAX_REPLY_CHARS = 600
-URGENT_ALERT_WINDOW_SECONDS = 24 * 3600  # 같은 어르신께 위급 알림은 하루 한 번
+URGENT_ALERT_WINDOW_SECONDS = 24 * 3600  # 같은 어르신께 같은 분류의 위급 알림은 하루 한 번
 SUMMARIZE_PER_REQUEST = 3  # 보호자가 한 번 열 때 새로 요약하는 대화 덩이의 최대 수
 PURGE_AFTER_SECONDS = 30 * 24 * 3600
 PURGE_EVERY_SECONDS = 3600
@@ -47,7 +49,8 @@ class ChatReply:
     urgent: str | None  # 위급한 표현으로 잡힌 분류. 없으면 None
 
 
-UrgentAlerter = Callable[[int, str], None]
+# (어르신 번호, 분류) -> 보호자 한 명 이상에게 알림을 남겼는가. 한 명에게도 못 남겼으면 False를 돌려주어야 한다.
+UrgentAlerter = Callable[[int, str], bool]
 
 
 class ChatService:
@@ -65,8 +68,8 @@ class ChatService:
         self._summarizer = summarizer
         self._on_urgent = on_urgent
         self._clock = clock
-        self._last_purge = 0.0
-        self._purge_lock = threading.Lock()
+        self._stopping = threading.Event()
+        self._thread: threading.Thread | None = None
 
     @property
     def available(self) -> bool:
@@ -76,25 +79,33 @@ class ChatService:
         text = text.strip()
         if not text:
             raise ValueError("빈 말")
-        if self._model is None:
-            raise ChatUnavailable("모델 없음")
         now = self._clock()
-        self._purge_if_due(now)
-        if self._store.elder_messages_since(elder_id, now - 86400) >= DAILY_LIMIT:
-            raise ChatLimitReached()
-
+        # 위급한 말은 잘리기 전의 글 전체에서 찾는다(긴 글 속에 있어도 놓치지 않는다).
         urgent = detect_urgent(text)
+        over_limit = self._store.elder_messages_since(elder_id, now - 86400) >= DAILY_LIMIT
+        no_model = self._model is None
+        if urgent is None:
+            if over_limit:
+                raise ChatLimitReached()
+            if no_model:
+                raise ChatUnavailable("모델 없음")
+
         session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
-        message_id = self._store.add_message(session, "elder", text, now, urgent.category if urgent else None)
+        message_id = self._store.add_message(
+            session, "elder", text[:MAX_MESSAGE_CHARS], now, urgent.category if urgent else None
+        )
         if urgent is not None:
             self._alert_guardians(elder_id, message_id, urgent.category, now)
 
-        reply = self._ask_model(session)
-        if urgent is not None:
-            # 안내는 서버가 직접 붙인다 — 모델이 빠뜨리거나 실패해도 어르신은 이 말을 듣는다.
-            reply = f"{reply} {safety_notice(urgent.category)}".strip()
-        elif not reply:
-            raise ChatUnavailable("빈 응답")
+        if urgent is not None and (over_limit or no_model):
+            reply = safety_notice(urgent.category)  # 모델을 부르지 않는다 — 안내만 나간다
+        else:
+            reply = self._ask_model(session)
+            if urgent is not None:
+                # 안내는 서버가 직접 붙인다 — 모델이 빠뜨리거나 실패해도 어르신은 이 말을 듣는다.
+                reply = f"{reply} {safety_notice(urgent.category)}".strip()
+            elif not reply:
+                raise ChatUnavailable("빈 응답")
         self._store.add_message(session, "ai", reply, self._clock())
         return ChatReply(reply=reply, urgent=urgent.category if urgent else None)
 
@@ -112,8 +123,43 @@ class ChatService:
                 self._store.save_summary(session_id, summary, getattr(self._summarizer, "model_id", ""), now)
         return self._store.summaries(elder_id, limit)
 
-    def remove_for_elder(self, elder_id: int) -> None:
-        self._store.remove_for_elder(elder_id)
+    def remove_for_elder(self, elder_id: int) -> int:
+        return self._store.remove_for_elder(elder_id)
+
+    # ------------------------------------------------------------------ 원문 지우기
+
+    def purge_expired(self) -> int:
+        """30일이 지난 대화 원문을 지운다(요약은 남는다). 지운 수. 실패해도 예외를 내지 않는다."""
+        try:
+            removed = self._store.purge_messages_before(self._clock() - PURGE_AFTER_SECONDS)
+        except Exception:
+            logger.exception("채팅 원문 정리 실패")
+            return 0
+        if removed:
+            logger.info("30일이 지난 채팅 원문을 지웠다 수=%s", removed)
+        return removed
+
+    def start(self) -> None:
+        """서버가 뜬 뒤 한 시간마다 원문을 지운다. 대화가 없어도 돈다 — 채팅을 그만둔 어르신의 원문도 30일에 지워야 한다."""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stopping.clear()
+        self._thread = threading.Thread(target=self._run, name="chat-purger", daemon=True)
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        self._stopping.set()
+        thread = self._thread
+        if thread is None:
+            return
+        thread.join(timeout=timeout)
+        if not thread.is_alive():
+            self._thread = None
+
+    def _run(self) -> None:
+        while not self._stopping.is_set():
+            self.purge_expired()
+            self._stopping.wait(PURGE_EVERY_SECONDS)
 
     # ------------------------------------------------------------------ 안쪽
 
@@ -131,24 +177,17 @@ class ChatService:
     def _alert_guardians(self, elder_id: int, message_id: int, category: str, now: float) -> None:
         if self._on_urgent is None:
             return
-        if self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS):
-            return  # 오늘 이미 알렸다 — 같은 말이 반복돼도 알림이 쌓이지 않는다
+        # 같은 분류는 하루 한 번만 — 다른 분류(예: 가슴 통증 뒤의 자살 표현)는 따로 알린다.
+        if self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, category):
+            return
         try:
-            self._on_urgent(elder_id, category)
+            delivered = self._on_urgent(elder_id, category)
         except Exception:
             logger.exception("위급 알림 실패 elder_id=%s", elder_id)
             return
+        if not delivered:
+            # 한 보호자에게도 남기지 못했다 — '알렸다'로 표시하지 않아 다음 말에서 다시 시도한다.
+            logger.warning("위급 알림을 한 명에게도 남기지 못했다 elder_id=%s category=%s", elder_id, category)
+            return
         self._store.mark_alerted(message_id, now)
         logger.info("채팅 위급 알림을 보냈다 elder_id=%s category=%s", elder_id, category)
-
-    def _purge_if_due(self, now: float) -> None:
-        with self._purge_lock:
-            if now - self._last_purge < PURGE_EVERY_SECONDS:
-                return
-            self._last_purge = now
-        try:
-            removed = self._store.purge_messages_before(now - PURGE_AFTER_SECONDS)
-            if removed:
-                logger.info("30일이 지난 채팅 원문을 지웠다 수=%s", removed)
-        except Exception:
-            logger.exception("채팅 원문 정리 실패")

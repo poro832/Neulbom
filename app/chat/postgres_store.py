@@ -57,13 +57,13 @@ class PostgresChatStore:
                 (elder_id, since),
             ).fetchone()[0]
 
-    def alerted_since(self, elder_id: int, since: float) -> bool:
+    def alerted_since(self, elder_id: int, since: float, category: str) -> bool:
         with self._pool.connection() as conn:
             return (
                 conn.execute(
                     "SELECT 1 FROM chat_messages m JOIN chat_sessions s USING (session_id) "
-                    "WHERE s.elder_id = %s AND m.alerted_at >= to_timestamp(%s) LIMIT 1",
-                    (elder_id, since),
+                    "WHERE s.elder_id = %s AND m.urgent = %s AND m.alerted_at >= to_timestamp(%s) LIMIT 1",
+                    (elder_id, category, since),
                 ).fetchone()
                 is not None
             )

@@ -14,7 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from app.api.app_data import MAX_ELDER_ID, iso_kst
-from app.chat.service import MAX_MESSAGE_CHARS, ChatLimitReached, ChatUnavailable
+from app.chat.service import MAX_REQUEST_CHARS, ChatLimitReached, ChatUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ CHAT_EMPTY = "하고 싶은 말씀을 적어 주세요"
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    message: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS)
 
 
 def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_id_of, owned_elder) -> None:
@@ -35,8 +35,6 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
     @guarded
     def send_chat(body: ChatRequest, authorization: str | None = Header(default=None)) -> dict:
         elder_id = ready_elder_id_of(authorization)
-        if not service.available:
-            raise HTTPException(status_code=503, detail=CHAT_CLOSED)
         try:
             result = service.send(elder_id, body.message)
         except ValueError:
@@ -44,7 +42,8 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
         except ChatLimitReached:
             raise HTTPException(status_code=429, detail=CHAT_LIMIT)
         except ChatUnavailable:
-            raise HTTPException(status_code=503, detail=CHAT_BUSY)
+            # 모델이 없으면 '준비 중', 있는데 못 만들었으면 '잠시 뒤에'. 위급한 말은 어느 쪽이든 서비스가 먼저 알린다.
+            raise HTTPException(status_code=503, detail=CHAT_BUSY if service.available else CHAT_CLOSED)
         # 말 내용은 로그에 남기지 않는다.
         logger.info("채팅 응답 elder_id=%s urgent=%s", elder_id, result.urgent is not None)
         return {"reply": result.reply, "urgent": result.urgent is not None}

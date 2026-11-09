@@ -987,6 +987,7 @@ def add_app_routes(app: FastAPI, data: AppData) -> None:
             reports=data.reports,
             alerts=data.alerts,
             withdrawals=data.withdrawals,
+            chat=data.chat,
         )
         logger.info(
             "어르신이 탈퇴했다 elder_id=%s 녹음=%s개 삭제시도 실패=%s 서버 파일 삭제=%s개",

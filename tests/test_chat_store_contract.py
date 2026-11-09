@@ -75,13 +75,15 @@ def test_it_counts_only_what_the_elder_sent_since_the_given_time(store):
 def test_it_remembers_whether_an_urgent_alert_already_went_out(store):
     session = store.session_for(12, NOW, IDLE)
     first = say(store, session, "elder", "가슴이 아파요", NOW, urgent="medical")
-    assert store.alerted_since(12, NOW - 10) is False
+    assert store.alerted_since(12, NOW - 10, "medical") is False
 
     store.mark_alerted(first, NOW + 5)
 
-    assert store.alerted_since(12, NOW - 10) is True
-    assert store.alerted_since(12, NOW + 6) is False
-    assert store.alerted_since(13, NOW - 10) is False
+    assert store.alerted_since(12, NOW - 10, "medical") is True
+    assert store.alerted_since(12, NOW + 6, "medical") is False
+    assert store.alerted_since(13, NOW - 10, "medical") is False
+    # 다른 분류는 따로 센다 — 가슴 통증을 알렸다고 자살 표현까지 알린 것이 되지 않는다.
+    assert store.alerted_since(12, NOW - 10, "self_harm") is False
 
 
 def test_only_finished_unsummarized_sessions_with_an_elder_message_are_summarized(store):
