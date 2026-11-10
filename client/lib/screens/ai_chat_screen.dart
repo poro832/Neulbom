@@ -67,13 +67,23 @@ class _AiChatScreenState extends State<AiChatScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _bubbles.add(_Bubble(e.message, isError: true)));
+      _restoreDraft(text);
     } catch (_) {
       if (!mounted) return;
       setState(() => _bubbles.add(const _Bubble('지금은 대답하기 어려워요. 잠시 뒤에 다시 해 주세요.', isError: true)));
+      _restoreDraft(text);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
     _scrollDown();
+  }
+
+  /// 보내기가 실패하면 쓴 글을 입력창에 돌려 놓는다 — 긴 글을 다시 쓰게 하지 않는다.
+  /// 기다리는 사이 새로 쓴 글이 있으면 덮어쓰지 않는다.
+  void _restoreDraft(String text) {
+    if (_input.text.isEmpty) {
+      _input.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+    }
   }
 
   void _scrollDown() {
@@ -187,7 +197,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
             child: TextField(
               key: const Key('chat-input'),
               controller: _input,
-              enabled: !_sending,
+              // enabled: false로 막으면 키보드가 내려가고 포커스를 잃는다. 읽기 전용으로 두어 이어서 쓰게 한다.
+              readOnly: _sending,
               minLines: 1,
               maxLines: 3,
               maxLength: 300,

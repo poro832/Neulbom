@@ -146,6 +146,33 @@ void main() {
       expect(find.textContaining('잠시 뒤에 다시 해 주세요'), findsOneWidget);
     });
 
+    testWidgets('보내기가 실패하면 쓴 글이 입력창에 돌아온다', (tester) async {
+      await open(tester, (_) async => throw const ApiException(503, '지금은 대답하기 어려워요'));
+
+      await tester.enterText(find.byKey(const Key('chat-input')), '긴 이야기를 적었어요');
+      await tester.tap(find.byKey(const Key('chat-send')));
+      await tester.pumpAndSettle();
+
+      final field = tester.widget<TextField>(find.byKey(const Key('chat-input')));
+      expect(field.controller!.text, '긴 이야기를 적었어요');
+    });
+
+    testWidgets('답을 기다리는 동안에도 입력창은 포커스를 잃지 않는다(읽기 전용일 뿐)', (tester) async {
+      final answer = Completer<ChatAnswer>();
+      await open(tester, (_) => answer.future);
+
+      await tester.enterText(find.byKey(const Key('chat-input')), '안녕');
+      await tester.tap(find.byKey(const Key('chat-send')));
+      await tester.pump();
+
+      final field = tester.widget<TextField>(find.byKey(const Key('chat-input')));
+      expect(field.enabled, isNot(false));
+      expect(field.readOnly, isTrue);
+      answer.complete(const ChatAnswer(reply: '네.', urgent: false));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byKey(const Key('chat-input'))).readOnly, isFalse);
+    });
+
     testWidgets('예상 밖 오류도 어르신에게는 쉬운 문장으로 보인다', (tester) async {
       await open(tester, (_) async => throw Exception('끊김'));
 
