@@ -9,6 +9,7 @@
     guardian pending                              운영자 확인을 기다리는 가입자 목록
     guardian activate N                           가입자를 연다 (어르신 등록·승인이 가능해진다)
     guardian verify N   보호자의 이메일을 수동으로 인증한 것으로 기록한다 (Firebase를 못 쓰는 사람용)
+    report [--days N]                             일일 운영 리포트 — 통화(예약·요청×상태·실패 이유)·스케줄 누락·알림·AI 채팅 사용량(읽기만 한다)
     check                                         서버 반영 점검 — DB 표·칸, 설정, 푸시 열쇠(비밀 값은 출력하지 않는다)
     guardian set-login N --email ...              보호자 N에게 이메일과 비밀번호를 붙인다 (비밀번호는 입력창에서)
     guardian delete N --yes                       보호자 N을 지운다 — 어르신은 연결 전으로 돌리고(지우지 않는다) 계정·열쇠·폰 등록·개인 코드·알림을 지운다
@@ -83,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
     delete_guardian.add_argument("--yes", action="store_true", help="정말 지운다(되돌릴 수 없다)")
 
     groups.add_parser("check", help="서버 반영 점검(DB 표·칸, 설정, 푸시 열쇠)")
+    report = groups.add_parser("report", help="일일 운영 리포트(읽기만 한다)")
+    report.add_argument("--days", type=int, default=1, help="오늘 0시부터 며칠 전까지 볼지(기본 1 = 오늘)")
 
     elder = groups.add_parser("elder", help="어르신").add_subparsers(dest="action", required=True)
     assign = elder.add_parser("assign", help="어르신을 보호자에게 옮긴다")
@@ -114,6 +117,19 @@ def run(
 ) -> int:
     err = err or (lambda text="": print(text, file=sys.stderr))
     args = build_parser().parse_args(argv)
+
+    if args.group == "report":
+        from app.ops_report import build_report
+
+        if pool is None:
+            err("DB가 없다.")
+            return 1
+        if not 1 <= args.days <= 31:
+            err("--days는 1~31이다.")
+            return 1
+        for line in build_report(pool, datetime.now(KST), args.days):
+            out(line)
+        return 0
 
     if args.group == "check":
         from app.ops_check import format_checks, run_checks

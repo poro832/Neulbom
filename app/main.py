@@ -441,6 +441,7 @@ def build_server(
     elders: ElderDirectory | None = None,
     manual_calls_per_day: int = DEFAULT_MANUAL_CALLS_PER_DAY,
     call_content: CallContentStore | None = None,
+    health_check: Callable[[], bool] | None = None,
     summarizer: CallSummarizer | None = None,
     medication: MedicationClassifier | None = None,
     mentions: MentionExtractor | None = None,
@@ -472,6 +473,16 @@ def build_server(
 
     if app_data is not None:
         add_app_routes(app, app_data)
+
+    @app.get("/healthz")
+    def healthz():
+        """서버와 DB가 살아 있는가. 인증이 없으니 상태 말고는 아무것도 싣지 않는다(외부 감시 서비스가 부른다)."""
+        from fastapi.responses import JSONResponse
+
+        from app.ops_report import health
+
+        status, body = health(health_check)
+        return JSONResponse(body, status_code=status)
 
     # 워커 조립은 app이 만들어진 뒤여야 한다 — add_event_handler는 app이
     # 있어야 부를 수 있다.
@@ -867,6 +878,12 @@ def app_data_for(
     return data, AlertRules(alerts=alerts, elders=elders, notifier=notifier)
 
 
+def _ping(pool) -> bool:
+    """DB가 대답하는가(1초 안에). /healthz가 쓴다."""
+    with pool.connection(timeout=1.0) as conn:
+        return conn.execute("SELECT 1").fetchone() == (1,)
+
+
 log_startup_readiness()
 
 _store, _outcomes, _pool = stores_from_env()
@@ -911,6 +928,7 @@ app = build_server(
     app_data=_app_data,
     alert_rules=_alert_rules,
     call_content=_app_data.content,
+    health_check=None if _pool is None else (lambda: _ping(_pool)),
     summarizer=summarizer_from_env(),
     medication=classifier_from_env(),
     mentions=extractor_from_env(),
