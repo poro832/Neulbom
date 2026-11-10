@@ -1,12 +1,13 @@
-"""AWS Bedrock 대화 어댑터 — 앱의 'AI 채팅'(글 대화)과 채팅 요약에 쓴다.
+"""LLM 게이트웨이(OpenAI 호환 API) 대화 어댑터 — 앱의 'AI 채팅'(글 대화)과 채팅 요약에 쓴다.
+
+수업 계정에서는 Bedrock을 **직접** 부를 수 없다(사용량 제어가 안 돼 과금 사고 위험이 있어 권한이 회수된다).
+대신 사용 한도가 걸린 **게이트웨이 키**로 부른다. 게이트웨이는 OpenAI 호환이라
+`POST {base_url}/chat/completions`에 Bearer 키를 보내고, 모델은 `bedrock-haiku` 같은 게이트웨이의 별칭이다.
 
 전화 대화는 CLOVA(`clova_chat.py`)가 맡는다. 이쪽은 어르신이 앱에서 글로 하는 말동무 대화다.
 **점수에는 닿지 않는다.** 위험 점수는 전화 통화에서만 규칙으로 계산한다.
 
-Bedrock **API 키**(긴 수명 키)를 쓴다 — 서버 환경 변수 `AWS_BEARER_TOKEN_BEDROCK`. IAM 역할을 건드리지
-않고 키 하나로 호출한다. 키는 서버에만 있고 앱에는 없다. 코드·로그·저장소에 남기지 않는다.
-
-Converse API(모델이 달라도 같은 요청 모양)로 REST 호출한다. 전송 계층을 주입받으므로 키 없이도
+키는 서버 환경 변수에만 있고 앱에는 없다. 코드·로그·저장소에 남기지 않는다. 전송 계층을 주입받으므로 키 없이도
 규약 전체가 테스트로 검증된다.
 """
 
@@ -16,7 +17,6 @@ import json
 import logging
 import os
 from collections.abc import Sequence
-from urllib.parse import quote
 
 import httpx
 
@@ -25,27 +25,25 @@ from app.media.conversation import Turn
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGION = "ap-northeast-2"
-
-# 서울 리전에서 Haiku 5.5는 모델 번호가 아니라 '추론 프로필' 이름으로만 부를 수 있다(직접 호출은 거절된다).
-# 짧은 한국어 글 대화라 가볍고 빠른 모델이면 충분하다. BEDROCK_CHAT_MODEL로 바꾼다.
-DEFAULT_MODEL = "global.anthropic.claude-haiku-5-5"
+# 한도 안에서 쓸 수 있는 모델: bedrock-haiku · bedrock-sonnet · bedrock-gpt-5.6-luna.
+# 짧은 한국어 글 대화라 가볍고 빠른 모델이면 충분하다. LLM_GATEWAY_MODEL로 바꾼다.
+DEFAULT_MODEL = "bedrock-haiku"
 
 _ROLE_OF = {"elder": "user", "ai": "assistant"}
 
 
 def _http_post(url: str, *, headers: dict, payload: dict, timeout: float) -> bytes:
-    """Bedrock 호출. 실패 로그에 'Bedrock'이라고 적는다(CLOVA와 같은 함수를 쓰면 로그가 CLOVA 오류처럼 읽힌다)."""
+    """게이트웨이 호출. 실패 로그에 'LLM 게이트웨이'라고 적는다(CLOVA와 같은 함수를 쓰면 CLOVA 오류처럼 읽힌다)."""
     response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
-        # 본문에는 Bedrock이 준 이유가 있다(예: 키 형식 오류, 모델 접근 거절). 요청 헤더의 키는 싣지 않는다.
-        logger.error("Bedrock 요청 실패 status=%s body=%s", response.status_code, response.text[:500])
+        # 본문에는 게이트웨이가 준 이유가 있다(예: 키 오류, 한도 초과, 없는 모델). 요청 헤더의 키는 싣지 않는다.
+        logger.error("LLM 게이트웨이 요청 실패 status=%s body=%s", response.status_code, response.text[:500])
     response.raise_for_status()
     return response.content
 
 
-class BedrockError(RuntimeError):
-    """Bedrock이 알아볼 수 없는 응답을 줬다."""
+class GatewayError(RuntimeError):
+    """게이트웨이가 알아볼 수 없는 응답을 줬다."""
 
 
 CHAT_SYSTEM_PROMPT = """당신은 혼자 사는 어르신의 말동무 '늘봄이'입니다. 앱에서 글로 대화합니다.
@@ -61,14 +59,19 @@ SUMMARY_SYSTEM_PROMPT = """당신은 어르신과 AI의 글 대화를 보호자�
 - 이모지, 목록, 따옴표 없이 문장만 씁니다."""
 
 
-class BedrockChat:
+def _endpoint(base_url: str) -> str:
+    base = base_url.strip().rstrip("/")
+    return base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+
+
+class GatewayChat:
     """실제 생성. 자격 증명은 생성자로만 받는다 — 코드에 박지 않는다."""
 
     def __init__(
         self,
         api_key: str,
+        base_url: str,
         *,
-        region: str = DEFAULT_REGION,
         model: str = DEFAULT_MODEL,
         system_prompt: str = CHAT_SYSTEM_PROMPT,
         max_tokens: int = 300,
@@ -77,8 +80,7 @@ class BedrockChat:
         timeout_seconds: float = 20.0,
     ) -> None:
         self._api_key = api_key
-        # 모델 이름의 ':'도 인코딩해야 서명 없는 키 호출이 같은 주소로 읽힌다.
-        self._url = f"https://bedrock-runtime.{region}.amazonaws.com/model/{quote(model, safe='')}/converse"
+        self._url = _endpoint(base_url)
         self.model = model
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
@@ -92,9 +94,10 @@ class BedrockChat:
             self._url,
             headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
             payload={
-                "system": [{"text": self.system_prompt}],
-                "messages": self._messages(history),
-                "inferenceConfig": {"maxTokens": self.max_tokens, "temperature": self._temperature},
+                "model": self.model,
+                "messages": [{"role": "system", "content": self.system_prompt}, *self._messages(history)],
+                "max_tokens": self.max_tokens,
+                "temperature": self._temperature,
             },
             timeout=self._timeout,
         )
@@ -102,7 +105,7 @@ class BedrockChat:
 
     @staticmethod
     def _messages(history: Sequence[Turn]) -> list[dict]:
-        """Converse는 user로 시작해 user·assistant가 번갈아야 한다 — 같은 쪽이 이어지면 한 덩이로 합친다."""
+        """같은 쪽이 이어지면 한 덩이로 합치고, AI 말로 시작하면 그 앞부분을 뺀다(모델이 user부터 읽게)."""
         merged: list[dict] = []
         for turn in history:
             role = _ROLE_OF.get(turn.speaker)
@@ -110,9 +113,9 @@ class BedrockChat:
             if role is None or not text:
                 continue
             if merged and merged[-1]["role"] == role:
-                merged[-1]["content"][0]["text"] += "\n" + text
+                merged[-1]["content"] += "\n" + text
             else:
-                merged.append({"role": role, "content": [{"text": text}]})
+                merged.append({"role": role, "content": text})
         while merged and merged[0]["role"] != "user":
             merged.pop(0)
         return merged
@@ -121,47 +124,49 @@ class BedrockChat:
     def _text_of(raw: bytes) -> str:
         try:
             body = json.loads(raw)
-            parts = body["output"]["message"]["content"]
-        except (ValueError, TypeError, KeyError) as exc:
-            logger.error("Bedrock 응답을 읽을 수 없다 body=%r", raw[:200])
-            raise BedrockError("읽을 수 없는 응답") from exc
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            logger.error("게이트웨이 응답을 읽을 수 없다 body=%r", raw[:200])
+            raise GatewayError("읽을 수 없는 응답") from exc
         usage = body.get("usage") or {}
         if usage:
-            # 토큰이 곧 요금이다. 남기지 않으면 청구서를 보고 나서야 안다.
-            logger.info("채팅 생성 — 입력 %s 토큰, 출력 %s 토큰", usage.get("inputTokens"), usage.get("outputTokens"))
-        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict)).strip()
+            # 토큰이 곧 요금(한도)이다. 남기지 않으면 청구서를 보고 나서야 안다.
+            logger.info("채팅 생성 — 입력 %s 토큰, 출력 %s 토큰", usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        if isinstance(content, list):  # 일부 게이트웨이는 조각 목록으로 준다
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        text = content.strip() if isinstance(content, str) else ""
         if not text:
-            logger.warning("Bedrock 응답이 비어 있다 stopReason=%s", body.get("stopReason"))
+            logger.warning("게이트웨이 응답이 비어 있다 finish=%s", choice.get("finish_reason"))
         return text
 
 
-def bedrock_key_from_env(env=os.environ) -> str | None:
-    """서버 환경 변수의 Bedrock API 키. 없으면 None(채팅은 닫힌다)."""
-    return (env.get("AWS_BEARER_TOKEN_BEDROCK") or "").strip() or None
+def gateway_settings_from_env(env=os.environ) -> tuple[str, str] | None:
+    """(키, 주소). 둘 중 하나라도 없으면 None(채팅은 닫힌다)."""
+    key = (env.get("LLM_GATEWAY_API_KEY") or "").strip()
+    base_url = (env.get("LLM_GATEWAY_BASE_URL") or "").strip()
+    return (key, base_url) if key and base_url else None
 
 
-def chat_model_from_env(env=os.environ, *, transport: Transport | None = None) -> BedrockChat | None:
-    key = bedrock_key_from_env(env)
-    if key is None:
+def chat_model_from_env(env=os.environ, *, transport: Transport | None = None) -> GatewayChat | None:
+    settings = gateway_settings_from_env(env)
+    if settings is None:
         return None
+    key, base_url = settings
     extra = {} if transport is None else {"transport": transport}
-    return BedrockChat(
-        key,
-        region=env.get("BEDROCK_REGION") or DEFAULT_REGION,
-        model=env.get("BEDROCK_CHAT_MODEL") or DEFAULT_MODEL,
-        **extra,
-    )
+    return GatewayChat(key, base_url, model=env.get("LLM_GATEWAY_MODEL") or DEFAULT_MODEL, **extra)
 
 
-def summary_model_from_env(env=os.environ, *, transport: Transport | None = None) -> BedrockChat | None:
-    key = bedrock_key_from_env(env)
-    if key is None:
+def summary_model_from_env(env=os.environ, *, transport: Transport | None = None) -> GatewayChat | None:
+    settings = gateway_settings_from_env(env)
+    if settings is None:
         return None
+    key, base_url = settings
     extra = {} if transport is None else {"transport": transport}
-    return BedrockChat(
+    return GatewayChat(
         key,
-        region=env.get("BEDROCK_REGION") or DEFAULT_REGION,
-        model=env.get("BEDROCK_CHAT_MODEL") or DEFAULT_MODEL,
+        base_url,
+        model=env.get("LLM_GATEWAY_MODEL") or DEFAULT_MODEL,
         system_prompt=SUMMARY_SYSTEM_PROMPT,
         max_tokens=200,
         temperature=0.2,

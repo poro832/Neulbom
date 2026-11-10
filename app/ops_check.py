@@ -128,7 +128,7 @@ def check_environment(
     need(("PUBLIC_BASE_URL", "STREAM_BASE_URL"), "공개 주소", "전화 연결 주소를 만들 수 없다")
     need(("FIREBASE_PROJECT_ID",), "이메일 인증(Firebase)", "새 보호자가 이메일 인증을 못 해 어르신을 연결할 수 없다")
     need(("RECORDINGS_BUCKET",), "녹음 보관(S3)", "녹음이 보관되지 않는다", level=WARN)
-    need(("AWS_BEARER_TOKEN_BEDROCK",), "AI 채팅(Bedrock)", "앱의 AI 채팅이 '준비 중'으로 닫힌다", level=WARN)
+    need(("LLM_GATEWAY_BASE_URL", "LLM_GATEWAY_API_KEY"), "AI 채팅(LLM 게이트웨이)", "앱의 AI 채팅이 '준비 중'으로 닫힌다", level=WARN)
 
     path = env.get("FCM_SERVICE_ACCOUNT_FILE", "").strip()
     if not path:

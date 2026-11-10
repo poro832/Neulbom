@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_IDLE_SECONDS = 30 * 60  # 마지막 말 뒤 30분 조용하면 대화가 끝난 것이다
 HISTORY_LIMIT = 20  # 모델에게 보이는 최근 말의 수(비용과 길이를 막는다)
-DAILY_LIMIT = 200  # 어르신 한 명이 하루에 보낼 수 있는 말(Bedrock 요금 사고를 막는 안전망)
+DAILY_LIMIT = 200  # 어르신 한 명이 하루에 보낼 수 있는 말(게이트웨이 한도 소진·요금 사고를 막는 안전망)
 MAX_MESSAGE_CHARS = 300  # 저장하고 모델에 보내는 길이. 위급한 말 찾기는 자르기 전 글 전체에서 한다
 MAX_REQUEST_CHARS = 2000  # 이보다 긴 글만 거절한다(앱은 300자까지만 받는다)
 MAX_REPLY_CHARS = 600

@@ -764,11 +764,11 @@ def guardian_auth_for(pool) -> tuple[GuardianAuth, ElderDirectory]:
 
 
 def chat_service_for(pool, *, elders, alerts, notifier, env=os.environ):
-    """앱 AI 채팅. Bedrock API 키(AWS_BEARER_TOKEN_BEDROCK)가 없으면 모델 없이 만들어 채팅 주소가 '준비 중'(503)을 돌려준다."""
+    """앱 AI 채팅. LLM 게이트웨이 키·주소(LLM_GATEWAY_API_KEY, LLM_GATEWAY_BASE_URL)가 없으면 모델 없이 만들어 채팅 주소가 '준비 중'(503)을 돌려준다."""
     from app.chat.alerting import make_urgent_alerter
     from app.chat.service import ChatService
     from app.chat.store import InMemoryChatStore
-    from app.media.bedrock_chat import chat_model_from_env, summary_model_from_env
+    from app.media.gateway_chat import chat_model_from_env, summary_model_from_env
     from app.media.call_summary import CallSummarizer
 
     if pool is None:
@@ -780,7 +780,7 @@ def chat_service_for(pool, *, elders, alerts, notifier, env=os.environ):
     model = chat_model_from_env(env)
     summary_model = summary_model_from_env(env)
     if model is None:
-        logger.info("AI 채팅 꺼짐 — AWS_BEARER_TOKEN_BEDROCK이 없다")
+        logger.info("AI 채팅 꺼짐 — LLM_GATEWAY_API_KEY나 LLM_GATEWAY_BASE_URL이 없다")
     return ChatService(
         store=store,
         model=model,
