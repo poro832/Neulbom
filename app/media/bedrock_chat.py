@@ -18,7 +18,9 @@ import os
 from collections.abc import Sequence
 from urllib.parse import quote
 
-from app.media.clova_chat import Transport, _http_post
+import httpx
+
+from app.media.clova_chat import Transport
 from app.media.conversation import Turn
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,16 @@ DEFAULT_REGION = "ap-northeast-2"
 DEFAULT_MODEL = "global.anthropic.claude-haiku-5-5"
 
 _ROLE_OF = {"elder": "user", "ai": "assistant"}
+
+
+def _http_post(url: str, *, headers: dict, payload: dict, timeout: float) -> bytes:
+    """Bedrock 호출. 실패 로그에 'Bedrock'이라고 적는다(CLOVA와 같은 함수를 쓰면 로그가 CLOVA 오류처럼 읽힌다)."""
+    response = httpx.post(url, headers=headers, json=payload, timeout=timeout)
+    if response.status_code >= 400:
+        # 본문에는 Bedrock이 준 이유가 있다(예: 키 형식 오류, 모델 접근 거절). 요청 헤더의 키는 싣지 않는다.
+        logger.error("Bedrock 요청 실패 status=%s body=%s", response.status_code, response.text[:500])
+    response.raise_for_status()
+    return response.content
 
 
 class BedrockError(RuntimeError):

@@ -115,3 +115,19 @@ def test_the_model_is_closed_without_a_key_and_configurable_with_one():
     chat = chat_model_from_env({"AWS_BEARER_TOKEN_BEDROCK": "K", "BEDROCK_CHAT_MODEL": "m", "BEDROCK_REGION": "us-east-1"})
     assert chat.model == "m"
     assert "us-east-1" in chat._url
+
+
+def test_a_rejected_request_is_logged_as_a_bedrock_failure_with_the_reason_and_never_the_key(monkeypatch, caplog):
+    import httpx
+
+    def reject(url, **kwargs):
+        return httpx.Response(403, json={"Message": "Invalid API Key format"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", reject)
+    chat = BedrockChat("SECRET-KEY-VALUE")
+
+    with caplog.at_level(logging.ERROR), pytest.raises(httpx.HTTPStatusError):
+        chat.reply([Turn("elder", "안녕")])
+
+    assert "Bedrock 요청 실패 status=403" in caplog.text and "Invalid API Key format" in caplog.text
+    assert "CLOVA" not in caplog.text and "SECRET-KEY-VALUE" not in caplog.text
