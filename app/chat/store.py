@@ -22,6 +22,15 @@ class ChatSummary:
     summary: str
 
 
+@dataclass(frozen=True)
+class ChatSessionItem:
+    """어르신 본인이 보는 지난 대화 한 덩이. 미리보기는 어르신이 처음 한 말이다."""
+
+    session_id: int
+    started_at: float
+    preview: str
+
+
 class ChatStore(Protocol):
     def session_for(self, elder_id: int, now: float, idle_seconds: float) -> int:
         """이어 갈 대화 덩이의 번호. 마지막 말이 idle_seconds 안쪽이면 그 덩이, 아니면 새로 만든다."""
@@ -59,6 +68,14 @@ class ChatStore(Protocol):
 
     def summaries(self, elder_id: int, limit: int) -> list[ChatSummary]:
         """요약이 있는 덩이, 최신순."""
+        ...
+
+    def sessions_for_elder(self, elder_id: int, limit: int) -> list[ChatSessionItem]:
+        """그 어르신의 지난 대화(말이 남아 있는 것만), 최신순. 미리보기는 어르신의 첫 말."""
+        ...
+
+    def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
+        """그 어르신의 대화 한 덩이의 말, 오래된 것부터. 남의 대화이거나 없으면 None."""
         ...
 
     def purge_messages_before(self, cutoff: float) -> int:
@@ -180,6 +197,27 @@ class InMemoryChatStore:
                 if s.elder_id == elder_id and s.summary
             ]
         return [ChatSummary(s.session_id, s.started_at, s.summary or "") for s in rows[:limit]]
+
+    def sessions_for_elder(self, elder_id: int, limit: int) -> list[ChatSessionItem]:
+        with self._lock:
+            items = []
+            for s in sorted(self._sessions.values(), key=lambda s: s.started_at, reverse=True):
+                if s.elder_id != elder_id:
+                    continue
+                mine = [m for m in self._messages if m.session_id == s.session_id]
+                if not mine:
+                    continue
+                first = next((m.text for m in mine if m.role == "elder"), mine[0].text)
+                items.append(ChatSessionItem(s.session_id, s.started_at, first))
+        return items[:limit]
+
+    def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None or session.elder_id != elder_id:
+                return None
+            rows = [m for m in self._messages if m.session_id == session_id]
+        return [ChatMessage(m.role, m.text, m.created_at) for m in rows] or None
 
     def purge_messages_before(self, cutoff: float) -> int:
         with self._lock:

@@ -513,10 +513,28 @@ class NulbomApi {
 
   /// 어르신: AI 채팅에 말 한 마디를 보내고 답을 받는다 — 어르신 열쇠로 부른다.
   /// 서버가 거절하면(429 하루 한도, 503 준비 중·잠시 뒤) 그 문장이 [ApiException.message]에 그대로 온다.
-  static Future<ChatAnswer> sendChat(String message, {String? key}) async {
+  static Future<ChatAnswer> sendChat(String message, {String? persona, String? key}) async {
+    // persona는 어르신이 지은 AI 친구 이름이다 — AI가 그 이름으로 말한다(서버가 글자를 거른다).
     final json = await _send('POST', '/v1/me/chat',
-        key: await _elderKeyOrThrow(key), body: {'message': message});
+        key: await _elderKeyOrThrow(key),
+        body: {'message': message, if (persona != null && persona.trim().isNotEmpty) 'persona': persona.trim()});
     return ChatAnswer.fromJson(json);
+  }
+
+  /// 어르신: 내 지난 AI 채팅 목록(서버에 원문이 남아 있는 30일 안쪽).
+  static Future<List<MyChatSession>> myChats({String? key}) async {
+    final json = await _send('GET', '/v1/me/chats', key: await _elderKeyOrThrow(key));
+    return ((json['sessions'] as List<dynamic>?) ?? [])
+        .map((s) => MyChatSession.fromJson(s as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 어르신: 지난 대화 한 덩이의 말.
+  static Future<List<MyChatMessage>> myChat(int sessionId, {String? key}) async {
+    final json = await _send('GET', '/v1/me/chats/$sessionId', key: await _elderKeyOrThrow(key));
+    return ((json['messages'] as List<dynamic>?) ?? [])
+        .map((m) => MyChatMessage.fromJson(m as Map<String, dynamic>))
+        .toList();
   }
 
   /// 보호자: 어르신의 AI 채팅 요약(원문은 오지 않는다). 어르신이 동의하기 전에는 비어 있다.

@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from app.chat.store import ChatStore, ChatSummary
+from app.chat.store import ChatMessage, ChatSessionItem, ChatStore, ChatSummary
 from app.chat.urgent import detect_urgent, safety_notice
 from app.media.conversation import ChatModel, Turn
 
@@ -86,7 +86,7 @@ class ChatService:
     def available(self) -> bool:
         return self._model is not None
 
-    def send(self, elder_id: int, text: str) -> ChatReply:
+    def send(self, elder_id: int, text: str, persona: str | None = None) -> ChatReply:
         text = text.strip()
         if not text:
             raise ValueError("빈 말")
@@ -122,7 +122,7 @@ class ChatService:
         if urgent is not None and (over_limit or no_model):
             reply = safety_notice(urgent.category)  # 모델을 부르지 않는다 — 안내만 나간다
         else:
-            reply = self._ask_model(session)
+            reply = self._ask_model(session, persona)
             if urgent is not None:
                 # 안내는 서버가 직접 붙인다 — 모델이 빠뜨리거나 실패해도 어르신은 이 말을 듣는다.
                 reply = f"{reply} {safety_notice(urgent.category)}".strip()
@@ -192,10 +192,21 @@ class ChatService:
 
     # ------------------------------------------------------------------ 안쪽
 
-    def _ask_model(self, session_id: int) -> str:
+    def my_sessions(self, elder_id: int, *, limit: int = 30) -> list[ChatSessionItem]:
+        """어르신 본인이 보는 지난 대화 목록(원문이 남아 있는 30일 안쪽)."""
+        return self._store.sessions_for_elder(elder_id, limit)
+
+    def my_session_messages(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
+        """어르신 본인의 대화 한 덩이. 남의 대화이거나 없으면 None."""
+        return self._store.messages_for_session(elder_id, session_id)
+
+    def _ask_model(self, session_id: int, persona: str | None = None) -> str:
         turns = [Turn(m.role, m.text) for m in self._store.history(session_id, HISTORY_LIMIT)]
         try:
-            reply = self._model.reply(turns)  # type: ignore[union-attr]
+            if persona and getattr(self._model, "persona_aware", False):
+                reply = self._model.reply(turns, persona=persona)  # type: ignore[union-attr]
+            else:
+                reply = self._model.reply(turns)  # type: ignore[union-attr]
         except Exception:
             # 말 내용은 로그에 남기지 않는다(어르신의 사적인 대화다).
             logger.exception("채팅 응답 생성 실패 session_id=%s", session_id)

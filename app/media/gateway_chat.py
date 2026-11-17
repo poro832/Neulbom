@@ -53,6 +53,8 @@ CHAT_SYSTEM_PROMPT = """당신은 혼자 사는 어르신의 말동무 '늘봄�
 - 돈, 투자, 보험, 개인정보(주민등록번호, 계좌, 비밀번호)는 묻지도 받지도 않습니다. 그런 이야기가 나오면 가족과 상의하시라고 권합니다.
 - 이모지, 목록, 마크다운 없이 대화체 문장으로만 씁니다."""
 
+DEFAULT_PERSONA_QUOTED = "'늘봄이'"
+
 SUMMARY_SYSTEM_PROMPT = """당신은 어르신과 AI의 글 대화를 보호자에게 전하는 기록자입니다.
 - 어르신이 실제로 한 말과 궁금해하신 것을 두세 문장으로 전합니다. 백오십 자 안팎, 존댓말("~하셨어요", "~궁금해하셨어요").
 - 추측, 평가, 조언, 병이나 마음 상태의 판단을 쓰지 않습니다. 무엇이 의심된다고 말하지 않습니다.
@@ -88,14 +90,19 @@ class GatewayChat:
         self._transport = transport
         self._timeout = timeout_seconds
 
-    def reply(self, history: Sequence[Turn]) -> str:
+    # 서비스가 이 값이 참인 모델에게만 어르신이 지은 AI 친구 이름을 넘긴다.
+    persona_aware = True
+
+    def reply(self, history: Sequence[Turn], *, persona: str | None = None) -> str:
+        """persona는 app.chat.persona.clean_persona를 거친 이름이다 — 기본 이름('늘봄이') 대신 그 이름으로 말한다."""
+        system = self.system_prompt.replace(DEFAULT_PERSONA_QUOTED, f"'{persona}'") if persona else self.system_prompt
         # 전송 실패는 여기서 삼키지 않는다 — 호출자가 '지금은 대답하기 어려워요'로 알린다.
         raw = self._transport(
             self._url,
             headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
             payload={
                 "model": self.model,
-                "messages": [{"role": "system", "content": self.system_prompt}, *self._messages(history)],
+                "messages": [{"role": "system", "content": system}, *self._messages(history)],
                 "max_tokens": self.max_tokens,
                 "temperature": self._temperature,
             },

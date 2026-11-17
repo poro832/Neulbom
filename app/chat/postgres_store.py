@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.chat.store import ChatMessage, ChatSummary
+from app.chat.store import ChatMessage, ChatSessionItem, ChatSummary
 
 
 class PostgresChatStore:
@@ -109,6 +109,31 @@ class PostgresChatStore:
                 (elder_id, limit),
             ).fetchall()
         return [ChatSummary(*row) for row in rows]
+
+    def sessions_for_elder(self, elder_id: int, limit: int) -> list[ChatSessionItem]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT s.session_id, extract(epoch from s.started_at)::float8, "
+                "  coalesce((SELECT m.content FROM chat_messages m WHERE m.session_id = s.session_id AND m.role = 'elder' "
+                "            ORDER BY m.message_id LIMIT 1), "
+                "           (SELECT m.content FROM chat_messages m WHERE m.session_id = s.session_id "
+                "            ORDER BY m.message_id LIMIT 1)) "
+                "FROM chat_sessions s WHERE s.elder_id = %s "
+                "  AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.session_id) "
+                "ORDER BY s.started_at DESC LIMIT %s",
+                (elder_id, limit),
+            ).fetchall()
+        return [ChatSessionItem(*row) for row in rows]
+
+    def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT m.role, m.content, extract(epoch from m.created_at)::float8 "
+                "FROM chat_messages m JOIN chat_sessions s USING (session_id) "
+                "WHERE s.elder_id = %s AND s.session_id = %s ORDER BY m.message_id",
+                (elder_id, session_id),
+            ).fetchall()
+        return [ChatMessage(*row) for row in rows] or None
 
     def purge_messages_before(self, cutoff: float) -> int:
         with self._pool.connection() as conn:

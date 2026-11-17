@@ -14,6 +14,7 @@ from fastapi import FastAPI, Header, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from app.api.app_data import MAX_ELDER_ID, iso_kst
+from app.chat.persona import clean_persona
 from app.chat.service import MAX_REQUEST_CHARS, ChatLimitReached, ChatUnavailable
 
 logger = logging.getLogger(__name__)
@@ -22,10 +23,20 @@ CHAT_CLOSED = "AI 채팅은 아직 준비 중이에요"
 CHAT_BUSY = "지금은 대답하기 어려워요. 잠시 뒤에 다시 해 주세요"
 CHAT_LIMIT = "오늘은 이야기를 많이 나눴어요. 내일 또 이야기해요"
 CHAT_EMPTY = "하고 싶은 말씀을 적어 주세요"
+CHAT_NOT_FOUND = "그 대화를 찾을 수 없어요"
+MAX_ID = 2**62
+PREVIEW_CHARS = 40
+
+
+def _preview(text: str) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= PREVIEW_CHARS else text[:PREVIEW_CHARS] + "…"
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS)
+    persona: str | None = Field(default=None, max_length=40)  # 어르신이 지은 AI 친구 이름(서버가 거른다)
+
 
 
 def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_id_of, owned_elder) -> None:
@@ -36,7 +47,7 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
     def send_chat(body: ChatRequest, authorization: str | None = Header(default=None)) -> dict:
         elder_id = ready_elder_id_of(authorization)
         try:
-            result = service.send(elder_id, body.message)
+            result = service.send(elder_id, body.message, clean_persona(body.persona))
         except ValueError:
             raise HTTPException(status_code=422, detail=CHAT_EMPTY)
         except ChatLimitReached:
@@ -47,6 +58,30 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
         # 말 내용은 로그에 남기지 않는다.
         logger.info("채팅 응답 elder_id=%s urgent=%s", elder_id, result.urgent is not None)
         return {"reply": result.reply, "urgent": result.urgent is not None}
+
+    @app.get("/v1/me/chats")
+    @guarded
+    def my_chats(limit: int = Query(default=30, ge=1, le=50), authorization: str | None = Header(default=None)) -> dict:
+        """어르신 본인의 지난 대화 목록(앱 햄버거 메뉴). 원문이 남아 있는 30일 안쪽만 보인다."""
+        elder_id = ready_elder_id_of(authorization)
+        return {
+            "sessions": [
+                {"session_id": s.session_id, "started_at": iso_kst(s.started_at), "preview": _preview(s.preview)}
+                for s in service.my_sessions(elder_id, limit=limit)
+            ]
+        }
+
+    @app.get("/v1/me/chats/{session_id}")
+    @guarded
+    def my_chat(session_id: int = Path(ge=1, le=MAX_ID), authorization: str | None = Header(default=None)) -> dict:
+        elder_id = ready_elder_id_of(authorization)
+        messages = service.my_session_messages(elder_id, session_id)
+        if messages is None:
+            raise HTTPException(status_code=404, detail=CHAT_NOT_FOUND)
+        return {
+            "session_id": session_id,
+            "messages": [{"role": m.role, "text": m.text, "created_at": iso_kst(m.created_at)} for m in messages],
+        }
 
     @app.get("/v1/elders/{elder_id}/chats")
     @guarded

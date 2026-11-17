@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:eldercare/models/nulbom_models.dart';
 import 'package:eldercare/screens/ai_chat_screen.dart';
+import 'package:eldercare/screens/chat_widgets.dart';
+import 'package:eldercare/utils/korean.dart';
 import 'package:eldercare/screens/elder_chats_section.dart';
 import 'package:eldercare/screens/health_alerts_screen.dart';
 import 'package:eldercare/services/nulbom_api.dart';
@@ -40,6 +42,50 @@ void main() {
       expect(answer.urgent, isFalse);
     });
 
+    test('sendChat은 AI 친구 이름이 있으면 함께 보내고, 빈 이름은 보내지 않는다', () async {
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return _json({'reply': '네', 'urgent': false});
+      });
+
+      await NulbomApi.sendChat('안녕', persona: ' 미소 ', key: 'nle_test');
+      expect(jsonDecode(seen.body), {'message': '안녕', 'persona': '미소'});
+
+      await NulbomApi.sendChat('안녕', persona: '  ', key: 'nle_test');
+      expect(jsonDecode(seen.body), {'message': '안녕'});
+    });
+
+    test('myChats와 myChat은 어르신 열쇠로 내 지난 대화를 읽는다', () async {
+      final seen = <http.Request>[];
+      NulbomApi.client = MockClient((request) async {
+        seen.add(request);
+        if (request.url.path == '/v1/me/chats') {
+          return _json({
+            'sessions': [
+              {'session_id': 7, 'started_at': '2026-11-17T14:30:00+09:00', 'preview': '날씨 어때요?'}
+            ]
+          });
+        }
+        return _json({
+          'session_id': 7,
+          'messages': [
+            {'role': 'elder', 'text': '날씨 어때요?', 'created_at': '2026-11-17T14:30:00+09:00'},
+            {'role': 'ai', 'text': '맑아요.', 'created_at': '2026-11-17T14:30:05+09:00'},
+          ]
+        });
+      });
+
+      final sessions = await NulbomApi.myChats(key: 'nle_test');
+      final messages = await NulbomApi.myChat(7, key: 'nle_test');
+
+      expect(seen.map((r) => r.url.path), ['/v1/me/chats', '/v1/me/chats/7']);
+      expect(seen.every((r) => r.headers['Authorization'] == 'Bearer nle_test'), isTrue);
+      expect(sessions.single.preview, '날씨 어때요?');
+      expect([for (final m in messages) m.fromElder], [true, false]);
+      expect(messages.last.text, '맑아요.');
+    });
+
     test('서버가 거절하면 그 문장이 오류 메시지다', () async {
       NulbomApi.client = MockClient((request) async => _json({'detail': '오늘은 이야기를 많이 나눴어요. 내일 또 이야기해요'}, 429));
 
@@ -73,20 +119,43 @@ void main() {
   });
 
   group('어르신 채팅 화면', () {
-    Future<void> open(WidgetTester tester, Future<ChatAnswer> Function(String) send) async {
+    Future<void> open(
+      WidgetTester tester,
+      Future<ChatAnswer> Function(String) send, {
+      String friendName = '늘봄이',
+      Future<List<MyChatSession>> Function()? loadSessions,
+      Future<List<MyChatMessage>> Function(int)? loadSession,
+    }) async {
       tester.view.physicalSize = const Size(1000, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
-      await tester.pumpWidget(MaterialApp(home: AiChatScreen(send: send)));
+      await tester.pumpWidget(const SizedBox()); // 같은 테스트에서 다시 열 때 State를 새로 만든다
+      await tester.pumpWidget(MaterialApp(
+        home: AiChatScreen(
+            friendName: friendName, send: send, loadSessions: loadSessions, loadSession: loadSession),
+      ));
       await tester.pump();
     }
 
     testWidgets('인사말과, 위급한 말이 가족에게 알려질 수 있다는 안내를 먼저 보여 준다', (tester) async {
       await open(tester, (_) async => const ChatAnswer(reply: '', urgent: false));
 
-      expect(find.textContaining('저는 늘봄이에요'), findsOneWidget);
+      expect(find.textContaining('저는 늘봄이예요'), findsOneWidget);
       expect(find.byKey(const Key('chat-notice')), findsOneWidget);
       expect(find.textContaining('가족분께 알려질 수 있어요'), findsOneWidget);
+    });
+
+    testWidgets('제목과 인사말은 어르신이 지은 AI 친구 이름이다(받침에 따라 이에요/예요)', (tester) async {
+      await open(tester, (_) async => const ChatAnswer(reply: '', urgent: false), friendName: '미소');
+
+      expect(find.byKey(const Key('chat-title')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('chat-title'))).data, '미소');
+      expect(find.textContaining('저는 미소예요'), findsOneWidget);
+      expect(find.textContaining('늘봄'), findsNothing);
+      expect(find.text('AI 채팅'), findsNothing);
+
+      await open(tester, (_) async => const ChatAnswer(reply: '', urgent: false), friendName: '영철');
+      expect(find.textContaining('저는 영철이에요'), findsOneWidget);
     });
 
     testWidgets('말을 보내면 내 말풍선과 AI의 답이 차례로 보인다', (tester) async {
@@ -195,6 +264,137 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('119에 전화하시거나'), findsOneWidget);
+    });
+  });
+
+  group('지난 대화(햄버거)와 글자 크기', () {
+    final sessions = [
+      MyChatSession(sessionId: 8, startedAt: DateTime(2026, 11, 17, 14, 30), preview: '점심 뭐 먹을까요'),
+      MyChatSession(sessionId: 7, startedAt: DateTime(2026, 11, 16, 9, 5), preview: '날씨 어때요?'),
+    ];
+
+    Future<void> open(
+      WidgetTester tester, {
+      Future<List<MyChatSession>> Function()? loadSessions,
+      Future<List<MyChatMessage>> Function(int)? loadSession,
+    }) async {
+      tester.view.physicalSize = const Size(1000, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      await tester.pumpWidget(const SizedBox()); // 같은 테스트에서 다시 열 때 State를 새로 만든다
+      await tester.pumpWidget(MaterialApp(
+        home: AiChatScreen(
+          friendName: '미소',
+          send: (_) async => const ChatAnswer(reply: '네', urgent: false),
+          loadSessions: loadSessions ?? () async => sessions,
+          loadSession: loadSession ??
+              (id) async => [
+                    const MyChatMessage(fromElder: true, text: '날씨 어때요?'),
+                    const MyChatMessage(fromElder: false, text: '맑아요, 산책하기 좋아요.'),
+                  ],
+        ),
+      ));
+      await tester.pump();
+    }
+
+    testWidgets('햄버거 버튼을 누르면 지난 대화가 최신순으로 미리보기와 함께 보인다', (tester) async {
+      await open(tester);
+
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('chat-history-drawer')), findsOneWidget);
+      expect(find.text('지난 대화'), findsOneWidget);
+      expect(find.textContaining('30일이 지난 대화는 지워져요'), findsOneWidget);
+      expect(find.text('점심 뭐 먹을까요'), findsOneWidget);
+      expect(find.text('11월 17일 오후 2:30'), findsOneWidget);
+      expect(find.text('11월 16일 오전 9:05'), findsOneWidget);
+      expect(tester.getTopLeft(find.byKey(const Key('chat-history-8'))).dy,
+          lessThan(tester.getTopLeft(find.byKey(const Key('chat-history-7'))).dy));
+    });
+
+    testWidgets('지난 대화를 누르면 그 대화의 말이 읽기 전용으로 열린다', (tester) async {
+      int? opened;
+      await open(tester, loadSession: (id) async {
+        opened = id;
+        return [
+          const MyChatMessage(fromElder: true, text: '날씨 어때요?'),
+          const MyChatMessage(fromElder: false, text: '맑아요, 산책하기 좋아요.'),
+        ];
+      });
+
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-history-7')));
+      await tester.pumpAndSettle();
+
+      expect(opened, 7);
+      expect(find.byKey(const Key('chat-history-list')), findsOneWidget);
+      expect(find.text('맑아요, 산책하기 좋아요.'), findsOneWidget);
+      expect(find.byKey(const Key('chat-input')), findsNothing); // 읽기만 한다 — 입력창이 없다
+      expect(find.byKey(const Key('chat-history-drawer')), findsNothing); // 서랍은 닫혔다
+    });
+
+    testWidgets('지난 대화가 없으면 안내를, 불러오지 못하면 오류와 다시 불러오기를 보인다', (tester) async {
+      await open(tester, loadSessions: () async => []);
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-history-empty')), findsOneWidget);
+      expect(find.text('아직 나눈 대화가 없어요.'), findsOneWidget);
+
+      var calls = 0;
+      await open(tester, loadSessions: () async {
+        calls++;
+        if (calls == 1) throw const ApiException(503, '잠시 뒤에 다시 해 주세요');
+        return sessions;
+      });
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-history-error')), findsOneWidget);
+      expect(find.text('잠시 뒤에 다시 해 주세요'), findsOneWidget);
+
+      await tester.tap(find.text('다시 불러오기'));
+      await tester.pumpAndSettle();
+      expect(find.text('점심 뭐 먹을까요'), findsOneWidget);
+    });
+
+    testWidgets('글자 크기를 고르면 말풍선과 입력창이 바뀌고 기기에 저장된다', (tester) async {
+      await open(tester);
+      double bubbleSize() => tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize!;
+      expect(bubbleSize(), 19);
+
+      await tester.tap(find.byKey(const Key('chat-font')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('chat-font-sheet')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('chat-font-3'))); // 아주 크게
+      await tester.pumpAndSettle();
+
+      expect(bubbleSize(), 28);
+      expect(tester.widget<TextField>(find.byKey(const Key('chat-input'))).style!.fontSize, 28);
+      expect((await SharedPreferences.getInstance()).getInt('chat_font_size_index'), 3);
+    });
+
+    testWidgets('저장된 글자 크기로 화면이 열린다', (tester) async {
+      SharedPreferences.setMockInitialValues({'chat_font_size_index': 0});
+      await open(tester);
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize, 16);
+    });
+
+    testWidgets('이상한 저장값은 무시하고 기본 크기로 연다', (tester) async {
+      SharedPreferences.setMockInitialValues({'chat_font_size_index': 99});
+      await open(tester);
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize, chatFontOptions[chatFontDefaultIndex].size);
+    });
+
+    test('이름 뒤 이에요/예요는 받침에 맞춰 붙는다', () {
+      expect(withIEyo('미소'), '미소예요');
+      expect(withIEyo('영철'), '영철이에요');
+      expect(withIEyo('AI 친구'), 'AI 친구예요');
+      expect(withIEyo(' '), '');
     });
   });
 

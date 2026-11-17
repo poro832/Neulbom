@@ -271,7 +271,7 @@ class _MainScreenState extends State<MainScreen> {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const AiChatScreen()),
+                      MaterialPageRoute(builder: (context) => AiChatScreen(friendName: _friendName)),
                     );
                   },
                 ),

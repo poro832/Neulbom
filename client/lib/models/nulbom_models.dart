@@ -540,6 +540,32 @@ class ChatAnswer {
       ChatAnswer(reply: json['reply'] as String, urgent: (json['urgent'] as bool?) ?? false);
 }
 
+/// 어르신 본인이 햄버거 메뉴에서 보는 지난 대화 한 덩이. [preview]는 어르신이 처음 한 말이다.
+class MyChatSession {
+  final int sessionId;
+  final DateTime startedAt;
+  final String preview;
+
+  const MyChatSession({required this.sessionId, required this.startedAt, required this.preview});
+
+  factory MyChatSession.fromJson(Map<String, dynamic> json) => MyChatSession(
+        sessionId: json['session_id'] as int,
+        startedAt: _asTime(json['started_at'])!,
+        preview: (json['preview'] as String?) ?? '',
+      );
+}
+
+/// 지난 대화 안의 말 한 마디.
+class MyChatMessage {
+  final bool fromElder;
+  final String text;
+
+  const MyChatMessage({required this.fromElder, required this.text});
+
+  factory MyChatMessage.fromJson(Map<String, dynamic> json) =>
+      MyChatMessage(fromElder: json['role'] == 'elder', text: (json['text'] as String?) ?? '');
+}
+
 /// 보호자 앱에 보이는 AI 채팅 요약 한 건. 원문은 오지 않는다.
 class ChatSummaryItem {
   final int sessionId;
