@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../services/speaker.dart';
 import 'chat_widgets.dart';
 
 /// 햄버거 버튼으로 여는 지난 대화 목록 — 어르신 본인의 대화만 보인다(서버가 30일 지나면 지운다).
@@ -19,6 +20,9 @@ class ChatHistoryDrawer extends StatefulWidget {
   /// 지난 대화에 이어 말할 때 부른다. 테스트에서 바꾼다. 기본은 [NulbomApi.sendChat]에 대화 번호를 실어 보낸다.
   final Future<ChatAnswer> Function(String message, int sessionId)? send;
 
+  /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다.
+  final Speaker? speaker;
+
   const ChatHistoryDrawer({
     super.key,
     required this.friendName,
@@ -26,6 +30,7 @@ class ChatHistoryDrawer extends StatefulWidget {
     this.loadSessions,
     this.loadSession,
     this.send,
+    this.speaker,
   });
 
   @override
@@ -115,6 +120,7 @@ class _ChatHistoryDrawerState extends State<ChatHistoryDrawer> {
               fontIndex: widget.fontIndex,
               load: widget.loadSession,
               send: widget.send,
+              speaker: widget.speaker,
             ),
           ));
         },
@@ -173,6 +179,9 @@ class ChatHistoryScreen extends StatefulWidget {
   final Future<List<MyChatMessage>> Function(int sessionId)? load;
   final Future<ChatAnswer> Function(String message, int sessionId)? send;
 
+  /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다.
+  final Speaker? speaker;
+
   const ChatHistoryScreen({
     super.key,
     required this.session,
@@ -180,6 +189,7 @@ class ChatHistoryScreen extends StatefulWidget {
     required this.fontIndex,
     this.load,
     this.send,
+    this.speaker,
   });
 
   @override
@@ -193,6 +203,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   Object? _loadError;
   bool _sending = false;
   late int _fontIndex;
+  late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
 
   @override
   void initState() {
@@ -203,6 +214,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
 
   @override
   void dispose() {
+    _readAloud.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -233,6 +245,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     final text = _input.text.trim();
     final bubbles = _bubbles;
     if (text.isEmpty || _sending || bubbles == null) return;
+    _readAloud.stop(); // 새 말을 보내면 읽던 소리는 멈춘다
     setState(() {
       bubbles.add(_LogBubble(text, fromElder: true));
       _sending = true;
@@ -257,6 +270,13 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
       if (mounted) setState(() => _sending = false);
     }
     _scrollDown();
+  }
+
+  Future<void> _speak(int index, String text) async {
+    final message = await _readAloud.toggle(index, text);
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   /// 보내기가 실패하면 쓴 글을 입력창에 돌려 놓는다. 기다리는 사이 새로 쓴 글이 있으면 덮어쓰지 않는다.
@@ -313,20 +333,28 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
                 : Column(
                     children: [
                       Expanded(
-                        child: ListView.builder(
-                          key: const Key('chat-history-list'),
-                          controller: _scroll,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                          itemCount: bubbles.length + (_sending ? 1 : 0),
-                          itemBuilder: (context, i) => i == bubbles.length
-                              ? _typing()
-                              : ChatBubble(
-                                  text: bubbles[i].text,
-                                  fromElder: bubbles[i].fromElder,
-                                  isError: bubbles[i].isError,
-                                  isUrgent: bubbles[i].isUrgent,
-                                  fontSize: _fontSize,
-                                ),
+                        child: ValueListenableBuilder<int?>(
+                          valueListenable: _readAloud.speaking,
+                          builder: (context, speaking, _) => ListView.builder(
+                            key: const Key('chat-history-list'),
+                            controller: _scroll,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            itemCount: bubbles.length + (_sending ? 1 : 0),
+                            itemBuilder: (context, i) => i == bubbles.length
+                                ? _typing()
+                                : ChatBubble(
+                                    text: bubbles[i].text,
+                                    fromElder: bubbles[i].fromElder,
+                                    isError: bubbles[i].isError,
+                                    isUrgent: bubbles[i].isUrgent,
+                                    fontSize: _fontSize,
+                                    onSpeak: bubbles[i].fromElder || bubbles[i].isError
+                                        ? null
+                                        : () => _speak(i, bubbles[i].text),
+                                    speaking: speaking == i,
+                                    speakButtonKey: Key('speak-$i'),
+                                  ),
+                          ),
                         ),
                       ),
                       ChatInputBar(

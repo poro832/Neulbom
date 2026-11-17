@@ -45,5 +45,9 @@
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
         </intent>
+        <!-- 소리로 듣기(flutter_tts)가 기기의 음성 합성 엔진을 찾는다. Android 11부터는 선언해야 보인다. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>

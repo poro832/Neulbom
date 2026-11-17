@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../services/speaker.dart';
 import '../utils/korean.dart';
 import 'chat_history.dart';
 import 'chat_widgets.dart';
@@ -15,6 +16,7 @@ import 'chat_widgets.dart';
 /// - 제목과 인사말, AI가 말하는 이름은 어르신이 지은 AI 친구 이름([friendName])이다(메인 화면 "○○와 통화하기"와 같다).
 /// - 왼쪽 위 햄버거 버튼은 지난 대화 목록을 연다(서버가 30일 보관).
 /// - 오른쪽 위 "글자 크기"는 4단계로 고르고 이 기기에 저장한다.
+/// - AI 말풍선 왼쪽 아래 스피커를 누르면 그 말을 소리로 읽어 준다(한 번에 하나, 다시 누르면 멈춘다).
 /// - 화면을 나가면 이 화면의 말풍선은 사라진다(서버는 30분 안에 다시 오면 같은 대화로 이어 준다).
 class AiChatScreen extends StatefulWidget {
   /// AI 친구 이름. 메인 화면이 넘긴다.
@@ -32,6 +34,9 @@ class AiChatScreen extends StatefulWidget {
   /// 지난 대화에 이어 말할 때 부른다. 테스트에서 바꾼다. 기본은 [NulbomApi.sendChat]에 대화 번호를 실어 보낸다.
   final Future<ChatAnswer> Function(String message, int sessionId)? sendInSession;
 
+  /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다. 기본은 기기 안의 음성 합성이다.
+  final Speaker? speaker;
+
   const AiChatScreen({
     super.key,
     this.friendName = 'AI 친구',
@@ -39,6 +44,7 @@ class AiChatScreen extends StatefulWidget {
     this.loadSessions,
     this.loadSession,
     this.sendInSession,
+    this.speaker,
   });
 
   @override
@@ -60,6 +66,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   late final List<_Bubble> _bubbles;
   bool _sending = false;
   int _fontIndex = chatFontDefaultIndex;
+  late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
 
   @override
   void initState() {
@@ -77,6 +84,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   @override
   void dispose() {
+    _readAloud.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -94,6 +102,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   Future<void> _submit() async {
     final text = _input.text.trim();
     if (text.isEmpty || _sending) return;
+    _readAloud.stop(); // 새 말을 보내면 읽던 소리는 멈춘다
     setState(() {
       _bubbles.add(_Bubble(text, fromElder: true));
       _sending = true;
@@ -147,6 +156,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         loadSessions: widget.loadSessions,
         loadSession: widget.loadSession,
         send: widget.sendInSession,
+        speaker: widget.speaker,
       ),
       appBar: AppBar(
         backgroundColor: chatBg,
@@ -178,12 +188,16 @@ class _AiChatScreenState extends State<AiChatScreen> {
           children: [
             _notice(),
             Expanded(
-              child: ListView.builder(
-                key: const Key('chat-list'),
-                controller: _scroll,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                itemCount: _bubbles.length + (_sending ? 1 : 0),
-                itemBuilder: (context, i) => i == _bubbles.length ? _typing() : _bubble(_bubbles[i]),
+              child: ValueListenableBuilder<int?>(
+                valueListenable: _readAloud.speaking,
+                builder: (context, speaking, _) => ListView.builder(
+                  key: const Key('chat-list'),
+                  controller: _scroll,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  itemCount: _bubbles.length + (_sending ? 1 : 0),
+                  itemBuilder: (context, i) =>
+                      i == _bubbles.length ? _typing() : _bubble(_bubbles[i], i, speaking == i),
+                ),
               ),
             ),
             _inputBar(),
@@ -220,13 +234,24 @@ class _AiChatScreenState extends State<AiChatScreen> {
     );
   }
 
-  Widget _bubble(_Bubble b) => ChatBubble(
+  Widget _bubble(_Bubble b, int index, bool speaking) => ChatBubble(
         text: b.text,
         fromElder: b.fromElder,
         isError: b.isError,
         isUrgent: b.isUrgent,
         fontSize: _fontSize,
+        // 내가 쓴 말과 오류 문구는 읽어 주지 않는다 — AI의 말에만 스피커가 붙는다.
+        onSpeak: b.fromElder || b.isError ? null : () => _speak(index, b.text),
+        speaking: speaking,
+        speakButtonKey: Key('speak-$index'),
       );
+
+  Future<void> _speak(int index, String text) async {
+    final message = await _readAloud.toggle(index, text);
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
 
   Widget _typing() {
     return Align(

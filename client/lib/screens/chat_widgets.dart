@@ -18,6 +18,13 @@ class ChatBubble extends StatelessWidget {
   final bool isUrgent;
   final double fontSize;
 
+  /// 있으면 말풍선 왼쪽 아래에 "소리로 듣기" 스피커 버튼이 생긴다(AI의 말에만 붙인다).
+  final VoidCallback? onSpeak;
+
+  /// 지금 이 말풍선을 읽는 중인가. 읽는 중이면 버튼이 "멈추기"로 바뀐다.
+  final bool speaking;
+  final Key? speakButtonKey;
+
   const ChatBubble({
     super.key,
     required this.text,
@@ -25,6 +32,9 @@ class ChatBubble extends StatelessWidget {
     this.isError = false,
     this.isUrgent = false,
     this.fontSize = 19,
+    this.onSpeak,
+    this.speaking = false,
+    this.speakButtonKey,
   });
 
   @override
@@ -42,8 +52,26 @@ class ChatBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: isUrgent ? chatDanger : (fromElder ? chatAccent : chatLine), width: isUrgent ? 2 : 1),
         ),
-        child: Text(text,
-            style: GoogleFonts.notoSansKr(fontSize: fontSize, height: 1.55, color: textColor, fontWeight: FontWeight.w500)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text,
+                style: GoogleFonts.notoSansKr(
+                    fontSize: fontSize, height: 1.55, color: textColor, fontWeight: FontWeight.w500)),
+            if (onSpeak != null)
+              IconButton(
+                key: speakButtonKey,
+                tooltip: speaking ? '읽기 멈추기' : '소리로 듣기',
+                onPressed: onSpeak,
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                icon: Icon(speaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                    size: 30, color: isUrgent ? chatDanger : chatAccent),
+              ),
+          ],
+        ),
       ),
     );
   }
