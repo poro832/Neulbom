@@ -56,6 +56,33 @@ void main() {
       expect(jsonDecode(seen.body), {'message': '안녕'});
     });
 
+    test('translate는 어르신 열쇠로 글과 언어를 보내고 번역문을 읽는다', () async {
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return _json({'text': 'It is sunny.', 'language': 'en'});
+      });
+
+      final text = await NulbomApi.translate('맑아요.', language: 'en', key: 'nle_test');
+
+      expect(seen.method, 'POST');
+      expect(seen.url.path, '/v1/me/translate');
+      expect(seen.headers['Authorization'], 'Bearer nle_test');
+      expect(jsonDecode(seen.body), {'text': '맑아요.', 'language': 'en'});
+      expect(text, 'It is sunny.');
+    });
+
+    test('translate는 서버가 거절하면 그 문장을 오류 메시지로 던진다', () async {
+      NulbomApi.client = MockClient((request) async => _json({'detail': '오늘은 번역을 많이 했어요. 내일 또 해 보세요'}, 429));
+
+      await expectLater(
+        NulbomApi.translate('맑아요.', language: 'en', key: 'nle_test'),
+        throwsA(isA<ApiException>()
+            .having((e) => e.statusCode, 'statusCode', 429)
+            .having((e) => e.message, 'message', contains('내일 또'))),
+      );
+    });
+
     test('sendChat은 지난 대화에 이어 말할 때만 대화 번호를 보낸다', () async {
       late http.Request seen;
       NulbomApi.client = MockClient((request) async {

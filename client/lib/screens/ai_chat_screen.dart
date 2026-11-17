@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../services/chat_translator.dart';
 import '../services/speaker.dart';
 import '../utils/korean.dart';
 import 'chat_history.dart';
@@ -17,6 +18,7 @@ import 'chat_widgets.dart';
 /// - 왼쪽 위 햄버거 버튼은 지난 대화 목록을 연다(서버가 30일 보관).
 /// - 오른쪽 위 "글자 크기"는 4단계로 고르고 이 기기에 저장한다.
 /// - AI 말풍선 왼쪽 아래 스피커를 누르면 그 말을 소리로 읽어 준다(한 번에 하나, 다시 누르면 멈춘다).
+/// - 스피커 왼쪽 번역 버튼은 설정한 언어로 번역해 보여 주고 그 언어로 읽어 준다. 언어는 오른쪽 위 설정에서 고른다.
 /// - 화면을 나가면 이 화면의 말풍선은 사라진다(서버는 30분 안에 다시 오면 같은 대화로 이어 준다).
 class AiChatScreen extends StatefulWidget {
   /// AI 친구 이름. 메인 화면이 넘긴다.
@@ -37,6 +39,9 @@ class AiChatScreen extends StatefulWidget {
   /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다. 기본은 기기 안의 음성 합성이다.
   final Speaker? speaker;
 
+  /// 번역에 쓴다. 테스트에서 바꾼다. 기본은 [NulbomApi.translate].
+  final Future<String> Function(String text, String language)? translate;
+
   const AiChatScreen({
     super.key,
     this.friendName = 'AI 친구',
@@ -45,6 +50,7 @@ class AiChatScreen extends StatefulWidget {
     this.loadSession,
     this.sendInSession,
     this.speaker,
+    this.translate,
   });
 
   @override
@@ -67,6 +73,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
   bool _sending = false;
   int _fontIndex = chatFontDefaultIndex;
   late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
+  late final ChatTranslator _translator = ChatTranslator(translate: widget.translate);
+  String _language = chatLanguageDefault;
 
   @override
   void initState() {
@@ -74,17 +82,23 @@ class _AiChatScreenState extends State<AiChatScreen> {
     _bubbles = [
       _Bubble('안녕하세요, 저는 ${withIEyo(widget.friendName)}. 궁금한 것이나 하고 싶은 이야기를 편하게 적어 주세요.'),
     ];
-    _loadFont();
+    _loadPrefs();
   }
 
-  Future<void> _loadFont() async {
+  Future<void> _loadPrefs() async {
     final index = await loadChatFontIndex();
-    if (mounted) setState(() => _fontIndex = index);
+    final language = await loadChatLanguage();
+    if (!mounted) return;
+    setState(() {
+      _fontIndex = index;
+      _language = language;
+    });
   }
 
   @override
   void dispose() {
     _readAloud.dispose();
+    _translator.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -92,11 +106,20 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   double get _fontSize => chatFontOptions[_fontIndex].size;
 
-  Future<void> _pickFont() async {
-    final picked = await showChatFontSheet(context, _fontIndex);
-    if (picked == null || !mounted) return;
-    setState(() => _fontIndex = picked);
-    await saveChatFontIndex(picked);
+  Future<void> _openSettings() {
+    return showChatSettingsSheet(
+      context,
+      fontIndex: _fontIndex,
+      language: _language,
+      onFont: (index) {
+        if (mounted) setState(() => _fontIndex = index);
+        saveChatFontIndex(index);
+      },
+      onLanguage: (code) {
+        if (mounted) setState(() => _language = code);
+        saveChatLanguage(code);
+      },
+    );
   }
 
   Future<void> _submit() async {
@@ -157,6 +180,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         loadSession: widget.loadSession,
         send: widget.sendInSession,
         speaker: widget.speaker,
+        translate: widget.translate,
       ),
       appBar: AppBar(
         backgroundColor: chatBg,
@@ -177,9 +201,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
         actions: [
           IconButton(
             key: const Key('chat-font'),
-            tooltip: '글자 크기',
-            icon: const Icon(Icons.text_fields_rounded),
-            onPressed: _pickFont,
+            tooltip: '설정',
+            icon: const Icon(Icons.tune_rounded),
+            onPressed: _openSettings,
           ),
         ],
       ),
@@ -188,15 +212,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
           children: [
             _notice(),
             Expanded(
-              child: ValueListenableBuilder<int?>(
-                valueListenable: _readAloud.speaking,
-                builder: (context, speaking, _) => ListView.builder(
+              child: ListenableBuilder(
+                listenable: Listenable.merge([_readAloud.speaking, _translator]),
+                builder: (context, _) => ListView.builder(
                   key: const Key('chat-list'),
                   controller: _scroll,
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   itemCount: _bubbles.length + (_sending ? 1 : 0),
                   itemBuilder: (context, i) =>
-                      i == _bubbles.length ? _typing() : _bubble(_bubbles[i], i, speaking == i),
+                      i == _bubbles.length ? _typing() : _bubble(_bubbles[i], i),
                 ),
               ),
             ),
@@ -234,23 +258,61 @@ class _AiChatScreenState extends State<AiChatScreen> {
     );
   }
 
-  Widget _bubble(_Bubble b, int index, bool speaking) => ChatBubble(
-        text: b.text,
-        fromElder: b.fromElder,
-        isError: b.isError,
-        isUrgent: b.isUrgent,
-        fontSize: _fontSize,
-        // 내가 쓴 말과 오류 문구는 읽어 주지 않는다 — AI의 말에만 스피커가 붙는다.
-        onSpeak: b.fromElder || b.isError ? null : () => _speak(index, b.text),
-        speaking: speaking,
-        speakButtonKey: Key('speak-$index'),
-      );
+  Widget _bubble(_Bubble b, int index) {
+    // 내가 쓴 말과 오류 문구는 읽어 주거나 번역하지 않는다 — AI의 말에만 번역·스피커 버튼이 붙는다.
+    final aiSpeech = !b.fromElder && !b.isError;
+    return ChatBubble(
+      text: b.text,
+      fromElder: b.fromElder,
+      isError: b.isError,
+      isUrgent: b.isUrgent,
+      fontSize: _fontSize,
+      onSpeak: aiSpeech ? () => _speak(index, b.text) : null,
+      speaking: _readAloud.speaking.value == index,
+      speakButtonKey: Key('speak-$index'),
+      onTranslate: aiSpeech ? () => _translate(index, b.text) : null,
+      translating: _translator.isPending(index, _language),
+      translation: _translator.resultFor(index, _language),
+      translationLabel: '${chatLanguageByCode(_language).label} 번역',
+      translationSpeaking: _readAloud.speaking.value == kTranslationSpeakBase + index,
+      translateButtonKey: Key('translate-$index'),
+    );
+  }
 
   Future<void> _speak(int index, String text) async {
     final message = await _readAloud.toggle(index, text);
-    if (message != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    if (message != null) _toast(message);
+  }
+
+  /// 번역 버튼. 설정한 언어로 번역해 말풍선에 보여 주고 그 언어로 읽어 준다.
+  /// 이미 번역한 말풍선이면 서버를 부르지 않고 다시 읽거나(읽는 중이면) 멈춘다.
+  Future<void> _translate(int index, String text) async {
+    final language = _language;
+    if (_translator.isPending(index, language)) return;
+    final String translated;
+    try {
+      translated = await _translator.obtain(index, text, language);
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('지금은 번역하기 어려워요. 잠시 뒤에 다시 해 주세요');
+      return;
     }
+    if (!mounted) return;
+    final info = chatLanguageByCode(language);
+    final message = await _readAloud.toggle(
+      kTranslationSpeakBase + index,
+      translated,
+      language: info.ttsLocale,
+      unavailableMessage: noVoiceMessage(info.label),
+    );
+    if (message != null) _toast(message);
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _typing() {

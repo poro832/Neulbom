@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.api.app_data import MAX_ELDER_ID, iso_kst
 from app.chat.persona import clean_persona
 from app.chat.service import MAX_REQUEST_CHARS, ChatLimitReached, ChatSessionNotFound, ChatUnavailable
+from app.chat.translate import MAX_TRANSLATE_CHARS, TranslateLimitReached, TranslateUnavailable, clean_language
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ CHAT_BUSY = "지금은 대답하기 어려워요. 잠시 뒤에 다시 해 주�
 CHAT_LIMIT = "오늘은 이야기를 많이 나눴어요. 내일 또 이야기해요"
 CHAT_EMPTY = "하고 싶은 말씀을 적어 주세요"
 CHAT_NOT_FOUND = "그 대화를 찾을 수 없어요"
+TRANSLATE_CLOSED = "번역은 아직 준비 중이에요"
+TRANSLATE_BUSY = "지금은 번역하기 어려워요. 잠시 뒤에 다시 해 주세요"
+TRANSLATE_LIMIT = "오늘은 번역을 많이 했어요. 내일 또 해 보세요"
+TRANSLATE_LANGUAGE = "지원하지 않는 언어예요"
 MAX_ID = 2**62
 PREVIEW_CHARS = 40
 
@@ -31,6 +36,11 @@ PREVIEW_CHARS = 40
 def _preview(text: str) -> str:
     text = " ".join(text.split())
     return text if len(text) <= PREVIEW_CHARS else text[:PREVIEW_CHARS] + "…"
+
+
+class TranslateRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TRANSLATE_CHARS)
+    language: str = Field(max_length=16)  # en · ja · zh · vi · th · ru
 
 
 class ChatRequest(BaseModel):
@@ -61,6 +71,25 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
         # 말 내용은 로그에 남기지 않는다.
         logger.info("채팅 응답 elder_id=%s urgent=%s", elder_id, result.urgent is not None)
         return {"reply": result.reply, "urgent": result.urgent is not None}
+
+    @app.post("/v1/me/translate")
+    @guarded
+    def translate(body: TranslateRequest, authorization: str | None = Header(default=None)) -> dict:
+        """AI의 말을 어르신이 설정한 언어로 번역한다. 번역문은 저장하지 않고, 말 내용은 로그에 남기지 않는다."""
+        elder_id = ready_elder_id_of(authorization)
+        language = clean_language(body.language)
+        if language is None:
+            raise HTTPException(status_code=422, detail=TRANSLATE_LANGUAGE)
+        try:
+            text = service.translate(elder_id, body.text, language)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=CHAT_EMPTY)
+        except TranslateLimitReached:
+            raise HTTPException(status_code=429, detail=TRANSLATE_LIMIT)
+        except TranslateUnavailable:
+            # 번역기가 없으면 '준비 중', 있는데 못 만들었으면 '잠시 뒤에'.
+            raise HTTPException(status_code=503, detail=TRANSLATE_BUSY if service.translator_available else TRANSLATE_CLOSED)
+        return {"text": text, "language": language}
 
     @app.get("/v1/me/chats")
     @guarded

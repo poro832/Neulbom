@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/nulbom_models.dart';
 import '../services/nulbom_api.dart';
+import '../services/chat_translator.dart';
 import '../services/speaker.dart';
 import 'chat_widgets.dart';
 
@@ -23,6 +24,9 @@ class ChatHistoryDrawer extends StatefulWidget {
   /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다.
   final Speaker? speaker;
 
+  /// 번역에 쓴다. 테스트에서 바꾼다. 기본은 [NulbomApi.translate].
+  final Future<String> Function(String text, String language)? translate;
+
   const ChatHistoryDrawer({
     super.key,
     required this.friendName,
@@ -31,6 +35,7 @@ class ChatHistoryDrawer extends StatefulWidget {
     this.loadSession,
     this.send,
     this.speaker,
+    this.translate,
   });
 
   @override
@@ -121,6 +126,7 @@ class _ChatHistoryDrawerState extends State<ChatHistoryDrawer> {
               load: widget.loadSession,
               send: widget.send,
               speaker: widget.speaker,
+              translate: widget.translate,
             ),
           ));
         },
@@ -182,6 +188,9 @@ class ChatHistoryScreen extends StatefulWidget {
   /// 소리로 듣기에 쓰는 음성 엔진. 테스트에서 바꾼다.
   final Speaker? speaker;
 
+  /// 번역에 쓴다. 테스트에서 바꾼다. 기본은 [NulbomApi.translate].
+  final Future<String> Function(String text, String language)? translate;
+
   const ChatHistoryScreen({
     super.key,
     required this.session,
@@ -190,6 +199,7 @@ class ChatHistoryScreen extends StatefulWidget {
     this.load,
     this.send,
     this.speaker,
+    this.translate,
   });
 
   @override
@@ -204,17 +214,21 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   bool _sending = false;
   late int _fontIndex;
   late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
+  late final ChatTranslator _translator = ChatTranslator(translate: widget.translate);
+  String _language = chatLanguageDefault;
 
   @override
   void initState() {
     super.initState();
     _fontIndex = widget.fontIndex;
     _load();
+    _loadLanguage();
   }
 
   @override
   void dispose() {
     _readAloud.dispose();
+    _translator.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -234,11 +248,25 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     }
   }
 
-  Future<void> _pickFont() async {
-    final picked = await showChatFontSheet(context, _fontIndex);
-    if (picked == null || !mounted) return;
-    setState(() => _fontIndex = picked);
-    await saveChatFontIndex(picked);
+  Future<void> _loadLanguage() async {
+    final language = await loadChatLanguage();
+    if (mounted) setState(() => _language = language);
+  }
+
+  Future<void> _openSettings() {
+    return showChatSettingsSheet(
+      context,
+      fontIndex: _fontIndex,
+      language: _language,
+      onFont: (index) {
+        if (mounted) setState(() => _fontIndex = index);
+        saveChatFontIndex(index);
+      },
+      onLanguage: (code) {
+        if (mounted) setState(() => _language = code);
+        saveChatLanguage(code);
+      },
+    );
   }
 
   Future<void> _submit() async {
@@ -272,11 +300,61 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     _scrollDown();
   }
 
+  Widget _bubble(_LogBubble b, int index) {
+    // 내가 쓴 말과 오류 문구는 읽어 주거나 번역하지 않는다 — AI의 말에만 번역·스피커 버튼이 붙는다.
+    final aiSpeech = !b.fromElder && !b.isError;
+    return ChatBubble(
+      text: b.text,
+      fromElder: b.fromElder,
+      isError: b.isError,
+      isUrgent: b.isUrgent,
+      fontSize: _fontSize,
+      onSpeak: aiSpeech ? () => _speak(index, b.text) : null,
+      speaking: _readAloud.speaking.value == index,
+      speakButtonKey: Key('speak-$index'),
+      onTranslate: aiSpeech ? () => _translate(index, b.text) : null,
+      translating: _translator.isPending(index, _language),
+      translation: _translator.resultFor(index, _language),
+      translationLabel: '${chatLanguageByCode(_language).label} 번역',
+      translationSpeaking: _readAloud.speaking.value == kTranslationSpeakBase + index,
+      translateButtonKey: Key('translate-$index'),
+    );
+  }
+
   Future<void> _speak(int index, String text) async {
     final message = await _readAloud.toggle(index, text);
-    if (message != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    if (message != null) _toast(message);
+  }
+
+  /// 번역 버튼. 설정한 언어로 번역해 말풍선에 보여 주고 그 언어로 읽어 준다.
+  /// 이미 번역한 말풍선이면 서버를 부르지 않고 다시 읽거나(읽는 중이면) 멈춘다.
+  Future<void> _translate(int index, String text) async {
+    final language = _language;
+    if (_translator.isPending(index, language)) return;
+    final String translated;
+    try {
+      translated = await _translator.obtain(index, text, language);
+    } on ApiException catch (e) {
+      _toast(e.message);
+      return;
+    } catch (_) {
+      _toast('지금은 번역하기 어려워요. 잠시 뒤에 다시 해 주세요');
+      return;
     }
+    if (!mounted) return;
+    final info = chatLanguageByCode(language);
+    final message = await _readAloud.toggle(
+      kTranslationSpeakBase + index,
+      translated,
+      language: info.ttsLocale,
+      unavailableMessage: noVoiceMessage(info.label),
+    );
+    if (message != null) _toast(message);
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// 보내기가 실패하면 쓴 글을 입력창에 돌려 놓는다. 기다리는 사이 새로 쓴 글이 있으면 덮어쓰지 않는다.
@@ -312,9 +390,9 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
         actions: [
           IconButton(
             key: const Key('chat-history-font'),
-            tooltip: '글자 크기',
-            icon: const Icon(Icons.text_fields_rounded),
-            onPressed: _pickFont,
+            tooltip: '설정',
+            icon: const Icon(Icons.tune_rounded),
+            onPressed: _openSettings,
           ),
         ],
       ),
@@ -333,27 +411,16 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
                 : Column(
                     children: [
                       Expanded(
-                        child: ValueListenableBuilder<int?>(
-                          valueListenable: _readAloud.speaking,
-                          builder: (context, speaking, _) => ListView.builder(
+                        child: ListenableBuilder(
+                          listenable: Listenable.merge([_readAloud.speaking, _translator]),
+                          builder: (context, _) => ListView.builder(
                             key: const Key('chat-history-list'),
                             controller: _scroll,
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                             itemCount: bubbles.length + (_sending ? 1 : 0),
                             itemBuilder: (context, i) => i == bubbles.length
                                 ? _typing()
-                                : ChatBubble(
-                                    text: bubbles[i].text,
-                                    fromElder: bubbles[i].fromElder,
-                                    isError: bubbles[i].isError,
-                                    isUrgent: bubbles[i].isUrgent,
-                                    fontSize: _fontSize,
-                                    onSpeak: bubbles[i].fromElder || bubbles[i].isError
-                                        ? null
-                                        : () => _speak(i, bubbles[i].text),
-                                    speaking: speaking == i,
-                                    speakButtonKey: Key('speak-$i'),
-                                  ),
+                                : _bubble(bubbles[i], i),
                           ),
                         ),
                       ),

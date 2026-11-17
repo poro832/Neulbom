@@ -526,6 +526,14 @@ class NulbomApi {
     return ChatAnswer.fromJson(json);
   }
 
+  /// 어르신: AI의 말을 [language](en · ja · zh · vi · th · ru)로 번역한다. 번역문은 서버에 저장되지 않는다.
+  /// 서버가 거절하면(429 하루 한도, 503 준비 중·잠시 뒤) 그 문장이 [ApiException.message]에 그대로 온다.
+  static Future<String> translate(String text, {required String language, String? key}) async {
+    final json = await _send('POST', '/v1/me/translate',
+        key: await _elderKeyOrThrow(key), body: {'text': text, 'language': language});
+    return json['text'] as String;
+  }
+
   /// 어르신: 내 지난 AI 채팅 목록(서버에 원문이 남아 있는 30일 안쪽).
   static Future<List<MyChatSession>> myChats({String? key}) async {
     final json = await _send('GET', '/v1/me/chats', key: await _elderKeyOrThrow(key));

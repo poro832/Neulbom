@@ -779,7 +779,13 @@ def chat_service_for(pool, *, elders, alerts, notifier, env=os.environ):
     from app.chat.alerting import make_urgent_alerter
     from app.chat.service import ChatService
     from app.chat.store import InMemoryChatStore
-    from app.media.gateway_chat import chat_model_from_env, summary_model_from_env
+    from app.chat.translate import Translator
+    from app.media.gateway_chat import (
+        chat_model_from_env,
+        gateway_settings_from_env,
+        summary_model_from_env,
+        translate_model_from_env,
+    )
     from app.media.call_summary import CallSummarizer
 
     if pool is None:
@@ -797,6 +803,12 @@ def chat_service_for(pool, *, elders, alerts, notifier, env=os.environ):
         model=model,
         summarizer=None if summary_model is None else CallSummarizer(summary_model, summary_model.model),
         on_urgent=make_urgent_alerter(elders=elders, alerts=alerts, notifier=notifier),
+        # 번역도 같은 게이트웨이를 쓴다. 키·주소가 없으면 번역 주소가 '준비 중'(503)을 돌려준다.
+        translator=(
+            None
+            if gateway_settings_from_env(env) is None
+            else Translator(lambda language_name: translate_model_from_env(language_name, env))
+        ),
     )
 
 

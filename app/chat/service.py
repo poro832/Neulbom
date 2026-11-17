@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.chat.store import ChatMessage, ChatSessionItem, ChatStore, ChatSummary
+from app.chat.translate import TRANSLATE_DAILY_LIMIT, TranslateLimitReached, TranslateUnavailable, Translator
 from app.chat.urgent import detect_urgent, safety_notice
 from app.media.conversation import ChatModel, Turn
 
@@ -74,8 +75,12 @@ class ChatService:
         model: ChatModel | None,
         summarizer=None,
         on_urgent: UrgentAlerter | None = None,
+        translator: Translator | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
+        self._translator = translator
+        self._translate_counts: dict[int, tuple[int, int]] = {}  # 어르신 → (날짜, 오늘 새로 번역한 수)
+        self._translate_guard = threading.Lock()
         self._store = store
         self._model = model
         self._summarizer = summarizer
@@ -89,6 +94,41 @@ class ChatService:
     @property
     def available(self) -> bool:
         return self._model is not None
+
+    @property
+    def translator_available(self) -> bool:
+        return self._translator is not None
+
+    def translate(self, elder_id: int, text: str, language: str) -> str:
+        """AI의 말을 번역한다. [language]는 clean_language를 거친 코드다.
+
+        이미 번역한 글은 한도와 상관없이 바로 돌려준다. 새로 번역하는 글만 하루 한도를 쓰고, 실패한 번역은 한도를 돌려준다.
+        """
+        if self._translator is None:
+            raise TranslateUnavailable("번역 꺼짐")
+        text = text.strip()
+        if not text:
+            raise ValueError("빈 글")
+        cached = self._translator.cached(text, language)
+        if cached is not None:
+            return cached
+        day = int((self._clock() + 9 * 3600) // 86400)  # 한국 날짜
+        with self._translate_guard:
+            if len(self._translate_counts) > 5000:  # 지난 날짜의 기록을 치운다
+                self._translate_counts = {k: v for k, v in self._translate_counts.items() if v[0] == day}
+            seen_day, used = self._translate_counts.get(elder_id, (day, 0))
+            if seen_day != day:
+                used = 0
+            if used >= TRANSLATE_DAILY_LIMIT:
+                raise TranslateLimitReached()
+            self._translate_counts[elder_id] = (day, used + 1)
+        try:
+            return self._translator.translate(text, language)
+        except TranslateUnavailable:
+            with self._translate_guard:
+                seen_day, used = self._translate_counts.get(elder_id, (day, 1))
+                self._translate_counts[elder_id] = (seen_day, max(0, used - 1))
+            raise
 
     def send(self, elder_id: int, text: str, persona: str | None = None, session_id: int | None = None) -> ChatReply:
         text = text.strip()

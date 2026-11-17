@@ -25,6 +25,22 @@ class ChatBubble extends StatelessWidget {
   final bool speaking;
   final Key? speakButtonKey;
 
+  /// 있으면 소리로 듣기 스피커 왼쪽에 "번역" 버튼이 생긴다. 누르면 설정한 언어로 번역해 보여 주고 읽어 준다.
+  final VoidCallback? onTranslate;
+
+  /// 번역을 기다리는 중이면 번역 버튼 자리에 빙글빙글이 돈다.
+  final bool translating;
+
+  /// 이 말풍선의 번역문(설정한 언어). 있으면 글 아래에 보인다.
+  final String? translation;
+
+  /// 번역문 머리에 쓰는 이름. 예: "영어 번역".
+  final String? translationLabel;
+
+  /// 번역문을 읽는 중인가. 읽는 중이면 번역 버튼이 "멈추기"로 바뀐다.
+  final bool translationSpeaking;
+  final Key? translateButtonKey;
+
   const ChatBubble({
     super.key,
     required this.text,
@@ -35,6 +51,12 @@ class ChatBubble extends StatelessWidget {
     this.onSpeak,
     this.speaking = false,
     this.speakButtonKey,
+    this.onTranslate,
+    this.translating = false,
+    this.translation,
+    this.translationLabel,
+    this.translationSpeaking = false,
+    this.translateButtonKey,
   });
 
   @override
@@ -59,16 +81,64 @@ class ChatBubble extends StatelessWidget {
             Text(text,
                 style: GoogleFonts.notoSansKr(
                     fontSize: fontSize, height: 1.55, color: textColor, fontWeight: FontWeight.w500)),
-            if (onSpeak != null)
-              IconButton(
-                key: speakButtonKey,
-                tooltip: speaking ? '읽기 멈추기' : '소리로 듣기',
-                onPressed: onSpeak,
-                padding: EdgeInsets.zero,
-                alignment: Alignment.centerLeft,
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                icon: Icon(speaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
-                    size: 30, color: isUrgent ? chatDanger : chatAccent),
+            if (translation != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                key: const Key('chat-translation'),
+                width: double.infinity,
+                padding: const EdgeInsets.only(top: 8),
+                decoration: const BoxDecoration(border: Border(top: BorderSide(color: chatLine))),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (translationLabel != null)
+                      Text(translationLabel!,
+                          style: GoogleFonts.notoSansKr(fontSize: 14, color: chatInkSoft, fontWeight: FontWeight.w700)),
+                    Text(translation!,
+                        style: GoogleFonts.notoSansKr(
+                            fontSize: fontSize, height: 1.55, color: textColor, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ),
+            ],
+            if (onSpeak != null || onTranslate != null)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 왼쪽부터 번역, 소리로 듣기. 번역 버튼은 눌러 둔 언어로 번역해 읽어 준다.
+                  if (onTranslate != null)
+                    translating
+                        ? const SizedBox(
+                            key: Key('chat-translating'),
+                            width: 44,
+                            height: 44,
+                            child: Padding(
+                              padding: EdgeInsets.all(10),
+                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                            ),
+                          )
+                        : IconButton(
+                            key: translateButtonKey,
+                            tooltip: translationSpeaking ? '읽기 멈추기' : '번역해서 듣기',
+                            onPressed: onTranslate,
+                            padding: EdgeInsets.zero,
+                            alignment: Alignment.centerLeft,
+                            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                            icon: Icon(translationSpeaking ? Icons.stop_circle_rounded : Icons.translate_rounded,
+                                size: 30, color: isUrgent ? chatDanger : chatAccent),
+                          ),
+                  if (onSpeak != null)
+                    IconButton(
+                      key: speakButtonKey,
+                      tooltip: speaking ? '읽기 멈추기' : '소리로 듣기',
+                      onPressed: onSpeak,
+                      padding: EdgeInsets.zero,
+                      alignment: Alignment.centerLeft,
+                      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                      icon: Icon(speaking ? Icons.stop_circle_rounded : Icons.volume_up_rounded,
+                          size: 30, color: isUrgent ? chatDanger : chatAccent),
+                    ),
+                ],
               ),
           ],
         ),
@@ -113,54 +183,163 @@ Future<void> saveChatFontIndex(int index) async {
   }
 }
 
-/// 글자 크기 고르는 아래 창. 고른 번호를 돌려준다(그냥 닫으면 null).
-Future<int?> showChatFontSheet(BuildContext context, int current) {
-  return showModalBottomSheet<int>(
+/// 번역 언어. [ttsLocale]은 그 언어로 읽을 때 쓰는 음성 언어 코드다.
+class ChatLanguage {
+  final String code; // 서버와 주고받는 코드(app/chat/translate.py의 LANGUAGES와 같다)
+  final String label; // 어르신께 보이는 한국어 이름
+  final String nativeName; // 그 언어로 쓴 이름
+  final String ttsLocale;
+  const ChatLanguage(this.code, this.label, this.nativeName, this.ttsLocale);
+}
+
+const List<ChatLanguage> chatLanguages = [
+  ChatLanguage('en', '영어', 'English', 'en-US'),
+  ChatLanguage('ja', '일본어', '日本語', 'ja-JP'),
+  ChatLanguage('zh', '중국어', '中文', 'zh-CN'),
+  ChatLanguage('vi', '베트남어', 'Tiếng Việt', 'vi-VN'),
+  ChatLanguage('th', '태국어', 'ไทย', 'th-TH'),
+  ChatLanguage('ru', '러시아어', 'Русский', 'ru-RU'),
+];
+const String chatLanguageDefault = 'en';
+const String _languagePrefKey = 'chat_translate_language';
+
+ChatLanguage chatLanguageByCode(String code) =>
+    chatLanguages.firstWhere((l) => l.code == code, orElse: () => chatLanguages.first);
+
+Future<String> loadChatLanguage() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_languagePrefKey);
+    if (saved != null && chatLanguages.any((l) => l.code == saved)) return saved;
+  } catch (_) {
+    // 저장소를 못 읽어도 화면은 기본 언어로 뜬다.
+  }
+  return chatLanguageDefault;
+}
+
+Future<void> saveChatLanguage(String code) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_languagePrefKey, code);
+  } catch (_) {
+    // 저장이 안 되어도 이번 화면에서는 바뀐 언어로 번역한다.
+  }
+}
+
+/// 채팅 설정 아래 창 — 글자 크기와 번역 언어. 고르는 즉시 [onFont]·[onLanguage]로 알리고 창은 열어 둔다
+/// (글자 크기는 뒤의 화면이 바로 바뀌는 것을 보면서 고를 수 있다). 다 골랐으면 "완료"나 바깥을 누른다.
+Future<void> showChatSettingsSheet(
+  BuildContext context, {
+  required int fontIndex,
+  required String language,
+  required ValueChanged<int> onFont,
+  required ValueChanged<String> onLanguage,
+}) {
+  return showModalBottomSheet<void>(
     context: context,
+    isScrollControlled: true,
     backgroundColor: chatCard,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-        child: Column(
-          key: const Key('chat-font-sheet'),
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('글자 크기',
-                style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: chatInk)),
-            const SizedBox(height: 12),
-            for (var i = 0; i < chatFontOptions.length; i++)
-              InkWell(
-                key: Key('chat-font-$i'),
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => Navigator.pop(context, i),
-                child: Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: i == current ? const Color(0xFFE3EEFF) : chatBg,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: i == current ? chatAccent : chatLine, width: i == current ? 2 : 1),
+    builder: (context) {
+      var font = fontIndex;
+      var lang = language;
+      return StatefulBuilder(
+        builder: (context, setSheet) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Column(
+                key: const Key('chat-font-sheet'),
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('글자 크기',
+                      style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: chatInk)),
+                  const SizedBox(height: 12),
+                  for (var i = 0; i < chatFontOptions.length; i++)
+                    _SettingTile(
+                      tileKey: Key('chat-font-$i'),
+                      selected: i == font,
+                      onTap: () {
+                        setSheet(() => font = i);
+                        onFont(i);
+                      },
+                      child: Text('${chatFontOptions[i].label} — 안녕하세요',
+                          style: GoogleFonts.notoSansKr(
+                              fontSize: chatFontOptions[i].size, color: chatInk, fontWeight: FontWeight.w500)),
+                    ),
+                  const SizedBox(height: 20),
+                  Text('번역 언어',
+                      style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: chatInk)),
+                  const SizedBox(height: 4),
+                  Text('말풍선의 번역 버튼을 누르면 이 언어로 번역해서 읽어 줘요.',
+                      style: GoogleFonts.notoSansKr(fontSize: 15, height: 1.4, color: chatInkSoft)),
+                  const SizedBox(height: 8),
+                  for (final l in chatLanguages)
+                    _SettingTile(
+                      tileKey: Key('chat-lang-${l.code}'),
+                      selected: l.code == lang,
+                      onTap: () {
+                        setSheet(() => lang = l.code);
+                        onLanguage(l.code);
+                      },
+                      child: Text('${l.label} · ${l.nativeName}',
+                          style: GoogleFonts.notoSansKr(fontSize: 19, color: chatInk, fontWeight: FontWeight.w500)),
+                    ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: FilledButton(
+                      key: const Key('chat-settings-done'),
+                      style: FilledButton.styleFrom(backgroundColor: chatAccent),
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('완료', style: GoogleFonts.notoSansKr(fontSize: 19, fontWeight: FontWeight.w700)),
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text('${chatFontOptions[i].label} — 안녕하세요',
-                            style: GoogleFonts.notoSansKr(
-                                fontSize: chatFontOptions[i].size, color: chatInk, fontWeight: FontWeight.w500)),
-                      ),
-                      if (i == current) const Icon(Icons.check_circle_rounded, color: chatAccent),
-                    ],
-                  ),
-                ),
+                ],
               ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _SettingTile extends StatelessWidget {
+  final Key tileKey;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget child;
+
+  const _SettingTile({required this.tileKey, required this.selected, required this.onTap, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: tileKey,
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFE3EEFF) : chatBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: selected ? chatAccent : chatLine, width: selected ? 2 : 1),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: child),
+            if (selected) const Icon(Icons.check_circle_rounded, color: chatAccent),
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// "11월 17일 오후 2:30"
