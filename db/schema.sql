@@ -170,8 +170,8 @@ CREATE INDEX calls_pending_idx ON calls (created_at)
 -- 재계산 가능한 창을 녹음과 정확히 같게 맞춘다. 다만 글은 음성보다 위험하다
 -- — 녹음 유출은 통화 하나지만 텍스트 유출은 검색 가능한 덩어리다.
 --
--- !! 아직 아무도 지우지 않는다. S3는 라이프사이클이 지우지만 DB 행은 지우는
---    주체가 없다. 주기 작업이 생기는 스케줄러 작업에서 붙인다.
+-- 30일이 지나면 녹음 보관기(app/archiver.py)가 1분마다 훑으면서 지운다(call_turns·call_reports 등도 같다).
+-- S3 객체는 버킷 수명주기와 서버의 삭제 규칙이 따로 지운다.
 CREATE TABLE call_transcripts (
     call_id    BIGINT PRIMARY KEY REFERENCES calls(call_id) ON DELETE CASCADE,
     text       TEXT NOT NULL,
