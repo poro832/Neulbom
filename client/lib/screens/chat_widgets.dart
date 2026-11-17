@@ -143,3 +143,70 @@ String chatTimeLabel(DateTime t) {
   final minute = local.minute.toString().padLeft(2, '0');
   return '${local.month}월 ${local.day}일 $period $hour12:$minute';
 }
+
+/// 채팅 입력줄(입력창 + 보내기 버튼). 답을 기다리는 동안([sending])에는 읽기 전용이라 키보드와 포커스가 유지된다.
+class ChatInputBar extends StatelessWidget {
+  final TextEditingController controller;
+  final bool sending;
+  final VoidCallback onSubmit;
+  final double fontSize;
+  final String hint;
+
+  const ChatInputBar({
+    super.key,
+    required this.controller,
+    required this.sending,
+    required this.onSubmit,
+    required this.fontSize,
+    this.hint = '여기에 적어 주세요',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      color: chatBg,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const Key('chat-input'),
+              controller: controller,
+              // enabled: false로 막으면 키보드가 내려가고 포커스를 잃는다. 읽기 전용으로 두어 이어서 쓰게 한다.
+              readOnly: sending,
+              minLines: 1,
+              maxLines: 3,
+              maxLength: 300,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => onSubmit(),
+              style: TextStyle(fontSize: fontSize),
+              decoration: InputDecoration(
+                hintText: hint,
+                counterText: '',
+                filled: true,
+                fillColor: chatCard,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: chatLine)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: chatLine)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: IconButton.filled(
+              key: const Key('chat-send'),
+              onPressed: sending ? null : onSubmit,
+              style: IconButton.styleFrom(backgroundColor: chatAccent, foregroundColor: Colors.white),
+              icon: const Icon(Icons.send_rounded, size: 26),
+              tooltip: '보내기',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

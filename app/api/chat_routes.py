@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.api.app_data import MAX_ELDER_ID, iso_kst
 from app.chat.persona import clean_persona
-from app.chat.service import MAX_REQUEST_CHARS, ChatLimitReached, ChatUnavailable
+from app.chat.service import MAX_REQUEST_CHARS, ChatLimitReached, ChatSessionNotFound, ChatUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ def _preview(text: str) -> str:
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_REQUEST_CHARS)
     persona: str | None = Field(default=None, max_length=40)  # 어르신이 지은 AI 친구 이름(서버가 거른다)
+    session_id: int | None = Field(default=None, ge=1, le=2**62)  # 지난 대화에 이어 말할 때 그 대화 번호
 
 
 
@@ -47,9 +48,11 @@ def add_chat_routes(app: FastAPI, *, data, guarded, guardian_id_of, ready_elder_
     def send_chat(body: ChatRequest, authorization: str | None = Header(default=None)) -> dict:
         elder_id = ready_elder_id_of(authorization)
         try:
-            result = service.send(elder_id, body.message, clean_persona(body.persona))
+            result = service.send(elder_id, body.message, clean_persona(body.persona), body.session_id)
         except ValueError:
             raise HTTPException(status_code=422, detail=CHAT_EMPTY)
+        except ChatSessionNotFound:
+            raise HTTPException(status_code=404, detail=CHAT_NOT_FOUND)
         except ChatLimitReached:
             raise HTTPException(status_code=429, detail=CHAT_LIMIT)
         except ChatUnavailable:

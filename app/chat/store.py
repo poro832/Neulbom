@@ -71,7 +71,11 @@ class ChatStore(Protocol):
         ...
 
     def sessions_for_elder(self, elder_id: int, limit: int) -> list[ChatSessionItem]:
-        """그 어르신의 지난 대화(말이 남아 있는 것만), 최신순. 미리보기는 어르신의 첫 말."""
+        """그 어르신의 지난 대화(말이 남아 있는 것만), 마지막 말이 최신인 순서. 미리보기는 어르신의 첫 말."""
+        ...
+
+    def reopen_for_summary(self, session_id: int) -> None:
+        """이미 요약한 대화에 말이 더 붙으면 '아직 요약 안 함'으로 되돌린다 — 끝난 뒤 이어진 내용까지 다시 요약한다."""
         ...
 
     def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
@@ -201,7 +205,7 @@ class InMemoryChatStore:
     def sessions_for_elder(self, elder_id: int, limit: int) -> list[ChatSessionItem]:
         with self._lock:
             items = []
-            for s in sorted(self._sessions.values(), key=lambda s: s.started_at, reverse=True):
+            for s in sorted(self._sessions.values(), key=lambda s: s.last_message_at, reverse=True):
                 if s.elder_id != elder_id:
                     continue
                 mine = [m for m in self._messages if m.session_id == s.session_id]
@@ -210,6 +214,12 @@ class InMemoryChatStore:
                 first = next((m.text for m in mine if m.role == "elder"), mine[0].text)
                 items.append(ChatSessionItem(s.session_id, s.started_at, first))
         return items[:limit]
+
+    def reopen_for_summary(self, session_id: int) -> None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session.summarized_at = None
 
     def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
         with self._lock:

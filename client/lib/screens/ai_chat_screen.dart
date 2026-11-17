@@ -29,12 +29,16 @@ class AiChatScreen extends StatefulWidget {
   /// 테스트에서 바꾼다. 기본은 [NulbomApi.myChat].
   final Future<List<MyChatMessage>> Function(int sessionId)? loadSession;
 
+  /// 지난 대화에 이어 말할 때 부른다. 테스트에서 바꾼다. 기본은 [NulbomApi.sendChat]에 대화 번호를 실어 보낸다.
+  final Future<ChatAnswer> Function(String message, int sessionId)? sendInSession;
+
   const AiChatScreen({
     super.key,
     this.friendName = 'AI 친구',
     this.send,
     this.loadSessions,
     this.loadSession,
+    this.sendInSession,
   });
 
   @override
@@ -142,6 +146,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
         fontIndex: _fontIndex,
         loadSessions: widget.loadSessions,
         loadSession: widget.loadSession,
+        send: widget.sendInSession,
       ),
       appBar: AppBar(
         backgroundColor: chatBg,
@@ -237,51 +242,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
     );
   }
 
-  Widget _inputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      color: chatBg,
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              key: const Key('chat-input'),
-              controller: _input,
-              // enabled: false로 막으면 키보드가 내려가고 포커스를 잃는다. 읽기 전용으로 두어 이어서 쓰게 한다.
-              readOnly: _sending,
-              minLines: 1,
-              maxLines: 3,
-              maxLength: 300,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _submit(),
-              style: TextStyle(fontSize: _fontSize),
-              decoration: InputDecoration(
-                hintText: '여기에 적어 주세요',
-                counterText: '',
-                filled: true,
-                fillColor: chatCard,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: chatLine)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(28), borderSide: const BorderSide(color: chatLine)),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 56,
-            height: 56,
-            child: IconButton.filled(
-              key: const Key('chat-send'),
-              onPressed: _sending ? null : _submit,
-              style: IconButton.styleFrom(backgroundColor: chatAccent, foregroundColor: Colors.white),
-              icon: const Icon(Icons.send_rounded, size: 26),
-              tooltip: '보내기',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _inputBar() =>
+      ChatInputBar(controller: _input, sending: _sending, onSubmit: _submit, fontSize: _fontSize);
 }

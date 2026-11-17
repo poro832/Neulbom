@@ -513,11 +513,16 @@ class NulbomApi {
 
   /// 어르신: AI 채팅에 말 한 마디를 보내고 답을 받는다 — 어르신 열쇠로 부른다.
   /// 서버가 거절하면(429 하루 한도, 503 준비 중·잠시 뒤) 그 문장이 [ApiException.message]에 그대로 온다.
-  static Future<ChatAnswer> sendChat(String message, {String? persona, String? key}) async {
+  static Future<ChatAnswer> sendChat(String message, {String? persona, int? sessionId, String? key}) async {
     // persona는 어르신이 지은 AI 친구 이름이다 — AI가 그 이름으로 말한다(서버가 글자를 거른다).
+    // sessionId가 있으면 그 지난 대화에 이어서 말한다(없는 대화이거나 남의 대화면 서버가 404).
     final json = await _send('POST', '/v1/me/chat',
         key: await _elderKeyOrThrow(key),
-        body: {'message': message, if (persona != null && persona.trim().isNotEmpty) 'persona': persona.trim()});
+        body: {
+          'message': message,
+          if (persona != null && persona.trim().isNotEmpty) 'persona': persona.trim(),
+          if (sessionId != null) 'session_id': sessionId,
+        });
     return ChatAnswer.fromJson(json);
   }
 

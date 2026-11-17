@@ -48,6 +48,10 @@ class ChatUnavailable(Exception):
     """대화를 만들 수 없다(모델이 없거나 응답하지 못했다)."""
 
 
+class ChatSessionNotFound(Exception):
+    """이어 말하려는 대화가 없다(없거나, 남의 것이거나, 30일이 지나 지워졌다)."""
+
+
 class ChatLimitReached(Exception):
     """오늘 보낼 수 있는 말을 다 썼다."""
 
@@ -86,13 +90,22 @@ class ChatService:
     def available(self) -> bool:
         return self._model is not None
 
-    def send(self, elder_id: int, text: str, persona: str | None = None) -> ChatReply:
+    def send(self, elder_id: int, text: str, persona: str | None = None, session_id: int | None = None) -> ChatReply:
         text = text.strip()
         if not text:
             raise ValueError("빈 말")
         now = self._clock()
         # 위급한 말은 잘리기 전의 글 전체에서 찾는다(긴 글 속에 있어도 놓치지 않는다).
         urgent = detect_urgent(text)
+
+        # 지난 대화에 이어 말하기: 그 어르신 본인의 대화일 때만 받는다. 번호가 틀려도 위급한 말은 놓치지 않는다 —
+        # 그때는 이어 말하기를 포기하고 평소처럼 현재 대화로 처리한다.
+        target: int | None = None
+        if session_id is not None:
+            if self._store.messages_for_session(elder_id, session_id) is not None:
+                target = session_id
+            elif urgent is None:
+                raise ChatSessionNotFound()
 
         # '개수 읽기 → 한도와 비교 → 저장'이 한 덩어리여야 한다. 같은 어르신의 요청이 겹쳐도 모두 같은 개수를 보고
         # 통과하지 못하도록 어르신별로 이 구간만 직렬화한다(느린 모델 호출은 자물쇠 밖에서 한다).
@@ -112,7 +125,11 @@ class ChatService:
                 if exhausted or self._store.alerted_since(elder_id, now - URGENT_ALERT_WINDOW_SECONDS, urgent.category):
                     return ChatReply(reply=safety_notice(urgent.category), urgent=urgent.category)
 
-            session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
+            if target is not None:
+                session = target
+                self._store.reopen_for_summary(session)  # 끝난 뒤 말이 붙었으니 요약을 다시 만든다
+            else:
+                session = self._store.session_for(elder_id, now, SESSION_IDLE_SECONDS)
             message_id = self._store.add_message(
                 session, "elder", text[:MAX_MESSAGE_CHARS], now, urgent.category if urgent else None
             )

@@ -56,6 +56,20 @@ void main() {
       expect(jsonDecode(seen.body), {'message': '안녕'});
     });
 
+    test('sendChat은 지난 대화에 이어 말할 때만 대화 번호를 보낸다', () async {
+      late http.Request seen;
+      NulbomApi.client = MockClient((request) async {
+        seen = request;
+        return _json({'reply': '네', 'urgent': false});
+      });
+
+      await NulbomApi.sendChat('이어서', sessionId: 7, key: 'nle_test');
+      expect(jsonDecode(seen.body), {'message': '이어서', 'session_id': 7});
+
+      await NulbomApi.sendChat('새로', key: 'nle_test');
+      expect(jsonDecode(seen.body), {'message': '새로'});
+    });
+
     test('myChats와 myChat은 어르신 열쇠로 내 지난 대화를 읽는다', () async {
       final seen = <http.Request>[];
       NulbomApi.client = MockClient((request) async {
@@ -277,6 +291,7 @@ void main() {
       WidgetTester tester, {
       Future<List<MyChatSession>> Function()? loadSessions,
       Future<List<MyChatMessage>> Function(int)? loadSession,
+      Future<ChatAnswer> Function(String, int)? sendInSession,
     }) async {
       tester.view.physicalSize = const Size(1000, 2000);
       tester.view.devicePixelRatio = 1.0;
@@ -285,6 +300,7 @@ void main() {
       await tester.pumpWidget(MaterialApp(
         home: AiChatScreen(
           friendName: '미소',
+          sendInSession: sendInSession,
           send: (_) async => const ChatAnswer(reply: '네', urgent: false),
           loadSessions: loadSessions ?? () async => sessions,
           loadSession: loadSession ??
@@ -313,7 +329,7 @@ void main() {
           lessThan(tester.getTopLeft(find.byKey(const Key('chat-history-7'))).dy));
     });
 
-    testWidgets('지난 대화를 누르면 그 대화의 말이 읽기 전용으로 열린다', (tester) async {
+    testWidgets('지난 대화를 누르면 그 대화의 말이 열리고 이어서 말할 입력창이 있다', (tester) async {
       int? opened;
       await open(tester, loadSession: (id) async {
         opened = id;
@@ -331,8 +347,66 @@ void main() {
       expect(opened, 7);
       expect(find.byKey(const Key('chat-history-list')), findsOneWidget);
       expect(find.text('맑아요, 산책하기 좋아요.'), findsOneWidget);
-      expect(find.byKey(const Key('chat-input')), findsNothing); // 읽기만 한다 — 입력창이 없다
+      expect(find.byKey(const Key('chat-input')), findsOneWidget); // 이어서 말할 수 있다
+      expect(find.text('이 대화에 이어서 말해요'), findsOneWidget);
       expect(find.byKey(const Key('chat-history-drawer')), findsNothing); // 서랍은 닫혔다
+    });
+
+    testWidgets('지난 대화에 이어 말하면 그 대화 번호로 보내고 답이 아래에 붙는다', (tester) async {
+      String? sentText;
+      int? sentSession;
+      await open(tester, sendInSession: (text, id) async {
+        sentText = text;
+        sentSession = id;
+        return const ChatAnswer(reply: '그럼 산책 가세요.', urgent: false);
+      });
+
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-history-7')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), '그럼 오늘 나갈까요?');
+      await tester.tap(find.byKey(const Key('chat-send')));
+      await tester.pumpAndSettle();
+
+      expect(sentText, '그럼 오늘 나갈까요?');
+      expect(sentSession, 7);
+      expect(find.text('날씨 어때요?'), findsOneWidget); // 앞 대화가 그대로 있다
+      expect(find.text('그럼 오늘 나갈까요?'), findsOneWidget);
+      expect(find.text('그럼 산책 가세요.'), findsOneWidget);
+    });
+
+    testWidgets('이어 말하기가 실패하면 오류 말풍선이 붙고 쓴 글이 입력창에 돌아온다', (tester) async {
+      await open(tester, sendInSession: (text, id) async => throw const ApiException(404, '그 대화를 찾을 수 없어요'));
+
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-history-7')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), '이어서 말해요');
+      await tester.tap(find.byKey(const Key('chat-send')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('그 대화를 찾을 수 없어요'), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('chat-input'))).controller!.text, '이어서 말해요');
+    });
+
+    testWidgets('이어 말한 위급한 답은 붉은 테두리로 보인다', (tester) async {
+      await open(tester,
+          sendInSession: (text, id) async =>
+              const ChatAnswer(reply: '참지 마시고 119에 전화하세요.', urgent: true));
+
+      await tester.tap(find.byKey(const Key('chat-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('chat-history-7')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('chat-input')), '가슴이 아파요');
+      await tester.tap(find.byKey(const Key('chat-send')));
+      await tester.pumpAndSettle();
+
+      final bubble = tester.widget<ChatBubble>(find.ancestor(
+          of: find.text('참지 마시고 119에 전화하세요.'), matching: find.byType(ChatBubble)));
+      expect(bubble.isUrgent, isTrue);
     });
 
     testWidgets('지난 대화가 없으면 안내를, 불러오지 못하면 오류와 다시 불러오기를 보인다', (tester) async {

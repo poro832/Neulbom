@@ -120,10 +120,14 @@ class PostgresChatStore:
                 "            ORDER BY m.message_id LIMIT 1)) "
                 "FROM chat_sessions s WHERE s.elder_id = %s "
                 "  AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.session_id) "
-                "ORDER BY s.started_at DESC LIMIT %s",
+                "ORDER BY s.last_message_at DESC LIMIT %s",
                 (elder_id, limit),
             ).fetchall()
         return [ChatSessionItem(*row) for row in rows]
+
+    def reopen_for_summary(self, session_id: int) -> None:
+        with self._pool.connection() as conn:
+            conn.execute("UPDATE chat_sessions SET summarized_at = NULL WHERE session_id = %s", (session_id,))
 
     def messages_for_session(self, elder_id: int, session_id: int) -> list[ChatMessage] | None:
         with self._pool.connection() as conn:
