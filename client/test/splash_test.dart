@@ -15,14 +15,14 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
   });
 
-  testWidgets('소개 화면은 로고·이름·한 줄 소개·불러오는 중 표시를 보여 준다', (tester) async {
+  testWidgets('소개 화면은 로고와 불러오는 중 표시만 보여 준다(앱 이름·한 줄 소개 글은 없다)', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: SplashScreen()));
     await tester.pump(const Duration(milliseconds: 1000));
 
     expect(find.byKey(const Key('splash-screen')), findsOneWidget);
-    expect(find.text('늘봄'), findsOneWidget);
-    expect(find.text(kSplashTagline), findsOneWidget);
     expect(find.byType(NulbomMark), findsOneWidget);
+    expect(find.text('늘봄'), findsNothing);
+    expect(find.textContaining('AI 친구'), findsNothing);
     expect(find.byKey(const Key('splash-loading')), findsOneWidget);
     expect(find.text('불러오는 중이에요'), findsOneWidget);
   });

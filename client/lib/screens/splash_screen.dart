@@ -4,17 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 const Color _bg = Color(0xFFEFF6FF);
-const Color _ink = Color(0xFF0E2548);
 const Color _inkSoft = Color(0xFF3C5C8C);
 const Color _accent = Color(0xFF1A6BFF);
 const Color _sun = Color(0xFFFFB400);
 const Color _hill = Color(0xFFF3F8FF);
 
-/// 앱을 켜면 소개 화면을 이 시간 이상 보여 준다. 로그인 상태 확인이 더 일찍 끝나도 이름과 로고를 알아볼 시간을 준다.
+/// 앱을 켜면 소개 화면을 이 시간 이상 보여 준다. 로그인 상태 확인이 더 일찍 끝나도 로고를 알아볼 시간을 준다.
 const Duration kSplashMinimum = Duration(milliseconds: 1600);
-
-/// 한 줄 소개. 늘봄이 무엇인지 첫 화면에서 알린다.
-const String kSplashTagline = '매일 안부를 전하는 AI 친구';
 
 /// 앱 아이콘과 같은 모양의 로고 — 파란 바탕, 노란 해, 하얀 언덕, 그 위의 새싹(늘봄 = 늘 봄).
 /// 사진이 아니라 그려서 크기를 키워도 선명하다.
@@ -97,7 +93,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         child: SizedBox.expand(
           child: Column(
             children: [
-              const Spacer(flex: 5),
+              const Spacer(),
               FadeTransition(
                 opacity: _fade,
                 child: SlideTransition(
@@ -114,19 +110,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                         ),
                         child: const NulbomMark(size: 132),
                       ),
-                      const SizedBox(height: 32),
-                      Text('늘봄',
-                          style: GoogleFonts.notoSansKr(
-                              fontSize: 56, fontWeight: FontWeight.w800, color: _ink, height: 1.1)),
-                      const SizedBox(height: 14),
-                      Text(kSplashTagline,
-                          style: GoogleFonts.notoSansKr(
-                              fontSize: 19, fontWeight: FontWeight.w500, color: _inkSoft, height: 1.4)),
                     ],
                   ),
                 ),
               ),
-              const Spacer(flex: 4),
+              const Spacer(),
               // 불러오는 동안 보이는 표시 — 이 화면이 로딩 화면을 겸한다.
               const SizedBox(
                 key: Key('splash-loading'),
