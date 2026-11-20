@@ -10,6 +10,7 @@ import 'services/auth_service.dart';
 import 'services/nulbom_api.dart';
 import 'services/push_registration.dart';
 import 'screens/role_selection_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/elderly_login_screen.dart';
 import 'screens/elderly_gate.dart';
 import 'screens/guardian_home_page.dart';
@@ -119,21 +120,11 @@ class _ElderCareAppState extends State<ElderCareApp> {
           ),
         ),
       ),
-      home: FutureBuilder<Widget>(
-        future: _homeScreen,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.done) {
-            return snapshot.data ?? const ElderlyLoginScreen();
-          }
-          return Scaffold(
-            backgroundColor: eBg,
-            body: Center(
-              child: CircularProgressIndicator(
-                valueColor: const AlwaysStoppedAnimation<Color>(eAccent),
-              ),
-            ),
-          );
-        },
+      // 앱을 켜면 소개 화면(로고·이름·불러오는 중)이 먼저 뜬다. 로그인 상태 확인이 끝나고 최소 시간이 지나면
+      // 역할 선택·로그인·홈 중 맞는 화면으로 바뀐다.
+      home: SplashGate(
+        destination: _homeScreen,
+        fallback: const ElderlyLoginScreen(),
       ),
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
