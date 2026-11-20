@@ -15,14 +15,23 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
   });
 
-  testWidgets('소개 화면은 로고와 불러오는 중 표시만 보여 준다(앱 이름·한 줄 소개 글은 없다)', (tester) async {
+  testWidgets('소개 화면은 가운데 로고, 아래쪽 앱 이름과 짧은 문구, 그 아래 불러오는 중 표시를 보여 준다', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: SplashScreen()));
     await tester.pump(const Duration(milliseconds: 1000));
 
     expect(find.byKey(const Key('splash-screen')), findsOneWidget);
     expect(find.byType(NulbomMark), findsOneWidget);
-    expect(find.text('늘봄'), findsNothing);
-    expect(find.textContaining('AI 친구'), findsNothing);
+    expect(find.text(kSplashName), findsOneWidget);
+    expect(find.text(kSplashTagline), findsOneWidget);
+
+    // 위에서 아래로: 로고 → 앱 이름 → 문구 → 불러오는 중 표시
+    final logo = tester.getBottomLeft(find.byType(NulbomMark)).dy;
+    final name = tester.getTopLeft(find.byKey(const Key('splash-name'))).dy;
+    final tagline = tester.getTopLeft(find.byKey(const Key('splash-tagline'))).dy;
+    final loading = tester.getTopLeft(find.byKey(const Key('splash-loading'))).dy;
+    expect(name, greaterThan(logo));
+    expect(tagline, greaterThan(name));
+    expect(loading, greaterThan(tagline));
     expect(find.byKey(const Key('splash-loading')), findsOneWidget);
     expect(find.text('불러오는 중이에요'), findsOneWidget);
   });

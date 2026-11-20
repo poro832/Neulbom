@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 const Color _bg = Color(0xFFEFF6FF);
+const Color _ink = Color(0xFF0E2548);
 const Color _inkSoft = Color(0xFF3C5C8C);
 const Color _accent = Color(0xFF1A6BFF);
 const Color _sun = Color(0xFFFFB400);
@@ -11,6 +12,10 @@ const Color _hill = Color(0xFFF3F8FF);
 
 /// 앱을 켜면 소개 화면을 이 시간 이상 보여 준다. 로그인 상태 확인이 더 일찍 끝나도 로고를 알아볼 시간을 준다.
 const Duration kSplashMinimum = Duration(milliseconds: 1600);
+
+/// 화면 아래쪽에 보이는 앱 이름과 짧은 문구.
+const String kSplashName = '늘봄';
+const String kSplashTagline = '매일 안부를 전하는 AI 친구';
 
 /// 앱 아이콘과 같은 모양의 로고 — 파란 바탕, 노란 해, 하얀 언덕, 그 위의 새싹(늘봄 = 늘 봄).
 /// 사진이 아니라 그려서 크기를 키워도 선명하다.
@@ -115,6 +120,25 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 ),
               ),
               const Spacer(),
+              // 앱 이름과 짧은 문구(로고는 가운데, 이름은 아래쪽에 작게)
+              FadeTransition(
+                opacity: _fade,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(kSplashName,
+                        key: const Key('splash-name'),
+                        style: GoogleFonts.notoSansKr(
+                            fontSize: 30, fontWeight: FontWeight.w800, color: _ink, height: 1.2)),
+                    const SizedBox(height: 8),
+                    Text(kSplashTagline,
+                        key: const Key('splash-tagline'),
+                        style: GoogleFonts.notoSansKr(
+                            fontSize: 16, fontWeight: FontWeight.w500, color: _inkSoft, height: 1.4)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 40),
               // 불러오는 동안 보이는 표시 — 이 화면이 로딩 화면을 겸한다.
               const SizedBox(
                 key: Key('splash-loading'),
