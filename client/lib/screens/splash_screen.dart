@@ -15,13 +15,16 @@ const Color _softInk = Color(0xFF6B7686);
 /// 앱을 켜면 소개 화면을 이 시간 이상 보여 준다. 로그인 상태 확인이 더 일찍 끝나도 로고를 알아볼 시간을 준다.
 const Duration kSplashMinimum = Duration(milliseconds: 1600);
 
-/// 화면 아래쪽에 보이는 앱 이름과 짧은 문구.
+/// 로고 바로 아래에 보이는 앱 이름과 짧은 문구.
 const String kSplashName = '늘봄';
 const String kSplashTagline = '매일 안부를 전하는 AI 친구';
 
 /// 로고 한 변의 크기(dp). 안드로이드의 맨 처음 시작 화면(res/drawable/launch_background.xml의 로고 그림)과 같아야
 /// 앱이 뜰 때 로고가 튀지 않는다.
 const double kSplashLogoSize = 132;
+
+/// 로고 아래쪽 끝에서 앱 이름까지의 간격(dp).
+const double kSplashNameGap = 28;
 
 /// 앱 아이콘과 같은 모양의 로고 — 파란 바탕, 노란 해, 하얀 언덕, 그 위의 새싹(늘봄 = 늘 봄).
 /// 사진이 아니라 그려서 크기를 키워도 선명하다.
@@ -101,67 +104,77 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     return Scaffold(
       key: const Key('splash-screen'),
       backgroundColor: _bg,
-      body: Stack(
-        children: [
-          // 로고: 시작 화면(안드로이드)에서 이미 보이고 있으므로 움직이지 않고 그대로 둔다. 그림자만 천천히 나타난다.
-          Center(
-            child: FadeTransition(
-              opacity: _fade,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(32),
-                  boxShadow: [
-                    BoxShadow(color: _accent.withValues(alpha: 0.22), blurRadius: 36, offset: const Offset(0, 14)),
-                  ],
-                ),
-                child: const NulbomMark(),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 56),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 앱 이름과 짧은 문구
-                    FadeTransition(
-                      opacity: _fade,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(kSplashName,
-                              key: const Key('splash-name'),
-                              style: GoogleFonts.notoSansKr(
-                                  fontSize: 30, fontWeight: FontWeight.w800, color: _nameInk, height: 1.2)),
-                          const SizedBox(height: 8),
-                          Text(kSplashTagline,
-                              key: const Key('splash-tagline'),
-                              style: GoogleFonts.notoSansKr(
-                                  fontSize: 16, fontWeight: FontWeight.w500, color: _softInk, height: 1.4)),
-                        ],
-                      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // 로고는 정중앙이고, 이름과 문구는 그 바로 아래에 붙는다.
+          final belowLogo = constraints.maxHeight / 2 + kSplashLogoSize / 2 + kSplashNameGap;
+          return Stack(
+            children: [
+              // 로고: 시작 화면(안드로이드)에서 이미 보이고 있으므로 움직이지 않고 그대로 둔다. 그림자만 천천히 나타난다.
+              Center(
+                child: FadeTransition(
+                  opacity: _fade,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(32),
+                      boxShadow: [
+                        BoxShadow(color: _accent.withValues(alpha: 0.22), blurRadius: 36, offset: const Offset(0, 14)),
+                      ],
                     ),
-                    const SizedBox(height: 40),
-                    // 불러오는 동안 보이는 표시 — 이 화면이 로딩 화면을 겸한다.
-                    const SizedBox(
-                      key: Key('splash-loading'),
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 3, valueColor: AlwaysStoppedAnimation<Color>(_accent)),
-                    ),
-                    const SizedBox(height: 12),
-                    Text('불러오는 중이에요',
-                        style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w500, color: _softInk)),
-                  ],
+                    child: const NulbomMark(),
+                  ),
                 ),
               ),
-            ),
-          ),
-        ],
+              // 앱 이름과 짧은 문구 — 로고(앱 아이콘) 바로 아래
+              Positioned(
+                top: belowLogo,
+                left: 0,
+                right: 0,
+                child: FadeTransition(
+                  opacity: _fade,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(kSplashName,
+                          key: const Key('splash-name'),
+                          style: GoogleFonts.notoSansKr(
+                              fontSize: 30, fontWeight: FontWeight.w800, color: _nameInk, height: 1.2)),
+                      const SizedBox(height: 8),
+                      Text(kSplashTagline,
+                          key: const Key('splash-tagline'),
+                          style: GoogleFonts.notoSansKr(
+                              fontSize: 16, fontWeight: FontWeight.w500, color: _softInk, height: 1.4)),
+                    ],
+                  ),
+                ),
+              ),
+              // 불러오는 동안 보이는 표시 — 이 화면이 로딩 화면을 겸한다.
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 56),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          key: Key('splash-loading'),
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 3, valueColor: AlwaysStoppedAnimation<Color>(_accent)),
+                        ),
+                        const SizedBox(height: 12),
+                        Text('불러오는 중이에요',
+                            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w500, color: _softInk)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

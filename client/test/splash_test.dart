@@ -15,7 +15,7 @@ void main() {
     GoogleFonts.config.allowRuntimeFetching = false;
   });
 
-  testWidgets('소개 화면은 가운데 로고, 아래쪽 앱 이름과 짧은 문구, 그 아래 불러오는 중 표시를 보여 준다', (tester) async {
+  testWidgets('소개 화면은 가운데 로고, 그 바로 아래 앱 이름과 짧은 문구, 맨 아래 불러오는 중 표시를 보여 준다', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: SplashScreen()));
     await tester.pump(const Duration(milliseconds: 1000));
 
@@ -32,6 +32,9 @@ void main() {
     expect(name, greaterThan(logo));
     expect(tagline, greaterThan(name));
     expect(loading, greaterThan(tagline));
+    expect(name - logo, closeTo(kSplashNameGap, 1)); // 이름은 로고 바로 아래에 붙어 있다
+    // 이름·문구는 로딩 표시와 떨어져 있다(로고 쪽에 붙어 있고 맨 아래에 있지 않다)
+    expect(loading - tagline, greaterThan(40));
 
     // 로고는 화면 정중앙에 있고 크기도 안드로이드 시작 화면의 로고(132dp)와 같다 — 두 화면이 겹쳐 보이게.
     final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
