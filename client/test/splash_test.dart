@@ -32,6 +32,13 @@ void main() {
     expect(name, greaterThan(logo));
     expect(tagline, greaterThan(name));
     expect(loading, greaterThan(tagline));
+
+    // 로고는 화면 정중앙에 있고 크기도 안드로이드 시작 화면의 로고(132dp)와 같다 — 두 화면이 겹쳐 보이게.
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    final center = tester.getCenter(find.byType(NulbomMark));
+    expect(center.dx, closeTo(screen.width / 2, 0.5));
+    expect(center.dy, closeTo(screen.height / 2, 0.5));
+    expect(tester.getSize(find.byType(NulbomMark)), const Size(kSplashLogoSize, kSplashLogoSize));
     expect(find.byKey(const Key('splash-loading')), findsOneWidget);
     expect(find.text('불러오는 중이에요'), findsOneWidget);
   });

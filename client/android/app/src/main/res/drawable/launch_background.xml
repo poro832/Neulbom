@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- 앱을 누른 직후, Flutter가 뜨기 전에 보이는 맨 처음 시작 화면.
+     배경색과 로고(132dp, 정중앙)가 Flutter 소개 화면(lib/screens/splash_screen.dart)과 같아서 두 화면이 이어져 보인다.
+     로고 그림은 drawable-*/splash_logo.png. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item android:drawable="@color/splash_background" />
+    <item>
         <bitmap
             android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:src="@drawable/splash_logo" />
+    </item>
 </layer-list>
