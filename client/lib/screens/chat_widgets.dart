@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'text_size_sheet.dart';
+
 const Color chatBg = Color(0xFFEFF6FF);
 const Color chatCard = Color(0xFFFFFFFF);
 const Color chatInk = Color(0xFF0E2548);
@@ -47,7 +49,7 @@ class ChatBubble extends StatelessWidget {
     this.fromElder = false,
     this.isError = false,
     this.isUrgent = false,
-    this.fontSize = 19,
+    this.fontSize = chatBaseFontSize,
     this.onSpeak,
     this.speaking = false,
     this.speakButtonKey,
@@ -147,41 +149,8 @@ class ChatBubble extends StatelessWidget {
   }
 }
 
-/// 채팅 글자 크기 고르기. 어르신이 읽기 편한 크기를 직접 고른다 — 이 기기에만 저장한다.
-class ChatFontOption {
-  final String label;
-  final double size;
-  const ChatFontOption(this.label, this.size);
-}
-
-const List<ChatFontOption> chatFontOptions = [
-  ChatFontOption('작게', 16),
-  ChatFontOption('보통', 19),
-  ChatFontOption('크게', 23),
-  ChatFontOption('아주 크게', 28),
-];
-const int chatFontDefaultIndex = 1;
-const String _fontPrefKey = 'chat_font_size_index';
-
-Future<int> loadChatFontIndex() async {
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getInt(_fontPrefKey);
-    if (saved != null && saved >= 0 && saved < chatFontOptions.length) return saved;
-  } catch (_) {
-    // 저장소를 못 읽어도 화면은 기본 크기로 뜬다.
-  }
-  return chatFontDefaultIndex;
-}
-
-Future<void> saveChatFontIndex(int index) async {
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_fontPrefKey, index);
-  } catch (_) {
-    // 저장이 안 되어도 이번 화면에서는 바뀐 크기로 보인다.
-  }
-}
+/// 채팅 글자의 기본 크기. 앱 전체 글자 크기 설정(text_size.dart)의 배율이 여기에 곱해진다.
+const double chatBaseFontSize = 19;
 
 /// 번역 언어. [ttsLocale]은 그 언어로 읽을 때 쓰는 음성 언어 코드다.
 class ChatLanguage {
@@ -226,13 +195,11 @@ Future<void> saveChatLanguage(String code) async {
   }
 }
 
-/// 채팅 설정 아래 창 — 글자 크기와 번역 언어. 고르는 즉시 [onFont]·[onLanguage]로 알리고 창은 열어 둔다
+/// 채팅 설정 아래 창 — 글자 크기(앱 전체 설정과 같다)와 번역 언어. 고르는 즉시 반영하고 창은 열어 둔다
 /// (글자 크기는 뒤의 화면이 바로 바뀌는 것을 보면서 고를 수 있다). 다 골랐으면 "완료"나 바깥을 누른다.
 Future<void> showChatSettingsSheet(
   BuildContext context, {
-  required int fontIndex,
   required String language,
-  required ValueChanged<int> onFont,
   required ValueChanged<String> onLanguage,
 }) {
   return showModalBottomSheet<void>(
@@ -241,7 +208,6 @@ Future<void> showChatSettingsSheet(
     backgroundColor: chatCard,
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
     builder: (context) {
-      var font = fontIndex;
       var lang = language;
       return StatefulBuilder(
         builder: (context, setSheet) => SafeArea(
@@ -257,18 +223,7 @@ Future<void> showChatSettingsSheet(
                   Text('글자 크기',
                       style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: chatInk)),
                   const SizedBox(height: 12),
-                  for (var i = 0; i < chatFontOptions.length; i++)
-                    _SettingTile(
-                      tileKey: Key('chat-font-$i'),
-                      selected: i == font,
-                      onTap: () {
-                        setSheet(() => font = i);
-                        onFont(i);
-                      },
-                      child: Text('${chatFontOptions[i].label} — 안녕하세요',
-                          style: GoogleFonts.notoSansKr(
-                              fontSize: chatFontOptions[i].size, color: chatInk, fontWeight: FontWeight.w500)),
-                    ),
+                  const TextSizeChoices(),
                   const SizedBox(height: 20),
                   Text('번역 언어',
                       style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: chatInk)),

@@ -8,6 +8,7 @@ import 'package:eldercare/utils/korean.dart';
 import 'package:eldercare/screens/elder_chats_section.dart';
 import 'package:eldercare/screens/health_alerts_screen.dart';
 import 'package:eldercare/services/nulbom_api.dart';
+import 'package:eldercare/services/text_size.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -459,7 +460,7 @@ void main() {
       expect(find.text('점심 뭐 먹을까요'), findsOneWidget);
     });
 
-    testWidgets('글자 크기를 고르면 말풍선과 입력창이 바뀌고 기기에 저장된다', (tester) async {
+    testWidgets('채팅 설정에서 글자 크기를 고르면 앱 전체 설정이 바뀌고 기기에 저장된다', (tester) async {
       await open(tester);
       double bubbleSize() => tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize!;
       expect(bubbleSize(), 19);
@@ -467,28 +468,14 @@ void main() {
       await tester.tap(find.byKey(const Key('chat-font')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('chat-font-sheet')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('chat-font-3'))); // 아주 크게
+      await tester.tap(find.byKey(const Key('text-size-3'))); // 아주 크게
       await tester.pumpAndSettle();
 
-      expect(bubbleSize(), 28);
-      expect(tester.widget<TextField>(find.byKey(const Key('chat-input'))).style!.fontSize, 28);
-      expect((await SharedPreferences.getInstance()).getInt('chat_font_size_index'), 3);
-    });
-
-    testWidgets('저장된 글자 크기로 화면이 열린다', (tester) async {
-      SharedPreferences.setMockInitialValues({'chat_font_size_index': 0});
-      await open(tester);
-      await tester.pumpAndSettle();
-
-      expect(tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize, 16);
-    });
-
-    testWidgets('이상한 저장값은 무시하고 기본 크기로 연다', (tester) async {
-      SharedPreferences.setMockInitialValues({'chat_font_size_index': 99});
-      await open(tester);
-      await tester.pumpAndSettle();
-
-      expect(tester.widget<Text>(find.textContaining('저는 미소예요')).style!.fontSize, chatFontOptions[chatFontDefaultIndex].size);
+      expect(textSizeIndex.value, 3);
+      expect((await SharedPreferences.getInstance()).getInt('app_text_size_index'), 3);
+      // 말풍선·입력창의 기본 글자는 그대로이고 앱 맨 위 배율이 곱해진다 — 채팅이 두 번 커지지 않는다.
+      expect(bubbleSize(), 19);
+      expect(tester.widget<TextField>(find.byKey(const Key('chat-input'))).style!.fontSize, 19);
     });
 
     test('이름 뒤 이에요/예요는 받침에 맞춰 붙는다', () {

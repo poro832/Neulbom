@@ -245,7 +245,6 @@ void main() {
         home: ChatHistoryScreen(
           session: MyChatSession(sessionId: 7, startedAt: DateTime(2026, 11, 17, 14, 30), preview: '날씨'),
           friendName: '미소',
-          fontIndex: 1,
           speaker: fake,
           load: (_) async => [
             const MyChatMessage(fromElder: true, text: '날씨 어때요?'),
@@ -442,7 +441,6 @@ void main() {
         home: ChatHistoryScreen(
           session: MyChatSession(sessionId: 7, startedAt: DateTime(2026, 11, 17, 14, 30), preview: '날씨'),
           friendName: '미소',
-          fontIndex: 1,
           speaker: fake,
           translate: (text, language) async => 'It is sunny.',
           load: (_) async => [

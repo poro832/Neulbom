@@ -6,6 +6,7 @@ import '../models/nulbom_models.dart' show WithdrawalStatus;
 import '../services/auth_service.dart';
 import '../services/nulbom_api.dart';
 import 'link_code_renew.dart';
+import 'text_size_sheet.dart';
 import 'elderly_login_screen.dart';
 import 'emergency_screen.dart';
 import 'history_screen.dart';
@@ -558,6 +559,8 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                         onSelected: (value) {
                           if (value == 'connection_code') {
                             _showConnectionCode();
+                          } else if (value == 'text_size') {
+                            showTextSizeSheet(context);
                           } else if (value == 'logout') {
                             _confirmLogout();
                           } else if (value == 'delete_account') {
@@ -570,6 +573,14 @@ class _ElderlyHomePageState extends State<ElderlyHomePage> {
                             child: _buildMenuRow(
                               icon: Icons.qr_code_2_rounded,
                               label: '내 연결코드',
+                            ),
+                          ),
+                          const PopupMenuDivider(height: 1),
+                          PopupMenuItem(
+                            value: 'text_size',
+                            child: _buildMenuRow(
+                              icon: Icons.format_size_rounded,
+                              label: '글자 크기',
                             ),
                           ),
                           const PopupMenuDivider(height: 1),

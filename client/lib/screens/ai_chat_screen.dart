@@ -71,7 +71,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final ScrollController _scroll = ScrollController();
   late final List<_Bubble> _bubbles;
   bool _sending = false;
-  int _fontIndex = chatFontDefaultIndex;
   late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
   late final ChatTranslator _translator = ChatTranslator(translate: widget.translate);
   String _language = chatLanguageDefault;
@@ -86,11 +85,9 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   Future<void> _loadPrefs() async {
-    final index = await loadChatFontIndex();
     final language = await loadChatLanguage();
     if (!mounted) return;
     setState(() {
-      _fontIndex = index;
       _language = language;
     });
   }
@@ -104,17 +101,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
     super.dispose();
   }
 
-  double get _fontSize => chatFontOptions[_fontIndex].size;
+  double get _fontSize => chatBaseFontSize;
 
   Future<void> _openSettings() {
     return showChatSettingsSheet(
       context,
-      fontIndex: _fontIndex,
       language: _language,
-      onFont: (index) {
-        if (mounted) setState(() => _fontIndex = index);
-        saveChatFontIndex(index);
-      },
       onLanguage: (code) {
         if (mounted) setState(() => _language = code);
         saveChatLanguage(code);
@@ -175,7 +167,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
       backgroundColor: chatBg,
       drawer: ChatHistoryDrawer(
         friendName: widget.friendName,
-        fontIndex: _fontIndex,
         loadSessions: widget.loadSessions,
         loadSession: widget.loadSession,
         send: widget.sendInSession,

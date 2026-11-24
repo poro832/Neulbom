@@ -4,8 +4,10 @@ import '../models/nulbom_models.dart' show ElderSummary;
 import '../services/auth_service.dart';
 import '../services/email_proof.dart';
 import '../services/nulbom_api.dart';
+import '../services/text_size.dart';
 import 'email_verification_screen.dart';
 import 'role_selection_screen.dart';
+import 'text_size_sheet.dart';
 import 'elderly_management_screen.dart';
 
 const Color eBg = Color(0xFFEFF6FF);
@@ -551,6 +553,37 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                 icon: Icons.phone_outlined,
                 label: '전화번호',
                 value: _guardianInfo['phone'] ?? '-',
+              ),
+              const SizedBox(height: 12),
+              InkWell(
+                key: const Key('guardian-text-size'),
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => showTextSizeSheet(context),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: eCard,
+                    border: Border.all(color: eLine),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.format_size_rounded, color: eAccent, size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('글자 크기',
+                            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w600, color: eInk)),
+                      ),
+                      ValueListenableBuilder<int>(
+                        valueListenable: textSizeIndex,
+                        builder: (context, index, _) => Text(textSizeOptions[index].label,
+                            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w600, color: eInkSoft)),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right_rounded, color: eInkSoft),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 28),
 

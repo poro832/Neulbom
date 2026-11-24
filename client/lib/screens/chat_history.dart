@@ -10,7 +10,6 @@ import 'chat_widgets.dart';
 /// 햄버거 버튼으로 여는 지난 대화 목록 — 어르신 본인의 대화만 보인다(서버가 30일 지나면 지운다).
 class ChatHistoryDrawer extends StatefulWidget {
   final String friendName;
-  final int fontIndex;
 
   /// 테스트에서 바꾼다. 기본은 [NulbomApi.myChats].
   final Future<List<MyChatSession>> Function()? loadSessions;
@@ -30,7 +29,6 @@ class ChatHistoryDrawer extends StatefulWidget {
   const ChatHistoryDrawer({
     super.key,
     required this.friendName,
-    required this.fontIndex,
     this.loadSessions,
     this.loadSession,
     this.send,
@@ -122,7 +120,6 @@ class _ChatHistoryDrawerState extends State<ChatHistoryDrawer> {
             builder: (_) => ChatHistoryScreen(
               session: s,
               friendName: widget.friendName,
-              fontIndex: widget.fontIndex,
               load: widget.loadSession,
               send: widget.send,
               speaker: widget.speaker,
@@ -181,7 +178,6 @@ class _LogBubble {
 class ChatHistoryScreen extends StatefulWidget {
   final MyChatSession session;
   final String friendName;
-  final int fontIndex;
   final Future<List<MyChatMessage>> Function(int sessionId)? load;
   final Future<ChatAnswer> Function(String message, int sessionId)? send;
 
@@ -195,7 +191,6 @@ class ChatHistoryScreen extends StatefulWidget {
     super.key,
     required this.session,
     required this.friendName,
-    required this.fontIndex,
     this.load,
     this.send,
     this.speaker,
@@ -212,7 +207,6 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   List<_LogBubble>? _bubbles; // null이면 아직 불러오는 중
   Object? _loadError;
   bool _sending = false;
-  late int _fontIndex;
   late final ReadAloud _readAloud = ReadAloud(speaker: widget.speaker);
   late final ChatTranslator _translator = ChatTranslator(translate: widget.translate);
   String _language = chatLanguageDefault;
@@ -220,7 +214,6 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    _fontIndex = widget.fontIndex;
     _load();
     _loadLanguage();
   }
@@ -234,7 +227,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
     super.dispose();
   }
 
-  double get _fontSize => chatFontOptions[_fontIndex].size;
+  double get _fontSize => chatBaseFontSize;
 
   Future<void> _load() async {
     try {
@@ -256,12 +249,7 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
   Future<void> _openSettings() {
     return showChatSettingsSheet(
       context,
-      fontIndex: _fontIndex,
       language: _language,
-      onFont: (index) {
-        if (mounted) setState(() => _fontIndex = index);
-        saveChatFontIndex(index);
-      },
       onLanguage: (code) {
         if (mounted) setState(() => _language = code);
         saveChatLanguage(code);
