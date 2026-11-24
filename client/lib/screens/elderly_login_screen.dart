@@ -125,10 +125,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: eAccent, width: 2),
       ),
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 
@@ -168,10 +165,7 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
               );
             },
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(
-              minWidth: 44,
-              minHeight: 44,
-            ),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
           ),
         ),
         title: Text(
@@ -232,7 +226,11 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
                 const SizedBox(height: 10),
                 Text(
                   '폰을 바꿨다면 보호자가 어르신 관리에서 번호를 고친 뒤 24시간 안에 한 번 로그인할 수 있어요.',
-                  style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+                  style: GoogleFonts.notoSansKr(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: eInkSoft,
+                  ),
                 ),
 
                 // 에러 메시지
@@ -289,17 +287,15 @@ class _ElderlyLoginScreenState extends State<ElderlyLoginScreen> {
 
                 // 회원가입 링크
                 Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
                     children: [
                       Text(
                         '계정이 없으신가요?',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: eInkSoft,
-                        ),
+                        style: TextStyle(fontSize: 14, color: eInkSoft),
                       ),
-                      const SizedBox(width: 8),
                       GestureDetector(
                         onTap: _isLoading
                             ? null

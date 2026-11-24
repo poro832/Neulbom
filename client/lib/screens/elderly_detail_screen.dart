@@ -87,14 +87,22 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     final calls = _recentCalls;
     final Widget body;
     if (_recentCallsError != null) {
-      body = Text(_recentCallsError!, style: const TextStyle(fontSize: 14, color: eInkSoft));
+      body = Text(
+        _recentCallsError!,
+        style: const TextStyle(fontSize: 14, color: eInkSoft),
+      );
     } else if (calls == null) {
       body = const LinearProgressIndicator();
     } else if (!calls.shareAgreed) {
-      body = const Text('어르신이 동의한 뒤에 볼 수 있어요.',
-          style: TextStyle(fontSize: 14, color: eInkSoft));
+      body = const Text(
+        '어르신이 동의한 뒤에 볼 수 있어요.',
+        style: TextStyle(fontSize: 14, color: eInkSoft),
+      );
     } else if (calls.calls.isEmpty) {
-      body = const Text('아직 통화가 없어요.', style: TextStyle(fontSize: 14, color: eInkSoft));
+      body = const Text(
+        '아직 통화가 없어요.',
+        style: TextStyle(fontSize: 14, color: eInkSoft),
+      );
     } else {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,12 +124,14 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              '최근 통화 요약',
-              style: GoogleFonts.notoSansKr(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: eInk,
+            Expanded(
+              child: Text(
+                '최근 통화 요약',
+                style: GoogleFonts.notoSansKr(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: eInk,
+                ),
               ),
             ),
             TextButton(
@@ -175,20 +185,29 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       final int? baseline;
       if (_reportPeriod == 'daily') {
         days = [DateTime.parse(_selectedDate)];
-        final week = await NulbomApi.weekly(widget.elderlyId, weekStart: _selectedDate);
+        final week = await NulbomApi.weekly(
+          widget.elderlyId,
+          weekStart: _selectedDate,
+        );
         add(week.days, (date) => date == _selectedDate);
         baseline = week.baselineCalls;
       } else if (_reportPeriod == 'weekly') {
         final sunday = _weekStart(_periodDate);
         days = [for (var i = 0; i < 7; i++) _addDays(sunday, i)];
-        final week = await NulbomApi.weekly(widget.elderlyId, weekStart: _dateKey(_periodDate));
+        final week = await NulbomApi.weekly(
+          widget.elderlyId,
+          weekStart: _dateKey(_periodDate),
+        );
         add(week.days, (_) => true);
         baseline = week.baselineCalls;
       } else {
         // 그 달의 날별 통계를 서버의 월간 주소에서 한 번에 읽는다.
         final first = DateTime(_periodDate.year, _periodDate.month, 1);
         final last = DateTime(_periodDate.year, _periodDate.month + 1, 0);
-        days = [for (var d = 1; d <= last.day; d++) DateTime(first.year, first.month, d)];
+        days = [
+          for (var d = 1; d <= last.day; d++)
+            DateTime(first.year, first.month, d),
+        ];
         final month = '${first.year}-${first.month.toString().padLeft(2, '0')}';
         final stats = await NulbomApi.monthly(widget.elderlyId, month: month);
         add(stats.days, (date) => date.startsWith('$month-'));
@@ -198,7 +217,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       final values = scored.values.toList();
       setState(() {
         _statCalls = calls;
-        _statScore = values.isEmpty ? null : values.reduce((a, b) => a + b) / values.length;
+        _statScore = values.isEmpty
+            ? null
+            : values.reduce((a, b) => a + b) / values.length;
         _dayScores = scored;
         _periodDays = days;
         _baselineCalls = baseline;
@@ -232,7 +253,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
   /// 평소 기준이 덜 쌓였을 때 카드 아래에 붙이는 한 줄. 기준 수를 모르거나(옛 서버) 다 쌓였으면 null.
   static String? _baselineHint(int? calls) {
     if (calls == null || calls >= baselineWindow) return null;
-    if (calls < baselineMinCalls) return '아직 평소 기준을 만드는 중이에요($calls통). 점수는 참고만 해 주세요.';
+    if (calls < baselineMinCalls)
+      return '아직 평소 기준을 만드는 중이에요($calls통). 점수는 참고만 해 주세요.';
     return '평소 기준 $calls/$baselineWindow통을 쌓았어요.';
   }
 
@@ -394,13 +416,20 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
         Container(
           width: 10,
           height: 10,
-          decoration: BoxDecoration(color: _colorFor(highest.score), shape: BoxShape.circle),
+          decoration: BoxDecoration(
+            color: _colorFor(highest.score),
+            shape: BoxShape.circle,
+          ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             '가장 높았던 날: ${day.month}월 ${day.day}일 · ${_shown(highest.score)}점',
-            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w600, color: eInk),
+            style: GoogleFonts.notoSansKr(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: eInk,
+            ),
           ),
         ),
       ],
@@ -415,7 +444,8 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
     const weekdays = ['일', '월', '화', '수', '목', '금', '토'];
     const axisMarks = {0, 30, 60, 100};
     bool isMark(double value) =>
-        (value - value.round()).abs() < 0.001 && axisMarks.contains(value.round());
+        (value - value.round()).abs() < 0.001 &&
+        axisMarks.contains(value.round());
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -442,15 +472,22 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                     final day = days[group.x];
                     return BarTooltipItem(
                       '${day.month}/${day.day} · ${_shown(score)}점',
-                      const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                      const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
                     );
                   },
                 ),
               ),
               titlesData: FlTitlesData(
                 show: true,
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
                 leftTitles: AxisTitles(
                   sideTitles: SideTitles(
                     showTitles: true,
@@ -477,10 +514,12 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                     showTitles: true,
                     getTitlesWidget: (value, meta) {
                       final index = value.toInt();
-                      if (index < 0 || index >= days.length) return const SizedBox.shrink();
+                      if (index < 0 || index >= days.length)
+                        return const SizedBox.shrink();
                       final day = days[index];
                       // 주간은 요일, 월간은 1일부터 5일 간격의 날짜 숫자
-                      if (monthly && (day.day - 1) % 5 != 0) return const SizedBox.shrink();
+                      if (monthly && (day.day - 1) % 5 != 0)
+                        return const SizedBox.shrink();
                       return Text(
                         monthly ? '${day.day}' : weekdays[day.weekday % 7],
                         style: TextStyle(
@@ -508,7 +547,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                       // 점수 없는 날도 자리는 남긴다(막대 간격이 날짜대로 고르게). 높이 0, 투명.
                       BarChartRodData(
                         toY: (scoreAt(i) ?? 0).clamp(0.0, 100.0),
-                        color: scoreAt(i) == null ? Colors.transparent : _colorFor(scoreAt(i)),
+                        color: scoreAt(i) == null
+                            ? Colors.transparent
+                            : _colorFor(scoreAt(i)),
                         width: monthly ? 5 : 14,
                         borderRadius: BorderRadius.only(
                           topLeft: Radius.circular(monthly ? 2 : 4),
@@ -528,17 +569,26 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             children: [
               TextSpan(
                 text: '정상',
-                style: TextStyle(color: _colorFor(0), fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: _colorFor(0),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const TextSpan(text: ' 30점 미만 · '),
               TextSpan(
                 text: '주의',
-                style: TextStyle(color: _colorFor(30), fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: _colorFor(30),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const TextSpan(text: ' 30~59점 · '),
               TextSpan(
                 text: '경고',
-                style: TextStyle(color: _colorFor(60), fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  color: _colorFor(60),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const TextSpan(text: ' 60점 이상'),
             ],
@@ -550,13 +600,14 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
 
   String _periodSummaryText(String periodLabel) {
     if (_statsLoading) return '통계를 불러오는 중이에요.';
-    if (_statCalls == 0) return '$periodLabel에는 ${widget.elderlyName}님과 나눈 통화 기록이 없어요.';
+    if (_statCalls == 0)
+      return '$periodLabel에는 ${widget.elderlyName}님과 나눈 통화 기록이 없어요.';
     final score = _statScore;
     final highest = _highestDay;
     final scoreText = score == null || highest == null
         ? '점수를 낼 수 있는 통화가 없었어요'
         : '평소와 다른 정도는 평균 ${_shown(score)}점, 가장 높았던 날은 '
-            '${highest.day.month}월 ${highest.day.day}일(${_shown(highest.score)}점, $_statusLabel)이에요';
+              '${highest.day.month}월 ${highest.day.day}일(${_shown(highest.score)}점, $_statusLabel)이에요';
     return '$periodLabel에는 ${widget.elderlyName}님과 $_statCalls번 통화했고, $scoreText.';
   }
 
@@ -588,7 +639,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
           Row(
             children: [
               Icon(
-                label == '정상' ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
+                label == '정상'
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.info_outline_rounded,
                 color: color,
                 size: 24,
               ),
@@ -604,7 +657,10 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          Text(lines, style: const TextStyle(fontSize: 14, color: eInkSoft, height: 1.6)),
+          Text(
+            lines,
+            style: const TextStyle(fontSize: 14, color: eInkSoft, height: 1.6),
+          ),
           const SizedBox(height: 12),
           Divider(height: 1, color: color.withValues(alpha: 0.3)),
           const SizedBox(height: 10),
@@ -800,7 +856,11 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
   }) {
     final today = _today();
     final firstDate = DateTime(2024, 1, 1);
-    var safeInitial = DateTime(initialDate.year, initialDate.month, initialDate.day);
+    var safeInitial = DateTime(
+      initialDate.year,
+      initialDate.month,
+      initialDate.day,
+    );
     if (safeInitial.isAfter(today)) {
       safeInitial = today;
     } else if (safeInitial.isBefore(firstDate)) {
@@ -817,12 +877,18 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final monthStart = DateTime(visibleMonth.year, visibleMonth.month, 1);
+            final monthStart = DateTime(
+              visibleMonth.year,
+              visibleMonth.month,
+              1,
+            );
             final gridStart = _weekStart(monthStart);
-            final canGoPrev =
-                visibleMonth.isAfter(DateTime(firstDate.year, firstDate.month));
-            final canGoNext =
-                visibleMonth.isBefore(DateTime(today.year, today.month));
+            final canGoPrev = visibleMonth.isAfter(
+              DateTime(firstDate.year, firstDate.month),
+            );
+            final canGoNext = visibleMonth.isBefore(
+              DateTime(today.year, today.month),
+            );
 
             return Dialog(
               backgroundColor: eCard,
@@ -939,8 +1005,7 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                                                     ? Colors.white
                                                     : !enabled ||
                                                           day.month !=
-                                                              visibleMonth
-                                                                  .month
+                                                              visibleMonth.month
                                                     ? eInkSoft
                                                     : eInk,
                                               ),
@@ -1011,15 +1076,15 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
                                                           TextAlign.center,
                                                       style:
                                                           GoogleFonts.notoSansKr(
-                                                        fontSize: 14,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: isSelected
-                                                            ? Colors.white
-                                                            : enabled
-                                                            ? eInk
-                                                            : eInkSoft,
-                                                      ),
+                                                            fontSize: 14,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            color: isSelected
+                                                                ? Colors.white
+                                                                : enabled
+                                                                ? eInk
+                                                                : eInkSoft,
+                                                          ),
                                                     ),
                                                   ),
                                                 ),
@@ -1189,7 +1254,9 @@ class _ElderlyDetailScreenState extends State<ElderlyDetailScreen> {
             const SizedBox(height: 16),
             _buildRealStatRow(isWeekly ? '주간 합계' : '월간 합계'),
             // 점수를 낸 날이 하나라도 있을 때만: 가장 높았던 날 한 줄과 날짜별 막대
-            if (!_statsLoading && _statsError == null && _highestDay != null) ...[
+            if (!_statsLoading &&
+                _statsError == null &&
+                _highestDay != null) ...[
               const SizedBox(height: 12),
               _buildHighestDayLine(),
               const SizedBox(height: 12),

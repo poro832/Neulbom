@@ -706,14 +706,17 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '관리 중인 어르신',
-                    style: GoogleFonts.notoSansKr(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: eInk,
+                  Expanded(
+                    child: Text(
+                      '관리 중인 어르신',
+                      style: GoogleFonts.notoSansKr(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: eInk,
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () {
                       Navigator.push(

@@ -22,7 +22,8 @@ class GuardianLoginScreen extends StatefulWidget {
   final EmailProof? emailProof;
 
   /// 비밀번호 찾기 화면에 넘긴다. 없으면 서버(NulbomApi.resetPassword). 테스트에서 가짜로 바꾼다.
-  final Future<void> Function(String idToken, String newPassword)? resetPassword;
+  final Future<void> Function(String idToken, String newPassword)?
+  resetPassword;
 
   @override
   State<GuardianLoginScreen> createState() => _GuardianLoginScreenState();
@@ -142,10 +143,7 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
               );
             },
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(
-              minWidth: 44,
-              minHeight: 44,
-            ),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
           ),
         ),
         title: Text(
@@ -373,17 +371,15 @@ class _GuardianLoginScreenState extends State<GuardianLoginScreen> {
 
                 // 회원가입 링크
                 Center(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
                     children: [
                       Text(
                         '계정이 없으신가요?',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: eInkSoft,
-                        ),
+                        style: TextStyle(fontSize: 14, color: eInkSoft),
                       ),
-                      const SizedBox(width: 8),
                       GestureDetector(
                         onTap: _isLoading
                             ? null
