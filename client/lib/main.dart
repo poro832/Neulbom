@@ -9,6 +9,7 @@ import 'services/fcm_service.dart';
 import 'services/auth_service.dart';
 import 'services/nulbom_api.dart';
 import 'services/push_registration.dart';
+import 'services/text_size.dart';
 import 'screens/role_selection_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/elderly_login_screen.dart';
@@ -31,6 +32,8 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 저장해 둔 글자 크기를 첫 화면부터 적용한다.
+  await loadTextSize();
   // Firebase 설정이 이 프로젝트 것이 아니어도 앱은 떠야 한다. 알림만 빠진다.
   try {
     await Firebase.initializeApp(
@@ -127,6 +130,7 @@ class _ElderCareAppState extends State<ElderCareApp> {
         fallback: const ElderlyLoginScreen(),
       ),
       debugShowCheckedModeBanner: false,
+      builder: textSizeBuilder,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

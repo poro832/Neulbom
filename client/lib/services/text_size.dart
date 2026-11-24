@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 앱 전체 글자 크기 — 어르신·보호자 모두 이 기기에서 4단계 중 하나를 고른다.
@@ -75,4 +76,18 @@ Future<void> setTextSize(int index) async {
 double effectiveTextScale(int index, double systemScale) {
   final option = textSizeOptions[_valid(index) ? index : textSizeDefaultIndex];
   return (option.scale * systemScale).clamp(_minScale, _maxScale).toDouble();
+}
+
+/// `MaterialApp.builder`에 그대로 넣는다. 고른 단계가 바뀌면 앱 전체 글자 배율이 바로 바뀐다.
+Widget textSizeBuilder(BuildContext context, Widget? child) {
+  return ValueListenableBuilder<int>(
+    valueListenable: textSizeIndex,
+    builder: (context, index, _) {
+      final data = MediaQuery.of(context);
+      return MediaQuery(
+        data: data.copyWith(textScaler: TextScaler.linear(effectiveTextScale(index, data.textScaler.scale(1)))),
+        child: child ?? const SizedBox.shrink(),
+      );
+    },
+  );
 }
