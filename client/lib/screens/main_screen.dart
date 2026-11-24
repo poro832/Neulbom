@@ -238,21 +238,27 @@ class _MainScreenState extends State<MainScreen> {
                           color: Colors.white,
                         ),
                         const SizedBox(height: 12),
-                        Text(
-                          '${withWaGwa(_friendName)} 통화하기',
-                          style: GoogleFonts.notoSansKr(
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '${withWaGwa(_friendName)} 통화하기',
+                            style: GoogleFonts.notoSansKr(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text(
-                          '편하게 누르세요',
-                          style: GoogleFonts.notoSansKr(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withOpacity(0.8),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '편하게 누르세요',
+                            style: GoogleFonts.notoSansKr(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withOpacity(0.8),
+                            ),
                           ),
                         ),
                       ],
@@ -271,7 +277,10 @@ class _MainScreenState extends State<MainScreen> {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => AiChatScreen(friendName: _friendName)),
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            AiChatScreen(friendName: _friendName),
+                      ),
                     );
                   },
                 ),

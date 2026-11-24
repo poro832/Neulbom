@@ -54,7 +54,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     } catch (_) {
       return;
     }
-    if (email is! String || owner == null || owner.trim().toLowerCase() != email.trim().toLowerCase()) return;
+    if (email is! String ||
+        owner == null ||
+        owner.trim().toLowerCase() != email.trim().toLowerCase())
+      return;
     await rotatePasswordQuietly(_proof, knownPassword: current);
   }
 
@@ -96,7 +99,13 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     } catch (_) {
       // 서버에 닿지 못하면 저장된 값을 쓰되, 이 화면이 이미 서버에서 받아 둔 값은 지킨다 —
       // 인증 화면에서 돌아와 다시 읽다 실패해도 인증 대기 표시와 버튼이 사라지지 않게.
-      for (final key in const ['name', 'email', 'phone', 'activated', 'emailVerified']) {
+      for (final key in const [
+        'name',
+        'email',
+        'phone',
+        'activated',
+        'emailVerified',
+      ]) {
         final known = _guardianInfo[key];
         if (known != null) info[key] = known;
       }
@@ -115,7 +124,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => EmailVerificationScreen(email: email, proof: widget.emailProof),
+        builder: (_) =>
+            EmailVerificationScreen(email: email, proof: widget.emailProof),
       ),
     );
     if (!mounted) return;
@@ -135,7 +145,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
           title: Text(
             '비밀번호 변경',
             style: GoogleFonts.notoSansKr(
-                fontSize: 18, fontWeight: FontWeight.w700, color: eInk),
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: eInk,
+            ),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -155,8 +168,13 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: Text(error!,
-                      style: const TextStyle(color: Color(0xFFF44336), fontSize: 13)),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(
+                      color: Color(0xFFF44336),
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -179,9 +197,12 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                       });
                       try {
                         final others = await NulbomApi.changeGuardianPassword(
-                            current: current.text, next: next.text);
+                          current: current.text,
+                          next: next.text,
+                        );
                         await _rotateFirebasePasswordAfterChange(current.text);
-                        if (dialogContext.mounted) Navigator.pop(dialogContext, others);
+                        if (dialogContext.mounted)
+                          Navigator.pop(dialogContext, others);
                       } on ApiException catch (e) {
                         setLocal(() {
                           busy = false;
@@ -203,9 +224,9 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
     if (changed == null || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(changed > 0
-            ? '비밀번호를 바꿨어요. 다른 폰 $changed대는 로그아웃됐어요.'
-            : '비밀번호를 바꿨어요.'),
+        content: Text(
+          changed > 0 ? '비밀번호를 바꿨어요. 다른 폰 $changed대는 로그아웃됐어요.' : '비밀번호를 바꿨어요.',
+        ),
         backgroundColor: eAccent,
         duration: const Duration(seconds: 3),
       ),
@@ -224,71 +245,89 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
         builder: (context, setLocal) => PopScope(
           canPop: !busy,
           child: AlertDialog(
-          backgroundColor: eCard,
-          title: Text(
-            '계정 삭제',
-            style: GoogleFonts.notoSansKr(
-                fontSize: 18, fontWeight: FontWeight.w700, color: const Color(0xFFF44336)),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '계정을 삭제하면 되돌릴 수 없어요.\n어르신 계정은 그대로 남아요.',
-                style: TextStyle(fontSize: 13, color: eInkSoft, height: 1.5),
+            backgroundColor: eCard,
+            title: Text(
+              '계정 삭제',
+              style: GoogleFonts.notoSansKr(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFFF44336),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('delete-password'),
-                controller: password,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: '비밀번호를 입력해 확인해 주세요'),
-              ),
-              if (error != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(error!,
-                      style: const TextStyle(color: Color(0xFFF44336), fontSize: 13)),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '계정을 삭제하면 되돌릴 수 없어요.\n어르신 계정은 그대로 남아요.',
+                  style: TextStyle(fontSize: 13, color: eInkSoft, height: 1.5),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('delete-password'),
+                  controller: password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: '비밀번호를 입력해 확인해 주세요',
+                  ),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      error!,
+                      style: const TextStyle(
+                        color: Color(0xFFF44336),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => Navigator.pop(dialogContext, false),
+                child: const Text('취소'),
+              ),
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        if (password.text.isEmpty) {
+                          setLocal(() => error = '비밀번호를 입력해 주세요.');
+                          return;
+                        }
+                        setLocal(() {
+                          busy = true;
+                          error = null;
+                        });
+                        try {
+                          await AuthService.deleteGuardianAccount(
+                            password: password.text,
+                          );
+                          if (dialogContext.mounted)
+                            Navigator.pop(dialogContext, true);
+                        } on ApiException catch (e) {
+                          setLocal(() {
+                            busy = false;
+                            error = e.message;
+                          });
+                        } catch (_) {
+                          setLocal(() {
+                            busy = false;
+                            error = '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
+                          });
+                        }
+                      },
+                child: const Text(
+                  '삭제',
+                  style: TextStyle(color: Color(0xFFF44336)),
+                ),
+              ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: busy ? null : () => Navigator.pop(dialogContext, false),
-              child: const Text('취소'),
-            ),
-            TextButton(
-              onPressed: busy
-                  ? null
-                  : () async {
-                      if (password.text.isEmpty) {
-                        setLocal(() => error = '비밀번호를 입력해 주세요.');
-                        return;
-                      }
-                      setLocal(() {
-                        busy = true;
-                        error = null;
-                      });
-                      try {
-                        await AuthService.deleteGuardianAccount(password: password.text);
-                        if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-                      } on ApiException catch (e) {
-                        setLocal(() {
-                          busy = false;
-                          error = e.message;
-                        });
-                      } catch (_) {
-                        setLocal(() {
-                          busy = false;
-                          error = '서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.';
-                        });
-                      }
-                    },
-              child: const Text('삭제', style: TextStyle(color: Color(0xFFF44336))),
-            ),
-          ],
-        ),
         ),
       ),
     );
@@ -299,7 +338,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
       (route) => false,
     );
     messenger.showSnackBar(
-      const SnackBar(content: Text('계정을 삭제했어요.'), duration: Duration(seconds: 3)),
+      const SnackBar(
+        content: Text('계정을 삭제했어요.'),
+        duration: Duration(seconds: 3),
+      ),
     );
   }
 
@@ -443,7 +485,8 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                                   color: eInkSoft,
                                 ),
                               ),
-                              if (_guardianInfo['activated'] == false || _emailPending)
+                              if (_guardianInfo['activated'] == false ||
+                                  _emailPending)
                                 const SizedBox(height: 8),
                               // 표시가 둘이면 좁은 폰에서 줄을 넘긴다.
                               Wrap(
@@ -568,16 +611,32 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.format_size_rounded, color: eAccent, size: 24),
+                      const Icon(
+                        Icons.format_size_rounded,
+                        color: eAccent,
+                        size: 24,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: Text('글자 크기',
-                            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w600, color: eInk)),
+                        child: Text(
+                          '글자 크기',
+                          style: GoogleFonts.notoSansKr(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: eInk,
+                          ),
+                        ),
                       ),
                       ValueListenableBuilder<int>(
                         valueListenable: textSizeIndex,
-                        builder: (context, index, _) => Text(textSizeOptions[index].label,
-                            style: GoogleFonts.notoSansKr(fontSize: 14, fontWeight: FontWeight.w600, color: eInkSoft)),
+                        builder: (context, index, _) => Text(
+                          textSizeOptions[index].label,
+                          style: GoogleFonts.notoSansKr(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: eInkSoft,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 4),
                       const Icon(Icons.chevron_right_rounded, color: eInkSoft),
@@ -722,33 +781,40 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.lock_outline_rounded,
-                            color: eAccent,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 12),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '비밀번호 변경',
-                                style: GoogleFonts.notoSansKr(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: eInk,
-                                ),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.lock_outline_rounded,
+                              color: eAccent,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '비밀번호 변경',
+                                    style: GoogleFonts.notoSansKr(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: eInk,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    '계정 보안을 위해 비밀번호를 변경하세요',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: eInkSoft,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 2),
-                              const Text(
-                                '계정 보안을 위해 비밀번호를 변경하세요',
-                                style: TextStyle(fontSize: 12, color: eInkSoft),
-                              ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
                       const Icon(Icons.chevron_right_rounded, color: eInkSoft),
                     ],
@@ -946,7 +1012,10 @@ class _GuardianAccountScreenState extends State<GuardianAccountScreen> {
               ),
             ),
             const SizedBox(height: 2),
-            Text(statusText, style: const TextStyle(fontSize: 12, color: eInkSoft)),
+            Text(
+              statusText,
+              style: const TextStyle(fontSize: 12, color: eInkSoft),
+            ),
           ],
         ),
       ],

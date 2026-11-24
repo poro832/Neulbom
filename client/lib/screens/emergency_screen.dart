@@ -40,7 +40,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       setState(() {
         contacts = [
           for (final g in mine.guardians)
-            {'name': g.name, 'relation': g.relation, 'number': g.phone, 'id': ''},
+            {
+              'name': g.name,
+              'relation': g.relation,
+              'number': g.phone,
+              'id': '',
+            },
           for (final c in mine.contacts)
             {
               'name': c.name,
@@ -63,8 +68,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     }
   }
 
-  Future<void> _addContact(BuildContext dialogContext, String name, String relation,
-      String number) async {
+  Future<void> _addContact(
+    BuildContext dialogContext,
+    String name,
+    String relation,
+    String number,
+  ) async {
     try {
       await NulbomApi.addContact(name: name, relation: relation, phone: number);
       if (!mounted) return;
@@ -72,7 +81,10 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       await _load();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$name 연락처가 추가되었습니다.'), duration: const Duration(seconds: 2)),
+        SnackBar(
+          content: Text('$name 연락처가 추가되었습니다.'),
+          duration: const Duration(seconds: 2),
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -93,8 +105,14 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       builder: (context) => AlertDialog(
         title: Text('${contact['name']} 연락처를 지울까요?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('아니요')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('지우기')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('아니요'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('지우기'),
+          ),
         ],
       ),
     );
@@ -105,7 +123,9 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error is ApiException ? error.message : '지우지 못했어요.')),
+        SnackBar(
+          content: Text(error is ApiException ? error.message : '지우지 못했어요.'),
+        ),
       );
     }
   }
@@ -121,10 +141,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
             fontWeight: FontWeight.w700,
           ),
         ),
-        content: Text(
-          '전화번호: $number',
-          style: const TextStyle(fontSize: 18),
-        ),
+        content: Text('전화번호: $number', style: const TextStyle(fontSize: 18)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -147,17 +164,11 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFD92D20),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
             child: const Text(
               '전화',
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 18, color: Colors.white),
             ),
           ),
         ],
@@ -244,10 +255,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFD92D20),
             ),
-            child: const Text(
-              '추가',
-              style: TextStyle(color: Colors.white),
-            ),
+            child: const Text('추가', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -315,26 +323,28 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                         ),
                       ),
                       const SizedBox(width: 14),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '119 응급 전화',
-                            style: GoogleFonts.notoSansKr(
-                              fontSize: 18.5,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '119 응급 전화',
+                              style: GoogleFonts.notoSansKr(
+                                fontSize: 18.5,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '도움이 필요하면 바로 눌러주세요',
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              color: Colors.white.withOpacity(0.9),
+                            const SizedBox(height: 3),
+                            Text(
+                              '도움이 필요하면 바로 눌러주세요',
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                color: Colors.white.withOpacity(0.9),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -381,42 +391,44 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               else if (_loadError != null)
                 Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text(_loadError!, style: const TextStyle(fontSize: 18, color: eInkSoft)),
+                  child: Text(
+                    _loadError!,
+                    style: const TextStyle(fontSize: 18, color: eInkSoft),
+                  ),
                 )
               else if (contacts.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(24),
-                  child: Text('등록된 연락처가 없어요.', style: TextStyle(fontSize: 18, color: eInkSoft)),
+                  child: Text(
+                    '등록된 연락처가 없어요.',
+                    style: TextStyle(fontSize: 18, color: eInkSoft),
+                  ),
                 ),
-              ...List.generate(
-                contacts.length,
-                (index) {
-                  final colors = [
-                    (const Color(0xFFE5F3EA), const Color(0xFF2E8F5E)),
-                    (const Color(0xFFE1E9F7), const Color(0xFF1F5C56)),
-                    (eAccentSoft, eAccent),
-                  ];
-                  final (bgColor, iconColor) = colors[index % colors.length];
+              ...List.generate(contacts.length, (index) {
+                final colors = [
+                  (const Color(0xFFE5F3EA), const Color(0xFF2E8F5E)),
+                  (const Color(0xFFE1E9F7), const Color(0xFF1F5C56)),
+                  (eAccentSoft, eAccent),
+                ];
+                final (bgColor, iconColor) = colors[index % colors.length];
 
-                  return Column(
-                    children: [
-                      GestureDetector(
-                        onLongPress: () => _confirmDelete(contacts[index]),
-                        child: _buildContactButton(
-                          context,
-                          contacts[index]['name']!,
-                          contacts[index]['relation']!,
-                          contacts[index]['number']!,
-                          bgColor,
-                          iconColor,
-                        ),
+                return Column(
+                  children: [
+                    GestureDetector(
+                      onLongPress: () => _confirmDelete(contacts[index]),
+                      child: _buildContactButton(
+                        context,
+                        contacts[index]['name']!,
+                        contacts[index]['relation']!,
+                        contacts[index]['number']!,
+                        bgColor,
+                        iconColor,
                       ),
-                      if (index < contacts.length - 1)
-                        const SizedBox(height: 10),
-                    ],
-                  );
-                },
-              ),
+                    ),
+                    if (index < contacts.length - 1) const SizedBox(height: 10),
+                  ],
+                );
+              }),
             ],
           ),
         ),
@@ -452,11 +464,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                 shape: BoxShape.circle,
                 color: backgroundColor,
               ),
-              child: Icon(
-                Icons.call,
-                color: iconColor,
-                size: 28,
-              ),
+              child: Icon(Icons.call, color: iconColor, size: 28),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -474,19 +482,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
                   const SizedBox(height: 2),
                   Text(
                     relation,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      color: eInkSoft,
-                    ),
+                    style: TextStyle(fontSize: 13.5, color: eInkSoft),
                   ),
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right,
-              color: iconColor,
-              size: 28,
-            ),
+            Icon(Icons.chevron_right, color: iconColor, size: 28),
           ],
         ),
       ),
