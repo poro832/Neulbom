@@ -26,7 +26,7 @@ Future<void> showTextSizeSheet(BuildContext context) {
               Text('글자 크기',
                   style: GoogleFonts.notoSansKr(fontSize: 22, fontWeight: FontWeight.w800, color: eInk)),
               const SizedBox(height: 4),
-              Text('앱의 모든 글자가 이 크기로 보여요.',
+              Text('앱의 글자가 이 크기로 바뀌어요.',
                   style: GoogleFonts.notoSansKr(fontSize: 15, height: 1.4, color: eInkSoft)),
               const SizedBox(height: 8),
               const TextSizeChoices(),

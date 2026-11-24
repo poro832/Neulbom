@@ -25,7 +25,10 @@ const Color eAccentSoft = Color(0xFFE6F0FF);
 const Color eBrass = Color(0xFFFFC21A);
 
 class GuardianScreen extends StatefulWidget {
-  const GuardianScreen({super.key, this.withdrawalPollInterval = const Duration(seconds: 30)});
+  const GuardianScreen({
+    super.key,
+    this.withdrawalPollInterval = const Duration(seconds: 30),
+  });
 
   /// 어르신 탈퇴 요청이 새로 왔는지 서버에 다시 묻는 간격. 푸시가 꺼져 있어도 화면이 열려 있으면 알아차린다.
   final Duration withdrawalPollInterval;
@@ -53,7 +56,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
   void initState() {
     super.initState();
     _load();
-    _withdrawalTimer = Timer.periodic(widget.withdrawalPollInterval, (_) => _loadWithdrawals());
+    _withdrawalTimer = Timer.periodic(
+      widget.withdrawalPollInterval,
+      (_) => _loadWithdrawals(),
+    );
     _dateRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -79,7 +85,8 @@ class _GuardianScreenState extends State<GuardianScreen> {
   static String _when(DateTime? time) {
     if (time == null) return '-';
     final now = DateTime.now();
-    final hm = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    final hm =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
     final today = DateTime(now.year, now.month, now.day);
     final day = DateTime(time.year, time.month, time.day);
     final diff = today.difference(day).inDays;
@@ -91,7 +98,8 @@ class _GuardianScreenState extends State<GuardianScreen> {
   Map<String, dynamic> _elderToMap(ElderSummary e) {
     final last = e.lastCallAt;
     final now = DateTime.now();
-    final talkedToday = last != null &&
+    final talkedToday =
+        last != null &&
         e.lastStatus == 'completed' &&
         last.year == now.year &&
         last.month == now.month &&
@@ -115,15 +123,15 @@ class _GuardianScreenState extends State<GuardianScreen> {
       'type': a.type == 'no_answer'
           ? '미응답'
           : a.type == 'emergency_keyword'
-              ? '위급 표현'
-              : '평소와 다름',
+          ? '위급 표현'
+          : '평소와 다름',
       'elder': a.elderName,
       'time': _when(a.createdAt),
       'severity': a.severity == 'critical'
           ? 'high'
           : a.severity == 'warning'
-              ? 'medium'
-              : 'low',
+          ? 'medium'
+          : 'low',
       'message': a.message,
     };
   }
@@ -132,8 +140,13 @@ class _GuardianScreenState extends State<GuardianScreen> {
     try {
       final all = await NulbomApi.guardianElders();
       final pending = all.where((e) => e.status == 'pending').toList();
-      final elders = all.where((e) => e.status != 'pending').map(_elderToMap).toList();
-      final alerts = (await NulbomApi.guardianAlerts()).map(_alertToMap).toList();
+      final elders = all
+          .where((e) => e.status != 'pending')
+          .map(_elderToMap)
+          .toList();
+      final alerts = (await NulbomApi.guardianAlerts())
+          .map(_alertToMap)
+          .toList();
       await _loadWithdrawals();
       if (!mounted) return;
       setState(() {
@@ -196,7 +209,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
     }
   }
 
-  Future<void> _decideWithdrawal(GuardianWithdrawal item, {required bool approve}) async {
+  Future<void> _decideWithdrawal(
+    GuardianWithdrawal item, {
+    required bool approve,
+  }) async {
     if (_decidingWithdrawals.contains(item.elderId)) return;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -204,13 +220,21 @@ class _GuardianScreenState extends State<GuardianScreen> {
         backgroundColor: eCard,
         title: Text(
           approve ? '탈퇴를 승인할까요?' : '탈퇴를 거절할까요?',
-          style: GoogleFonts.notoSansKr(fontSize: 18, fontWeight: FontWeight.w700, color: eInk),
+          style: GoogleFonts.notoSansKr(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: eInk,
+          ),
         ),
         content: Text(
           approve
               ? '${item.name} 어르신의 통화 기록과 정보가 모두 지워지고 되돌릴 수 없어요.'
               : '${item.name} 어르신은 계속 이용하게 돼요.',
-          style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+          style: GoogleFonts.notoSansKr(
+            fontSize: 14,
+            height: 1.5,
+            color: eInkSoft,
+          ),
         ),
         actions: [
           TextButton(
@@ -222,7 +246,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
             onPressed: () => Navigator.pop(context, true),
             child: Text(
               approve ? '승인' : '거절',
-              style: TextStyle(color: approve ? const Color(0xFFF44336) : eAccent),
+              style: TextStyle(
+                color: approve ? const Color(0xFFF44336) : eAccent,
+              ),
             ),
           ),
         ],
@@ -233,12 +259,19 @@ class _GuardianScreenState extends State<GuardianScreen> {
     _decidingWithdrawals.add(item.elderId);
     try {
       if (approve) {
-        final result = await NulbomApi.approveWithdrawal(item.elderId, item.requestId);
-        messenger.showSnackBar(SnackBar(
-          content: Text(result.deleted
-              ? '탈퇴를 승인했어요. ${item.name} 어르신의 정보가 지워졌어요.'
-              : '탈퇴를 승인했어요. 다른 보호자의 승인을 기다려요.'),
-        ));
+        final result = await NulbomApi.approveWithdrawal(
+          item.elderId,
+          item.requestId,
+        );
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              result.deleted
+                  ? '탈퇴를 승인했어요. ${item.name} 어르신의 정보가 지워졌어요.'
+                  : '탈퇴를 승인했어요. 다른 보호자의 승인을 기다려요.',
+            ),
+          ),
+        );
         if (result.deleted && mounted) _reload();
       } else {
         await NulbomApi.rejectWithdrawal(item.elderId, item.requestId);
@@ -248,7 +281,8 @@ class _GuardianScreenState extends State<GuardianScreen> {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     } catch (_) {
       messenger.showSnackBar(
-          const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')));
+        const SnackBar(content: Text('서버에 연결하지 못했어요. 잠시 뒤에 다시 해 주세요.')),
+      );
     } finally {
       _decidingWithdrawals.remove(item.elderId);
     }
@@ -272,14 +306,22 @@ class _GuardianScreenState extends State<GuardianScreen> {
         children: [
           Text(
             '${item.name} 어르신이 탈퇴를 요청했어요',
-            style: GoogleFonts.notoSansKr(fontSize: 16, fontWeight: FontWeight.w700, color: eInk),
+            style: GoogleFonts.notoSansKr(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: eInk,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             item.approvedByMe
                 ? '승인했어요. 다른 보호자의 승인을 기다리고 있어요. (${item.total}명 중 ${item.approved}명)'
                 : '보호자가 모두 승인하면 어르신의 통화 기록과 정보가 지워져요. (${item.total}명 중 ${item.approved}명 승인)',
-            style: GoogleFonts.notoSansKr(fontSize: 14, height: 1.5, color: eInkSoft),
+            style: GoogleFonts.notoSansKr(
+              fontSize: 14,
+              height: 1.5,
+              color: eInkSoft,
+            ),
           ),
           if (!item.approvedByMe) ...[
             const SizedBox(height: 12),
@@ -288,7 +330,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 Expanded(
                   child: OutlinedButton(
                     key: Key('withdrawal-reject-${item.elderId}'),
-                    onPressed: busy ? null : () => _decideWithdrawal(item, approve: false),
+                    onPressed: busy
+                        ? null
+                        : () => _decideWithdrawal(item, approve: false),
                     child: const Text('거절'),
                   ),
                 ),
@@ -296,9 +340,16 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 Expanded(
                   child: ElevatedButton(
                     key: Key('withdrawal-approve-${item.elderId}'),
-                    onPressed: busy ? null : () => _decideWithdrawal(item, approve: true),
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF44336)),
-                    child: const Text('승인', style: TextStyle(color: Colors.white)),
+                    onPressed: busy
+                        ? null
+                        : () => _decideWithdrawal(item, approve: true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF44336),
+                    ),
+                    child: const Text(
+                      '승인',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ),
                 ),
               ],
@@ -315,7 +366,11 @@ class _GuardianScreenState extends State<GuardianScreen> {
   String _currentWeekRange() {
     // 이번 주는 한국 날짜로 정한다(서버의 주간 통계와 같은 주). 필드만 읽는다.
     final today = kstNow();
-    final sunday = DateTime(today.year, today.month, today.day - today.weekday % 7);
+    final sunday = DateTime(
+      today.year,
+      today.month,
+      today.day - today.weekday % 7,
+    );
     final saturday = DateTime(sunday.year, sunday.month, sunday.day + 6);
     return '${_formatDate(sunday)} ~ ${_formatDate(saturday)}';
   }
@@ -340,7 +395,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
                   Text(
                     _loadError ?? '관리 중인 어르신이 아직 없어요.',
                     textAlign: TextAlign.center,
-                    style: GoogleFonts.notoSansKr(fontSize: 18, color: eInkSoft),
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 18,
+                      color: eInkSoft,
+                    ),
                   ),
                   if (!failed) ...[
                     const SizedBox(height: 8),
@@ -401,203 +459,216 @@ class _GuardianScreenState extends State<GuardianScreen> {
     return PopScope(
       canPop: false,
       child: Scaffold(
-      backgroundColor: eBg,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 헤더 (인사말 + 설정 버튼)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '보호자님\n안녕하세요',
-                      style: GoogleFonts.notoSansKr(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w700,
-                        color: eInk,
-                        height: 1.3,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const GuardianAccountScreen(),
-                          ),
-                        );
-                      },
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: eCard,
-                          border: Border.all(color: eLine),
-                        ),
-                        child: const Icon(
-                          Icons.settings_rounded,
-                          color: eAccent,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 28),
-
-                // 어르신이 탈퇴를 요청했다면 가장 위에서 보인다
-                ..._withdrawals.map(_buildWithdrawalCard),
-
-                // 어르신 상태 카드들
-                Text(
-                  '관리 중인 어르신',
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: eInk,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ..._pending.map(_buildPendingCard),
-                ..._elders.map((elder) => _buildElderCard(context, elder)),
-                const SizedBox(height: 32),
-
-                _buildElderSelector(),
-                const SizedBox(height: 20),
-
-                // 요약 통계
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '이번 주 통계',
-                      style: GoogleFonts.notoSansKr(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        color: eInk,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(
-                        _currentWeekRange(),
-                        style: GoogleFonts.notoSansKr(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: eInkSoft,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatCard(
-                        title: '통화 횟수',
-                        value: '${_selectedElder['weekCalls']}회',
-                        subtitle: '',
-                        color: const Color(0xFF2196F3),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildStatCard(
-                        title: '평소와 다른 정도',
-                        value: _scoreText(_selectedElder['weekScore']),
-                        subtitle: '',
-                        color: _scoreColor(_selectedElder['weekScore']),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-
-                // 감정 추이 그래프
-                Text(
-                  '이번 주 평소와 다른 정도',
-                  style: GoogleFonts.notoSansKr(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: eInk,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _buildEmotionChart(
-                  _selectedElder['dayScores'] as List<double>,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '낮을수록 평소와 같아요. 30점부터 주의, 60점부터 경고로 알려 드려요.',
-                  style: GoogleFonts.notoSansKr(fontSize: 12, color: eInkSoft),
-                ),
-                const SizedBox(height: 32),
-
-                // 최근 알림 미리보기
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          '최근 알림',
+        backgroundColor: eBg,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 헤더 (인사말 + 설정 버튼)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '보호자님\n안녕하세요',
                           style: GoogleFonts.notoSansKr(
-                            fontSize: 22,
+                            fontSize: 36,
                             fontWeight: FontWeight.w700,
                             color: eInk,
+                            height: 1.3,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '건강 정보',
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  const GuardianAccountScreen(),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: eCard,
+                            border: Border.all(color: eLine),
+                          ),
+                          child: const Icon(
+                            Icons.settings_rounded,
+                            color: eAccent,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+
+                  // 어르신이 탈퇴를 요청했다면 가장 위에서 보인다
+                  ..._withdrawals.map(_buildWithdrawalCard),
+
+                  // 어르신 상태 카드들
+                  Text(
+                    '관리 중인 어르신',
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: eInk,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ..._pending.map(_buildPendingCard),
+                  ..._elders.map((elder) => _buildElderCard(context, elder)),
+                  const SizedBox(height: 32),
+
+                  _buildElderSelector(),
+                  const SizedBox(height: 20),
+
+                  // 요약 통계
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.end,
+                    spacing: 8,
+                    children: [
+                      Text(
+                        '이번 주 통계',
+                        style: GoogleFonts.notoSansKr(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: eInk,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Text(
+                          _currentWeekRange(),
                           style: GoogleFonts.notoSansKr(
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight: FontWeight.w500,
                             color: eInkSoft,
                           ),
                         ),
-                      ],
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HealthAlertsScreen(
-                              elderName: _selectedElder['name'] as String,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Text(
-                        '전체보기',
-                        style: GoogleFonts.notoSansKr(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: eAccent,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          title: '통화 횟수',
+                          value: '${_selectedElder['weekCalls']}회',
+                          subtitle: '',
+                          color: const Color(0xFF2196F3),
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          title: '평소와 다른 정도',
+                          value: _scoreText(_selectedElder['weekScore']),
+                          subtitle: '',
+                          color: _scoreColor(_selectedElder['weekScore']),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+
+                  // 감정 추이 그래프
+                  Text(
+                    '이번 주 평소와 다른 정도',
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: eInk,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                ..._alerts
-                    .where((alert) => alert['elder'] == _selectedElder['name'])
-                    .take(2)
-                    .map((alert) => _buildAlertItem(alert)),
-                const SizedBox(height: 20),
-              ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildEmotionChart(
+                    _selectedElder['dayScores'] as List<double>,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '낮을수록 평소와 같아요. 30점부터 주의, 60점부터 경고로 알려 드려요.',
+                    style: GoogleFonts.notoSansKr(
+                      fontSize: 12,
+                      color: eInkSoft,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+
+                  // 최근 알림 미리보기
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.end,
+                          spacing: 8,
+                          children: [
+                            Text(
+                              '최근 알림',
+                              style: GoogleFonts.notoSansKr(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                                color: eInk,
+                              ),
+                            ),
+                            Text(
+                              '건강 정보',
+                              style: GoogleFonts.notoSansKr(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: eInkSoft,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => HealthAlertsScreen(
+                                elderName: _selectedElder['name'] as String,
+                              ),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          '전체보기',
+                          style: GoogleFonts.notoSansKr(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: eAccent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ..._alerts
+                      .where(
+                        (alert) => alert['elder'] == _selectedElder['name'],
+                      )
+                      .take(2)
+                      .map((alert) => _buildAlertItem(alert)),
+                  const SizedBox(height: 20),
+                ],
+              ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -615,7 +686,11 @@ class _GuardianScreenState extends State<GuardianScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error is ApiException ? error.message : '처리하지 못했어요. 잠시 뒤에 다시 해 주세요.'),
+          content: Text(
+            error is ApiException
+                ? error.message
+                : '처리하지 못했어요. 잠시 뒤에 다시 해 주세요.',
+          ),
         ),
       );
     }
@@ -654,7 +729,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
             ),
           ),
           const SizedBox(height: 2),
-          Text(elder.phone ?? '-', style: const TextStyle(fontSize: 15, color: eInkSoft)),
+          Text(
+            elder.phone ?? '-',
+            style: const TextStyle(fontSize: 15, color: eInkSoft),
+          ),
           const SizedBox(height: 4),
           Text(
             '내 부모님이 맞다면 승인해 주세요. 승인하면 이 번호로 안부 전화가 시작돼요.',
@@ -674,7 +752,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 child: ElevatedButton(
                   onPressed: () => _decide(elder, approve: true),
                   style: ElevatedButton.styleFrom(backgroundColor: eAccent),
-                  child: const Text('승인', style: TextStyle(color: Colors.white)),
+                  child: const Text(
+                    '승인',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ),
             ],
@@ -721,7 +802,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
         for (final elder in _elders)
           MenuItemButton(
             style: ButtonStyle(
-              overlayColor: WidgetStatePropertyAll(eAccent.withValues(alpha: 0.08)),
+              overlayColor: WidgetStatePropertyAll(
+                eAccent.withValues(alpha: 0.08),
+              ),
               padding: const WidgetStatePropertyAll(
                 EdgeInsets.all(itemPadding),
               ),
@@ -1051,7 +1134,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
               getTooltipItem: (group, groupIndex, rod, rodIndex) {
                 return BarTooltipItem(
                   '${rod.toY.round()}점',
-                  const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
                 );
               },
             ),
@@ -1065,7 +1151,10 @@ class _GuardianScreenState extends State<GuardianScreen> {
                 showTitles: true,
                 reservedSize: 28,
                 getTitlesWidget: (value, meta) {
-                  if (value != 0 && value != 30 && value != 60 && value != 100) {
+                  if (value != 0 &&
+                      value != 30 &&
+                      value != 60 &&
+                      value != 100) {
                     return const SizedBox.shrink();
                   }
                   return SideTitleWidget(
@@ -1133,7 +1222,9 @@ class _GuardianScreenState extends State<GuardianScreen> {
 
     return GestureDetector(
       onTap: () {
-        final tabIndex = alert['type'] == '미응답' ? 2 : 1; // 위급 표현도 '건강 경고' 탭에서 본다
+        final tabIndex = alert['type'] == '미응답'
+            ? 2
+            : 1; // 위급 표현도 '건강 경고' 탭에서 본다
         Navigator.push(
           context,
           MaterialPageRoute(

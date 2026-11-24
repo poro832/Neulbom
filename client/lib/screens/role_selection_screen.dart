@@ -16,132 +16,145 @@ class RoleSelectionScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: eBg,
+      // 글자를 크게 했거나 화면이 낮으면 스크롤된다. 들어맞을 때는 예전처럼 가운데에 놓인다.
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 60),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // 타이틀
-              Text(
-                '늘봄',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.notoSansKr(
-                  fontSize: 48,
-                  fontWeight: FontWeight.w700,
-                  color: eInk,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '당신의 역할을 선택해주세요',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.notoSansKr(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w400,
-                  color: eInk,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 80),
-
-              // 어르신 버튼
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ElderlyLoginScreen(),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: double.infinity,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    color: eCard,
-                    border: Border.all(color: eAccent, width: 2),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: eAccent.withOpacity(0.1),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 26,
+                    vertical: 60,
                   ),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.person_outline_rounded,
-                        size: 48,
-                        color: eAccent,
-                      ),
-                      const SizedBox(height: 2),
+                      // 타이틀
                       Text(
-                        '어르신',
+                        '늘봄',
+                        textAlign: TextAlign.center,
                         style: GoogleFonts.notoSansKr(
-                          fontSize: 24,
+                          fontSize: 48,
                           fontWeight: FontWeight.w700,
                           color: eInk,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        '당신의 역할을 선택해주세요',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.notoSansKr(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w400,
+                          color: eInk,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 80),
+
+                      // 어르신 버튼
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ElderlyLoginScreen(),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          height: 140,
+                          decoration: BoxDecoration(
+                            color: eCard,
+                            border: Border.all(color: eAccent, width: 2),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: eAccent.withOpacity(0.1),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.person_outline_rounded,
+                                size: 48,
+                                color: eAccent,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '어르신',
+                                style: GoogleFonts.notoSansKr(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  color: eInk,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // 보호자 버튼
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const GuardianLoginScreen(),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          height: 140,
+                          decoration: BoxDecoration(
+                            color: eCard,
+                            border: Border.all(color: eAccent, width: 2),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: eAccent.withOpacity(0.1),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.shield_outlined,
+                                size: 48,
+                                color: eAccent,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '보호자',
+                                style: GoogleFonts.notoSansKr(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  color: eInk,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-
-              const SizedBox(height: 24),
-
-              // 보호자 버튼
-              GestureDetector(
-                onTap: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const GuardianLoginScreen(),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: double.infinity,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    color: eCard,
-                    border: Border.all(color: eAccent, width: 2),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: eAccent.withOpacity(0.1),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.shield_outlined,
-                        size: 48,
-                        color: eAccent,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '보호자',
-                        style: GoogleFonts.notoSansKr(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: eInk,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
